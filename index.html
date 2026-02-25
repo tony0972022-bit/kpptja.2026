@@ -162,7 +162,7 @@
           const [calendarEvents, setCalendarEvents] = useState([]);
           const [clockIns, setClockIns] = useState([]);
           const [leaveQuotas, setLeaveQuotas] = useState([]);
-          const [announcements, setAnnouncements] = useState([]); // 🌟 新增：公告事項
+          const [announcements, setAnnouncements] = useState([]); 
           const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
           const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
           const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
@@ -174,7 +174,7 @@
           const [sidebarTheme, setSidebarTheme] = useState('light'); 
 
           const [settings, setSettings] = useState({ areaColors: DEFAULT_AREA_COLORS });
-          const [globalSettings, setGlobalSettings] = useState({ calendarOverrides: {} }); // 🌟 新增：全域設定(如自訂假日)
+          const [globalSettings, setGlobalSettings] = useState({ calendarOverrides: {} }); 
           
           const [loading, setLoading] = useState(true);
           const [db, setDb] = useState(null);
@@ -282,11 +282,9 @@
             const unsubQuotas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas')),
               (s) => setLeaveQuotas(s.docs.map(d => ({ id: d.id, ...d.data() }))));
               
-            // 🌟 監聽公告事項
             const unsubAnnouncements = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements')),
               (s) => setAnnouncements(s.docs.map(d => ({ id: d.id, ...d.data() }))));
               
-            // 🌟 監聽全域設定 (包含自訂節假日)
             const unsubGlobal = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), (docSnap) => {
                 if (docSnap.exists()) setGlobalSettings(docSnap.data());
             });
@@ -358,7 +356,6 @@
                   if (existing) await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas', existing.id), d);
                   else await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas'), d);
               },
-              // 🌟 新增公告與全域設定 CRUD
               createAnnouncement: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements'), d),
               deleteAnnouncement: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'announcements', id)),
               saveGlobalSettings: async (d) => await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), d, { merge: true })
@@ -416,7 +413,7 @@
                 <nav className="flex-1 overflow-y-auto py-2 overflow-x-hidden">
                   {[
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
-                    {id:'clockin', icon:<Clock4 size={20}/>, label:'線上打卡'}, 
+                    {id:'clockin', icon:<Clock4 size={20}/>, label:'本月打卡一覽'}, // 🌟 更新名稱
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
                     {id:'leave', icon:<ClipboardList size={20}/>, label:'差勤填寫'},
                     ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
@@ -462,8 +459,7 @@
 
                 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
                   {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} />}
-                  {view === 'clockin' && <ClockInView user={userData} clockIns={clockIns} crud={crud} />}
-                  {/* 🌟 傳入 announcements 與 globalSettings 到 CalendarView */}
+                  {view === 'clockin' && <MonthlyClockInView user={userData} users={usersList} clockIns={clockIns} leaves={leaves} events={calendarEvents} crud={crud} globalSettings={globalSettings} />}
                   {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} globalSettings={globalSettings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} announcements={announcements} />}
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
@@ -479,58 +475,175 @@
           );
         }
 
-        // --- 模組：線上打卡 ---
-        function ClockInView({ user, clockIns, crud }) {
-            const [currentTime, setCurrentTime] = useState(new Date());
+        // --- 🌟 全新升級模組：本月打卡一覽 (表格+批量處理) ---
+        function MonthlyClockInView({ user, users, clockIns, leaves, events, crud, globalSettings }) {
+            const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [localRecords, setLocalRecords] = useState({});
+            const [defaultIn, setDefaultIn] = useState('08:00');
+            const [defaultOut, setDefaultOut] = useState('17:00');
+            const [isSaving, setIsSaving] = useState(false);
+
+            const monthData = useMemo(() => {
+                const parts = month.split('-');
+                const y = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                const daysInMonth = new Date(y, m, 0).getDate();
+                const data = [];
+
+                for(let i=1; i<=daysInMonth; i++) {
+                    const dateStr = `${month}-${String(i).padStart(2,'0')}`;
+                    const dObj = new Date(dateStr);
+                    
+                    const override = globalSettings?.calendarOverrides?.[dateStr];
+                    let isHoliday = !!TAIWAN_HOLIDAYS_2026[dateStr];
+                    let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+                    let holidayName = TAIWAN_HOLIDAYS_2026[dateStr] || '';
+                    
+                    if (override) {
+                        if (override.type === 'holiday') { isHoliday = true; isWeekend = true; holidayName = override.name; } 
+                        else if (override.type === 'workday') { isHoliday = false; isWeekend = false; }
+                    }
+
+                    const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status === 'approved' && (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name));
+                    
+                    const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && (e.userId === user.docId || e.userName === user.name)).map(p => events.find(t => t.groupId === p.groupId && t.type === 'tag'));
+                    const isExternal = myWork.some(w => w && EXTERNAL_WORK_TAGS.includes(w.item));
+
+                    let status = 'workday';
+                    let statusText = '正常出勤';
+                    if (isWeekend || isHoliday) { status = 'holiday'; statusText = holidayName || '例假日'; }
+                    else if (myLeave) { status = 'leave'; statusText = `請假 (${myLeave.type})`; }
+                    else if (isExternal) { status = 'external'; statusText = '外勤任務'; }
+
+                    const dbRecord = clockIns.find(c => c.date === dateStr && c.userId === (user.docId || user.uid));
+
+                    data.push({ date: dateStr, dayOfWeek: ['日','一','二','三','四','五','六'][dObj.getDay()], status, statusText, dbRecord });
+                }
+                return data;
+            }, [month, leaves, events, clockIns, user, globalSettings]);
 
             useEffect(() => {
-                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-                return () => clearInterval(timer);
-            }, []);
+                const initial = {};
+                monthData.forEach(d => {
+                    initial[d.date] = {
+                        clockIn: d.dbRecord?.clockIn || '',
+                        clockOut: d.dbRecord?.clockOut || ''
+                    };
+                });
+                setLocalRecords(initial);
+            }, [monthData]);
 
-            const tzOffset = currentTime.getTimezoneOffset() * 60000;
-            const todayStr = (new Date(currentTime - tzOffset)).toISOString().slice(0, 10);
-            
-            const myTodayRecord = clockIns.find(c => c.date === todayStr && c.userId === (user.docId || user.uid));
+            const handleInputChange = (date, field, val) => {
+                setLocalRecords(prev => ({ ...prev, [date]: { ...prev[date], [field]: val } }));
+            };
 
-            const handleClock = async (type) => {
-                const timeStr = currentTime.toTimeString().slice(0, 5); 
-                const record = myTodayRecord || { userId: user.docId || user.uid, userName: user.name, date: todayStr };
-                
-                if (type === 'in') record.clockIn = timeStr;
-                if (type === 'out') record.clockOut = timeStr;
+            const handleBulkFill = () => {
+                const updated = { ...localRecords };
+                monthData.forEach(d => {
+                    if (d.status === 'workday' || d.status === 'external') {
+                        if (!updated[d.date].clockIn) updated[d.date].clockIn = defaultIn;
+                        if (!updated[d.date].clockOut) updated[d.date].clockOut = defaultOut;
+                    }
+                });
+                setLocalRecords(updated);
+            };
 
+            const handleSaveAll = async () => {
+                setIsSaving(true);
                 try {
-                    await crud.saveClockIn(record);
-                    alert(`${type === 'in' ? '上班' : '下班'}打卡成功：${timeStr}`);
-                } catch(e) {
-                    alert('打卡失敗：' + e.message);
-                }
+                    for (const d of monthData) {
+                        const local = localRecords[d.date];
+                        const db = d.dbRecord || {};
+                        if (local.clockIn !== (db.clockIn || '') || local.clockOut !== (db.clockOut || '')) {
+                            await crud.saveClockIn({
+                                userId: user.docId || user.uid,
+                                userName: user.name,
+                                date: d.date,
+                                clockIn: local.clockIn,
+                                clockOut: local.clockOut
+                            });
+                        }
+                    }
+                    alert("打卡紀錄已全部儲存！");
+                } catch (e) { alert("儲存失敗: " + e.message); } 
+                finally { setIsSaving(false); }
+            };
+
+            const exportCSV = () => {
+                let csv = "\uFEFF日期,星期,出勤狀態,上班時間,下班時間\n";
+                monthData.forEach(d => {
+                    const local = localRecords[d.date] || {};
+                    csv += `${d.date},${d.dayOfWeek},${d.statusText},${local.clockIn},${local.clockOut}\n`;
+                });
+                const link = document.createElement("a");
+                link.href = encodeURI("data:text/csv;charset=utf-8," + csv);
+                link.download = `打卡紀錄_${user.name}_${month}.csv`;
+                link.click();
             };
 
             return (
-                <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8 text-center mt-10">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">線上打卡</h2>
-                    <p className="text-gray-500 mb-8">{todayStr.replace(/-/g, ' / ')}</p>
-                    
-                    <div className="text-6xl font-black text-blue-600 tracking-wider mb-10 font-mono">
-                        {currentTime.toTimeString().slice(0, 8)}
+                <div className="max-w-4xl mx-auto space-y-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
+                        <h2 className="text-xl font-bold flex items-center gap-2"><Clock4/> 本月打卡一覽</h2>
+                        <div className="flex gap-2 w-full md:w-auto">
+                            <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
+                            <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition flex-1 md:flex-none">
+                                <FileSpreadsheet size={16}/> 下載 Excel
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <button 
-                            onClick={() => handleClock('in')}
-                            disabled={myTodayRecord?.clockIn}
-                            className={`py-4 rounded-xl font-bold text-lg transition flex flex-col items-center justify-center gap-2 ${myTodayRecord?.clockIn ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-100 text-green-700 hover:bg-green-200 hover:shadow'}`}
-                        >
-                            <span className="text-sm">{myTodayRecord?.clockIn ? `已打卡 ${myTodayRecord.clockIn}` : '上班打卡'}</span>
+                    <div className="bg-white p-4 rounded shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-end bg-indigo-50/50">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-600 mb-1">預設上班</label>
+                            <input type="time" className="border rounded p-2 text-sm bg-white" value={defaultIn} onChange={e=>setDefaultIn(e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-600 mb-1">預設下班</label>
+                            <input type="time" className="border rounded p-2 text-sm bg-white" value={defaultOut} onChange={e=>setDefaultOut(e.target.value)} />
+                        </div>
+                        <button onClick={handleBulkFill} className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-indigo-700 transition">
+                            批量填寫空白工作日
                         </button>
-                        <button 
-                            onClick={() => handleClock('out')}
-                            className={`py-4 rounded-xl font-bold text-lg transition flex flex-col items-center justify-center gap-2 bg-blue-100 text-blue-700 hover:bg-blue-200 hover:shadow`}
-                        >
-                            <span className="text-sm">{myTodayRecord?.clockOut ? `已下班 ${myTodayRecord.clockOut} (可覆蓋)` : '下班打卡'}</span>
+                        <div className="flex-1"></div>
+                        <button onClick={handleSaveAll} disabled={isSaving} className={`w-full md:w-auto px-6 py-2 rounded text-sm font-bold shadow-md flex items-center justify-center gap-2 text-white ${isSaving ? 'bg-gray-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900'}`}>
+                            {isSaving ? <><Loader2 className="animate-spin" size={16}/> 儲存中...</> : <><Check size={16}/> 儲存所有變更</>}
                         </button>
+                    </div>
+
+                    <div className="bg-white rounded shadow overflow-hidden">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-50 border-b font-bold text-gray-600">
+                                <tr>
+                                    <th className="p-3 w-32">日期</th>
+                                    <th className="p-3 w-16 text-center">星期</th>
+                                    <th className="p-3 w-40">出勤狀態</th>
+                                    <th className="p-3">上班時間</th>
+                                    <th className="p-3">下班時間</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {monthData.map(d => {
+                                    const local = localRecords[d.date] || { clockIn: '', clockOut: '' };
+                                    const isHoliday = d.status === 'holiday';
+                                    const rowBg = isHoliday ? 'bg-red-50/30 text-red-800' : d.status === 'leave' ? 'bg-pink-50/50' : d.status === 'external' ? 'bg-blue-50/30' : 'hover:bg-gray-50';
+
+                                    return (
+                                        <tr key={d.date} className={`border-b last:border-0 transition ${rowBg}`}>
+                                            <td className="p-3 font-medium">{d.date}</td>
+                                            <td className="p-3 text-center">{d.dayOfWeek}</td>
+                                            <td className="p-3 font-bold">{d.statusText}</td>
+                                            <td className="p-3">
+                                                <input type="time" className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white/80 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none w-32" value={local.clockIn} onChange={e => handleInputChange(d.date, 'clockIn', e.target.value)} />
+                                            </td>
+                                            <td className="p-3">
+                                                <input type="time" className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white/80 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none w-32" value={local.clockOut} onChange={e => handleInputChange(d.date, 'clockOut', e.target.value)} />
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             );
@@ -629,7 +742,6 @@
             );
         }
 
-        // --- Sub-Components ---
         function Dashboard({ user, leaves, calendarEvents, setView }) {
           const today = new Date();
           const weekDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
@@ -771,10 +883,10 @@
           const tzOffsetToday = todayObj.getTimezoneOffset() * 60000;
           const todayStr = (new Date(todayObj - tzOffsetToday)).toISOString().slice(0, 10);
           
-          // 🌟 公告過濾與排序 (顯示今天以後的)
-          const upcomingAnnouncements = announcements
-              .filter(a => a.date >= todayStr)
-              .sort((a,b) => a.date.localeCompare(b.date));
+          // 🌟 修復：增加安全檢測，避免舊資料缺少 date 導致 map/filter 崩潰
+          const upcomingAnnouncements = (announcements || [])
+              .filter(a => a && a.date && a.date >= todayStr)
+              .sort((a,b) => (a.date || '').localeCompare(b.date || ''));
 
           const rotationStats = useMemo(() => {
               const currentYear = new Date().getFullYear();
@@ -783,12 +895,12 @@
                   stats[rule.id] = {};
                   rule.order.forEach(name => stats[rule.id][name] = 0);
               });
-              events.forEach(e => {
-                  if (e.type === 'person' && new Date(e.date).getFullYear() === currentYear) {
+              (events || []).forEach(e => {
+                  if (e && e.type === 'person' && e.date && new Date(e.date).getFullYear() === currentYear) {
                       const tagEv = events.find(t => t.groupId === e.groupId && t.type === 'tag');
                       if (tagEv) {
                           const rule = rotationRules.find(r => r.matchTag === tagEv.item);
-                          if (rule && stats[rule.id][e.userName] !== undefined) {
+                          if (rule && stats[rule.id] && stats[rule.id][e.userName] !== undefined) {
                               stats[rule.id][e.userName]++;
                           }
                       }
@@ -800,8 +912,8 @@
           const getNextRotationPerson = (matchTag) => {
               const rule = rotationRules.find(r => r.matchTag === matchTag);
               if (!rule) return null;
-              const sortedEvents = [...events]
-                .filter(e => e.type === 'tag' && e.item === matchTag)
+              const sortedEvents = (events || [])
+                .filter(e => e && e.type === 'tag' && e.item === matchTag && e.date)
                 .sort((a,b) => new Date(b.date) - new Date(a.date));
 
               let next = rule.order[0];
@@ -818,7 +930,7 @@
                       next = rule.order[(maxIndex + 1) % rule.order.length];
                   }
               }
-              return { user: users.find(u => u.name === next), lastDate };
+              return { user: users.find(u => (u.name || '') === next), lastDate };
           };
 
           const rotationData = rotationRules.map(rule => {
@@ -944,11 +1056,10 @@
 
           const renderDayCell = (dObj) => {
               const dStr = (new Date(dObj - dObj.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
-              const dayEvs = events.filter(e => e.date === dStr);
+              const dayEvs = (events || []).filter(e => e.date === dStr);
               const isToday = dStr === todayStr;
               
-              // 🌟 整合自訂節假日 (全域設定)
-              const override = globalSettings.calendarOverrides?.[dStr];
+              const override = globalSettings?.calendarOverrides?.[dStr];
               let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
               let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
               let holidayName = TAIWAN_HOLIDAYS_2026[dStr] || '';
@@ -994,7 +1105,7 @@
               };
 
               const renderLeaves = () => {
-                  const leavesOnDay = leaves.filter(l => l.status !== 'rejected' && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
+                  const leavesOnDay = (leaves || []).filter(l => l.status !== 'rejected' && l.start && l.end && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
                   return leavesOnDay.map(l => {
                       return (
                           <div key={l.id} className="text-[10px] md:text-xs border border-pink-200 bg-pink-100 text-pink-700 shadow-sm rounded px-1 py-0.5 my-0.5 w-full select-none truncate font-bold text-center">
@@ -1029,7 +1140,6 @@
 
           return (
             <div className="flex flex-col h-full gap-4">
-               {/* 🌟 頂部：重大事項公告區 */}
                {upcomingAnnouncements.length > 0 && (
                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 shadow-sm shrink-0">
                        <div className="flex justify-between items-center mb-2">
@@ -1059,7 +1169,6 @@
                        </div>
                    </div>
                )}
-               {/* 當沒有公告時，顯示一個按鈕可以加 */}
                {upcomingAnnouncements.length === 0 && (
                     <div className="flex justify-end">
                         <button onClick={()=>setAnnouncementModalOpen(true)} className="text-xs bg-white border border-gray-300 text-gray-600 px-3 py-1.5 font-bold rounded hover:bg-gray-50 transition shadow-sm flex items-center gap-1"><Megaphone size={14}/> 發布新公告</button>
@@ -1094,7 +1203,6 @@
                   </div>
                </div>
 
-               {/* 🌟 公告表單 Modal */}
                {announceModalOpen && (
                    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setAnnouncementModalOpen(false)}>
                        <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
@@ -1371,7 +1479,6 @@
                         const dStr = `${month}-${String(dayNum).padStart(2,'0')}`;
                         const dObj = new Date(dStr);
                         
-                        // 🌟 整合自訂節假日 (全域設定)
                         const override = globalSettings.calendarOverrides?.[dStr];
                         let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
                         let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
@@ -1425,7 +1532,6 @@
                     tableRows += tr1 + tr2;
                 }
 
-                // 處理第31天的備註格
                 const override31 = globalSettings.calendarOverrides?.[`${month}-31`];
                 let isHol31 = !!TAIWAN_HOLIDAYS_2026[`${month}-31`] || new Date(`${month}-31`).getDay() === 0 || new Date(`${month}-31`).getDay() === 6;
                 let text31 = '例 假 日';
@@ -1542,21 +1648,13 @@
             );
         }
 
-        // --- 待送差單小卡 ---
         const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
             const [type, setType] = useState('出差'); 
             const [deputyId, setDeputyId] = useState('');
 
             const handleSend = () => {
                 if(!deputyId) { alert("請選擇職務代理人"); return; }
-                onSubmit({
-                    type,
-                    start: task.suggestedStart,
-                    end: task.suggestedEnd,
-                    reason: task.reason,
-                    deputyId,
-                    hours: task.slot === 'all_day' ? 8 : 4
-                });
+                onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, hours: task.slot === 'all_day' ? 8 : 4 });
             }
 
             return (
@@ -1573,29 +1671,12 @@
                             </div>
                         </div>
                     </div>
-                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (預設出差)</label>
-                            <select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>
-                                {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label>
-                            <select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}>
-                                <option value="">-- 點此選擇職代 --</option>
-                                {deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}
-                            </select>
-                        </div>
+                        <div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (預設出差)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+                        <div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
                     </div>
-
                     <div className="pt-2 text-right">
-                        <button 
-                            onClick={handleSend} 
-                            disabled={isSubmitting} 
-                            className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto"
-                        >
+                        <button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">
                             {isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}
                         </button>
                     </div>
@@ -1603,7 +1684,6 @@
             )
         }
 
-        // --- 差勤表單 ---
         function LeaveForm({ user, users, leaves, events, crud, leaveTypes }) {
           const [form, setForm] = useState({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
@@ -1612,7 +1692,7 @@
 
           const pendingExternalTasks = useMemo(() => {
               const groups = {};
-              events.forEach(e => {
+              (events || []).forEach(e => {
                   if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
                   if (e.type === 'tag') groups[e.groupId].tag = e;
                   if (e.type === 'person') groups[e.groupId].people.push(e);
@@ -1621,10 +1701,8 @@
               const pending = [];
               Object.values(groups).forEach(g => {
                   if (!g.tag) return;
-                  
                   const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
                   if (!isExternal) return;
-
                   const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
                   if (!isMe) return;
 
@@ -1634,26 +1712,21 @@
                   if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
                   else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
 
-                  const hasLeave = leaves.some(l => 
+                  const hasLeave = (leaves || []).some(l => 
                       (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
-                      l.start.startsWith(d) && 
+                      l.start && l.start.startsWith(d) && 
                       l.status !== 'rejected' 
                   );
 
                   if (!hasLeave) {
                       pending.push({
-                          id: g.tag.groupId,
-                          date: d,
-                          slot: g.tag.slot,
-                          item: g.tag.item,
-                          area: g.tag.area,
-                          suggestedStart: startTime,
-                          suggestedEnd: endTime,
+                          id: g.tag.groupId, date: d, slot: g.tag.slot, item: g.tag.item, area: g.tag.area,
+                          suggestedStart: startTime, suggestedEnd: endTime,
                           reason: `[${g.tag.item}] ${g.tag.area ? g.tag.area : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim()
                       });
                   }
               });
-              return pending.sort((a,b) => a.date.localeCompare(b.date));
+              return pending.sort((a,b) => (a.date || '').localeCompare(b.date || ''));
           }, [events, leaves, user]);
 
           useEffect(() => {
@@ -1666,13 +1739,7 @@
           const handleTaskSubmit = async (taskData, taskId) => {
               setSubmittingTaskId(taskId);
               try {
-                  await crud.createLeave({ 
-                      ...taskData, 
-                      requesterId: user.docId || user.uid, 
-                      requesterName: user.name, 
-                      status: 'pending', 
-                      timestamp: new Date() 
-                  });
+                  await crud.createLeave({ ...taskData, requesterId: user.docId || user.uid, requesterName: user.name, status: 'pending', timestamp: new Date() });
                   alert("差單已送出，已顯示在日曆上！");
               } catch (e) { alert("送出失敗"); } 
               finally { setSubmittingTaskId(null); }
@@ -1682,21 +1749,14 @@
               e.preventDefault();
               setIsSubmitting(true);
               try {
-                  await crud.createLeave({ 
-                      ...form, 
-                      requesterId: user.docId || user.uid, 
-                      requesterName: user.name, 
-                      hours, 
-                      status: 'pending', 
-                      timestamp: new Date() 
-                  });
+                  await crud.createLeave({ ...form, requesterId: user.docId || user.uid, requesterName: user.name, hours, status: 'pending', timestamp: new Date() });
                   alert("請假單已送出，已同步顯示在日曆上！");
                   setForm({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
               } catch (e) { alert("送出失敗，請稍後再試。"); } 
               finally { setIsSubmitting(false); }
           };
 
-          const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
+          const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
 
           return (
@@ -1735,7 +1795,6 @@
           );
         }
 
-        // --- 審核模組 ---
         function ApprovalView({ leaves, currentUser, crud, users }) {
           const [processingId, setProcessingId] = useState(null);
 
@@ -1813,7 +1872,6 @@
             const [localRoleNames, setLocalRoleNames] = useState(roleNames);
             const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
             
-            // 🌟 處理全域自訂假日的狀態
             const [calendarOverrides, setCalendarOverrides] = useState(globalSettings.calendarOverrides || {});
             const [newOverrideDate, setNewOverrideDate] = useState('');
             const [newOverrideType, setNewOverrideType] = useState('holiday');
@@ -1828,7 +1886,6 @@
             };
             const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
 
-            // 新增自訂假日
             const handleAddOverride = () => {
                 if (!newOverrideDate || !newOverrideName) { alert("日期與原因必填"); return; }
                 setCalendarOverrides(prev => ({
@@ -1837,7 +1894,6 @@
                 }));
                 setNewOverrideDate(''); setNewOverrideName('');
             };
-            // 刪除自訂假日
             const handleDeleteOverride = (dateKey) => {
                 const updated = { ...calendarOverrides };
                 delete updated[dateKey];
@@ -1847,7 +1903,6 @@
             const handleSaveSettings = async () => {
                 onUpdateRoleNames(localRoleNames); 
                 onSave({...settings, areaColors: areaC});
-                // 儲存全域設定到 Firestore
                 try {
                     await crud.saveGlobalSettings({ calendarOverrides });
                     setIsSettingsSaved(true); 
@@ -1857,7 +1912,6 @@
 
             return (
                 <div className="max-w-3xl mx-auto space-y-8">
-                    {/* 🌟 新增：行事曆特殊日設定區塊 */}
                     <div className="bg-white p-6 rounded shadow-sm border-t-4 border-red-500">
                         <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Flag className="text-red-500"/> 📅 行事曆特殊日設定 (例假日/補班補休)</h2>
                         <p className="text-sm text-gray-500 mb-4">在此設定的特殊日子，會即時同步到全公司的排班日曆與簽到表。若某天原本是補班日但單位放假，您可以設定為「自訂放假日」。</p>
@@ -1915,7 +1969,7 @@
             );
         }
 
-        // 成員管理與個人設定模組 (略去重複修改，維持先前的姓氏與名字分離)
+        // 成員管理與個人設定模組 (略)
         function MembersView({ db, users, currentUser, roleNames }) {
             const isAdmin = currentUser && currentUser.role === 'admin';
             const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1954,6 +2008,9 @@
                 }
             };
 
+            const openAdd = () => { setEditUser(null); setIsModalOpen(true); };
+            const openEdit = (u) => { setEditUser(u); setIsModalOpen(true); };
+
             return (
                 <div className="max-w-5xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow-sm gap-4">
@@ -1961,7 +2018,7 @@
                         {isAdmin && (
                             <div className="flex gap-2">
                                 <button onClick={handleImportPredefined} className="bg-purple-100 text-purple-700 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-purple-200 transition"><Users size={16}/> 一鍵匯入預設名單</button>
-                                <button onClick={()=>{setEditUser(null); setIsModalOpen(true);}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button>
+                                <button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button>
                             </div>
                         )}
                     </div>
@@ -1978,7 +2035,7 @@
                                 </div>
                                 {isAdmin && (
                                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
-                                        <button onClick={()=>{setEditUser(u); setIsModalOpen(true);}} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-blue-100 hover:text-blue-600"><Edit size={14}/></button>
+                                        <button onClick={()=>openEdit(u)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-blue-100 hover:text-blue-600"><Edit size={14}/></button>
                                         <button onClick={()=>handleDelete(u.docId)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-red-100 hover:text-red-600"><Trash2 size={14}/></button>
                                     </div>
                                 )}
@@ -2019,20 +2076,6 @@
             );
         }
 
-        function ManagementView({ tags }) {
-            const [newWork, setNewWork] = useState('');
-            const [newArea, setNewArea] = useState('');
-            return (
-                <div className="max-w-4xl mx-auto space-y-6">
-                    <h2 className="text-xl font-bold flex items-center gap-2"><List/> 項目管理</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-blue-700">工作項目</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newWork} onChange={e=>setNewWork(e.target.value)} /><button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.workTags.map(tag => (<div key={tag} className="bg-blue-50 text-blue-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-blue-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div>
-                        <div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-green-700">轄區</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>{tags.handleAddTag('area', newArea); setNewArea('')}} className="bg-green-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.areaTags.map(tag => (<div key={tag} className="bg-green-50 text-green-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('area', tag)} className="text-green-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div>
-                    </div>
-                </div>
-            );
-        }
-
         function ProfileView({ user, onSave, roleNames }) {
             const [p, setP] = useState({ 
                 lastName: user.lastName || '', name: user.name || '', initials: user.initials || '', color: user.color || 'bg-gray-200', 
@@ -2044,7 +2087,6 @@
                 const file = e.target.files[0];
                 if (file) { const reader = new FileReader(); reader.onloadend = () => { setP({ ...p, avatarUrl: reader.result }); }; reader.readAsDataURL(file); }
             };
-
             const handleSubmit = async () => { setIsSubmitting(true); await onSave(p); setIsSubmitting(false); };
 
             return (
