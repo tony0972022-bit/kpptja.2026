@@ -500,33 +500,34 @@
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
                     {id:'leave', icon:<ClipboardList size={20}/>, label:'請假申請'},
+                    ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
                     {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
                     {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
                     {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'},
                     {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'}
                   ].map(item => (
-                    <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
+                    <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`relative w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
                       <div className={`flex items-center gap-3 ${isDesktopCollapsed ? '' : 'w-full'}`}>
                           <div className="shrink-0">{item.icon}</div>
                           {!isDesktopCollapsed && <span>{item.label}</span>}
                       </div>
+                      {!isDesktopCollapsed && item.count > 0 && <span className={`${view===item.id ? 'bg-white text-blue-600' : 'bg-red-500 text-white'} text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-auto`}>{item.count}</span>}
+                      {isDesktopCollapsed && item.count > 0 && <div className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
                     </button>
                   ))}
                   
-                  {/* 管理與審核專區摺疊選單 */}
-                  {(userData.role === 'leader' || userData.role === 'admin') && (
+                  {/* 管理設定區摺疊選單 (僅管理員顯示) */}
+                  {userData.role === 'admin' && (
                     <div className={`mt-2 ${isLight ? 'border-t border-gray-200' : 'border-t border-slate-700'} pt-2`}>
-                      <button onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)} className={`w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`} title={isDesktopCollapsed ? "管理與審核" : ""}>
+                      <button onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)} className={`w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`} title={isDesktopCollapsed ? "管理設定區" : ""}>
                          <div className="flex items-center gap-3">
                              <div className="shrink-0 relative">
                                  <Shield size={20}/>
-                                 {isDesktopCollapsed && totalAlert > 0 && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
                              </div>
-                             {!isDesktopCollapsed && <span className="font-bold text-sm">管理與審核專區</span>}
+                             {!isDesktopCollapsed && <span className="font-bold text-sm">管理設定區</span>}
                          </div>
                          {!isDesktopCollapsed && (
                              <div className="flex items-center gap-2">
-                                 {totalAlert > 0 && !isAdminMenuOpen && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">{totalAlert}</span>}
                                  {isAdminMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                              </div>
                          )}
@@ -535,18 +536,15 @@
                       {(isAdminMenuOpen || isDesktopCollapsed) && (
                           <div className={isDesktopCollapsed ? '' : (isLight ? 'bg-gray-100/50' : 'bg-slate-900/30')}>
                             {[
-                              {id:'approval', icon:<CheckCircle size={18}/>, label:'差單審核', count: totalAlert},
-                              ...(userData.role === 'admin' ? [{id:'members', icon:<Users size={18}/>, label:'成員管理'}] : []),
-                              ...(userData.role === 'admin' ? [{id:'database', icon:<Database size={18}/>, label:'資料庫管理'}] : []),
-                              ...(userData.role === 'admin' ? [{id:'settings', icon:<Settings size={18}/>, label:'系統設定'}] : [])
+                              {id:'members', icon:<Users size={18}/>, label:'成員管理'},
+                              {id:'database', icon:<Database size={18}/>, label:'資料庫管理'},
+                              {id:'settings', icon:<Settings size={18}/>, label:'系統設定'}
                             ].map(item => (
                               <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`w-full flex items-center py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center px-4' : 'justify-between pl-10 pr-4'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
                                 <div className={`flex items-center gap-3 ${isDesktopCollapsed ? '' : 'w-full'}`}>
-                                    <div className="shrink-0">{item.icon}</div>
+                                    <div className="shrink-0 relative">{item.icon}</div>
                                     {!isDesktopCollapsed && <span className="text-sm">{item.label}</span>}
                                 </div>
-                                {!isDesktopCollapsed && item.count > 0 && <span className={`${view===item.id ? 'bg-white text-blue-600' : 'bg-red-500 text-white'} text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-auto`}>{item.count}</span>}
-                                {isDesktopCollapsed && item.count > 0 && <div className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
                               </button>
                             ))}
                           </div>
