@@ -1288,22 +1288,32 @@
             const [defaultEnd, setDefaultEnd] = useState('17:00');
             
             const daysInMonth = new Date(selectedMonth.split('-')[0], selectedMonth.split('-')[1], 0).getDate();
+            const officialTypes = leaveTypes.filter(t => t.category === 'official').map(t => t.name);
+
             useEffect(() => {
                 const currentMonthRecords = attendanceRecords.filter(r => r.userId === user.uid && r.month === selectedMonth);
                 const recordsMap = {};
                 currentMonthRecords.forEach(r => { recordsMap[r.date] = r; });
                 setLocalRecords(recordsMap);
             }, [attendanceRecords, selectedMonth, user.uid]);
+            
             const handleTimeChange = (date, field, value) => { setLocalRecords(prev => ({ ...prev, [date]: { ...prev[date], [field]: value } })); };
+            
             const batchFill = () => {
                 const newRecords = { ...localRecords };
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
                     const dayOfWeek = new Date(dateStr).getDay();
-                    if (dayOfWeek !== 0 && dayOfWeek !== 6) { if (!newRecords[dateStr]) { newRecords[dateStr] = { start: defaultStart, end: defaultEnd }; } }
+                    const isRedDay = dayOfWeek === 0 || dayOfWeek === 6 || !!TAIWAN_HOLIDAYS_2026[dateStr];
+                    
+                    // 避開紅字，針對上班日批次填入設定的時間
+                    if (!isRedDay) { 
+                        if (!newRecords[dateStr]) { newRecords[dateStr] = { start: defaultStart, end: defaultEnd }; } 
+                    }
                 }
                 setLocalRecords(newRecords);
             };
+            
             const saveAttendance = async () => {
                 const batch = writeBatch(db);
                 Object.keys(localRecords).forEach(date => {
@@ -1316,23 +1326,24 @@
                 });
                 try { await batch.commit(); alert("打卡紀錄已儲存！"); } catch (e) { alert("儲存失敗: " + e.message); }
             };
+            
             const downloadExcel = () => {
                 let csvContent = "\uFEFF日期,星期,簽到,簽退\n";
                 const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
-                const officialTypes = leaveTypes.filter(t => t.category === 'official').map(t => t.name);
                 
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
                     const d = new Date(dateStr);
-                    const dayName = weekDays[d.getDay()];
-                    const rec = localRecords[dateStr] || { start: '', end: '' };
+                    const dayOfWeek = d.getDay();
+                    const dayName = weekDays[dayOfWeek];
+                    const holidayName = TAIWAN_HOLIDAYS_2026[dateStr];
+                    const isRedDay = dayOfWeek === 0 || dayOfWeek === 6 || !!holidayName;
                     
-                    let morningStart = rec.start || '';
-                    let morningEnd = rec.start ? '12:00' : '';
-                    let afternoonStart = rec.end ? '13:00' : '';
-                    let afternoonEnd = rec.end || '';
+                    const rec = localRecords[dateStr] || {};
+                    
+                    let morningState = isRedDay ? 'holiday' : 'normal';
+                    let afternoonState = isRedDay ? 'holiday' : 'normal';
 
-                    // 檢查請假紀錄以覆蓋時間為出差/休息
                     const dayLeaves = leaves.filter(l => 
                         (l.requesterId === user.uid || l.requesterId === user.docId) && 
                         l.status === 'approved' && 
@@ -1341,31 +1352,51 @@
 
                     dayLeaves.forEach(dayLeave => {
                         const isOfficial = officialTypes.includes(dayLeave.type);
-                        const leaveText = isOfficial ? '出差' : '休息';
-                        
                         const isAllDay = Number(dayLeave.hours) >= 8;
                         const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
                         const isAfternoon = dayLeave.start.includes('T13') || dayLeave.start.includes('T12');
 
+                        const stateVal = isOfficial ? 'official' : 'personal';
                         if (isAllDay) {
-                            morningStart = leaveText; morningEnd = leaveText;
-                            afternoonStart = leaveText; afternoonEnd = leaveText;
+                            morningState = stateVal; afternoonState = stateVal;
                         } else if (isMorning) {
-                            morningStart = leaveText; morningEnd = leaveText;
+                            morningState = stateVal;
                         } else if (isAfternoon) {
-                            afternoonStart = leaveText; afternoonEnd = leaveText;
+                            afternoonState = stateVal;
                         }
                     });
 
-                    csvContent += `${dateStr},${dayName},${morningStart},${morningEnd}\n`;
-                    csvContent += `,,${afternoonStart},${afternoonEnd}\n`;
+                    // 上午的兩格
+                    let mStart = rec.start || '';
+                    let mEnd = rec.start ? '12:00' : '';
+                    // 下午的兩格
+                    let aStart = rec.end ? '13:00' : '';
+                    let aEnd = rec.end || '';
+
+                    if (morningState === 'official') {
+                        mStart = '出差'; mEnd = '出差';
+                    } else if (morningState === 'personal' || morningState === 'holiday') {
+                        mStart = '休息'; mEnd = '休息';
+                    }
+
+                    if (afternoonState === 'official') {
+                        aStart = '出差'; aEnd = '出差';
+                    } else if (afternoonState === 'personal' || afternoonState === 'holiday') {
+                        aStart = '休息'; aEnd = '休息';
+                    }
+
+                    // 1個日期分兩列寫入，第一列為上午，第二列為下午 (達成四格排版)
+                    csvContent += `${dateStr},${dayName},${mStart},${mEnd}\n`;
+                    csvContent += `,,${aStart},${aEnd}\n`;
                 }
+                
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
                 link.download = `${user.name}_${selectedMonth}_出勤紀錄.csv`;
                 link.click();
             };
+
             return (
                 <div className="max-w-4xl mx-auto space-y-6">
                     <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
@@ -1384,7 +1415,86 @@
                             <button onClick={downloadExcel} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-green-200 transition"><Download size={16}/> 下載 Excel</button>
                         </div>
                     </div>
-                    <div className="bg-white rounded shadow overflow-hidden border"><div className="max-h-[600px] overflow-y-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-100 sticky top-0 z-10 font-bold text-gray-600"><tr><th className="p-3 w-32">日期</th><th className="p-3 w-20">星期</th><th className="p-3">上班時間</th><th className="p-3">下班時間</th></tr></thead><tbody>{[...Array(daysInMonth)].map((_, i) => { const dateStr = `${selectedMonth}-${String(i + 1).padStart(2, '0')}`; const d = new Date(dateStr); const dayOfWeek = d.getDay(); const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; const rec = localRecords[dateStr] || {}; return (<tr key={dateStr} className={`border-b ${isWeekend ? 'bg-gray-50' : 'hover:bg-blue-50'}`}><td className="p-3 font-medium">{dateStr}</td><td className={`p-3 font-bold ${isWeekend ? 'text-red-500' : 'text-gray-600'}`}>{['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}</td><td className="p-2"><input type="time" className="border rounded p-1 w-full max-w-[150px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.start || ''} onChange={(e) => handleTimeChange(dateStr, 'start', e.target.value)} /></td><td className="p-2"><input type="time" className="border rounded p-1 w-full max-w-[150px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.end || ''} onChange={(e) => handleTimeChange(dateStr, 'end', e.target.value)} /></td></tr>); })}</tbody></table></div><div className="p-4 border-t bg-gray-50 flex justify-end"><button onClick={saveAttendance} className="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex items-center gap-2"><CheckCircle size={18}/> 儲存打卡紀錄</button></div></div>
+                    
+                    <div className="bg-white rounded shadow overflow-hidden border">
+                        <div className="max-h-[600px] overflow-y-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-100 sticky top-0 z-10 font-bold text-gray-600">
+                                    <tr>
+                                        {/* 調整寬度使時間欄位靠得更近 */}
+                                        <th className="p-3 w-32 md:w-40">日期</th>
+                                        <th className="p-3 w-16">星期</th>
+                                        <th className="p-3 w-32">上班時間</th>
+                                        <th className="p-3 w-32">下班時間</th>
+                                        <th className="p-3"></th> {/* 吸收剩餘空間的空白欄 */}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {[...Array(daysInMonth)].map((_, i) => { 
+                                        const dateStr = `${selectedMonth}-${String(i + 1).padStart(2, '0')}`; 
+                                        const d = new Date(dateStr); 
+                                        const dayOfWeek = d.getDay(); 
+                                        const holidayName = TAIWAN_HOLIDAYS_2026[dateStr];
+                                        const isRedDay = dayOfWeek === 0 || dayOfWeek === 6 || !!holidayName; 
+                                        const rec = localRecords[dateStr] || {}; 
+
+                                        let morningState = isRedDay ? 'holiday' : 'normal';
+                                        let afternoonState = isRedDay ? 'holiday' : 'normal';
+
+                                        const dayLeaves = leaves.filter(l => 
+                                            (l.requesterId === user.uid || l.requesterId === user.docId) && 
+                                            l.status === 'approved' && 
+                                            l.start.startsWith(dateStr)
+                                        );
+
+                                        dayLeaves.forEach(dayLeave => {
+                                            const isOfficial = officialTypes.includes(dayLeave.type);
+                                            const isAllDay = Number(dayLeave.hours) >= 8;
+                                            const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
+                                            const isAfternoon = dayLeave.start.includes('T13') || dayLeave.start.includes('T12');
+
+                                            const stateVal = isOfficial ? 'official' : 'personal';
+                                            if (isAllDay) {
+                                                morningState = stateVal; afternoonState = stateVal;
+                                            } else if (isMorning) {
+                                                morningState = stateVal;
+                                            } else if (isAfternoon) {
+                                                afternoonState = stateVal;
+                                            }
+                                        });
+
+                                        const renderInput = (type, val, field) => {
+                                            if (type === 'official') return <span className="font-bold text-blue-600 px-2 block w-full max-w-[120px]">出差</span>;
+                                            if (type === 'personal' || type === 'holiday') return <span className="font-bold text-red-400 px-2 block w-full max-w-[120px]">休息</span>;
+                                            return <input type="time" className="border rounded p-1 w-full max-w-[120px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={val || ''} onChange={(e) => handleTimeChange(dateStr, field, e.target.value)} />;
+                                        };
+
+                                        return (
+                                            <tr key={dateStr} className={`border-b ${isRedDay ? 'bg-red-50/30' : 'hover:bg-blue-50'}`}>
+                                                <td className="p-3 font-medium whitespace-nowrap">
+                                                    {dateStr}
+                                                    {holidayName && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-2">{holidayName}</span>}
+                                                </td>
+                                                <td className={`p-3 font-bold ${isRedDay ? 'text-red-500' : 'text-gray-600'}`}>
+                                                    {['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}
+                                                </td>
+                                                <td className="p-2">
+                                                    {renderInput(morningState, rec.start, 'start')}
+                                                </td>
+                                                <td className="p-2">
+                                                    {renderInput(afternoonState, rec.end, 'end')}
+                                                </td>
+                                                <td className="p-2"></td>
+                                            </tr>
+                                        ); 
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="p-4 border-t bg-gray-50 flex justify-end">
+                            <button onClick={saveAttendance} className="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex items-center gap-2"><CheckCircle size={18}/> 儲存打卡紀錄</button>
+                        </div>
+                    </div>
                 </div>
             );
         }
