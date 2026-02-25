@@ -115,6 +115,16 @@
             "分署": "bg-gray-100 text-gray-800"
         };
 
+        // 🌟 新增：預設名單與權限 (免等登入直接綁定)
+        const PREDEFINED_USERS = [
+            { email: 'kaiyu097@gmail.com', name: '凱宇', role: 'admin', initials: '宇', color: 'bg-purple-200', borderColor: '#a855f7' },
+            { email: 'n85551@gmail.com', name: '國裕', role: 'leader', initials: '裕', color: 'bg-blue-200', borderColor: '#3b82f6' },
+            { email: 'hkkwork@gmail.com', name: '湘怡', role: 'staff', initials: '湘', color: 'bg-red-200', borderColor: '#ef4444' },
+            { email: 'judyfang1226@gmail.com', name: '姿云', role: 'staff', initials: '姿', color: 'bg-green-200', borderColor: '#22c55e' },
+            { email: 'kppt1110601@gmail.com', name: '秋媚', role: 'staff', initials: '媚', color: 'bg-yellow-200', borderColor: '#eab308' },
+            { email: 'yilun1208@gmail.com', name: '怡倫', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899' }
+        ];
+
         // --- Helper: Send Mail ---
         const openMailClient = (to, subject, body) => {
             if (!to) {
@@ -221,16 +231,19 @@
                                 if (snap.exists()) {
                                     setUserData(snap.data());
                                 } else {
+                                    // 🌟 尋找是否在預設名單中
+                                    const matchedUser = PREDEFINED_USERS.find(p => p.email.toLowerCase() === (u.email || '').toLowerCase());
+                                    
                                     const newP = { 
                                         uid: u.uid, 
                                         email: u.email || '', 
-                                        name: u.displayName || '新成員', 
-                                        role: 'staff', 
-                                        initials: u.displayName ? u.displayName.slice(0, 1) : '新', 
-                                        color: 'bg-blue-200',
+                                        name: matchedUser ? matchedUser.name : (u.displayName || '新成員'), 
+                                        role: matchedUser ? matchedUser.role : 'staff', 
+                                        initials: matchedUser ? matchedUser.initials : (u.displayName ? u.displayName.slice(0, 1) : '新'), 
+                                        color: matchedUser ? matchedUser.color : 'bg-blue-200',
                                         usePhoto: !!u.photoURL,
                                         avatarUrl: u.photoURL || '',
-                                        borderColor: '#3b82f6'
+                                        borderColor: matchedUser ? matchedUser.borderColor : '#3b82f6'
                                     };
                                     await setDoc(userRef, newP);
                                     setUserData(newP);
@@ -1236,6 +1249,45 @@
                 link.click();
             };
 
+            // 🌟 新增：加入 Google 行事曆的功能
+            const addToGoogleCalendar = (dateStr, slot, title, area, note) => {
+                const d = dateStr.replace(/-/g, '');
+                let start = '';
+                let end = '';
+                
+                // 簡易時間對應 (可根據貴單位實際上下班時間微調)
+                if (slot === 'morning') {
+                    start = `${d}T090000`;
+                    end = `${d}T120000`;
+                } else if (slot === 'afternoon') {
+                    start = `${d}T133000`;
+                    end = `${d}T173000`;
+                } else {
+                    // 整天行程的格式規則：跨越到隔天
+                    start = d;
+                    const nextDay = new Date(dateStr);
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    end = nextDay.toISOString().split('T')[0].replace(/-/g, '');
+                }
+
+                const url = new URL('https://calendar.google.com/calendar/render');
+                url.searchParams.append('action', 'TEMPLATE');
+                url.searchParams.append('text', `[外勤] ${title}`);
+                
+                if (slot === 'all_day') {
+                     url.searchParams.append('dates', `${start}/${end}`);
+                } else {
+                     url.searchParams.append('dates', `${start}/${end}`);
+                     url.searchParams.append('ctz', 'Asia/Taipei'); // 指定台灣時區
+                }
+                
+                if (note) url.searchParams.append('details', note);
+                if (area) url.searchParams.append('location', area);
+
+                // 開啟新分頁前往 Google 行事曆
+                window.open(url.toString(), '_blank');
+            };
+
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
                     <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm">
@@ -1282,9 +1334,21 @@
                                              <td className="p-3 text-xs text-gray-500">{d.leave?.reason || '-'}</td>
                                              <td className="p-3 text-xs text-gray-500">{!w.isLeaveOnly ? (w.tag?.note || '-') : '-'}</td>
                                              <td className="p-3">
-                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${d.status==='缺公務單'?'bg-red-100 text-red-600':(d.status==='假別不符' || d.status==='異常公出' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600')}`}>
-                                                     {(d.status === '正常' || d.status === '內勤' || (d.leave && !['缺公務單','假別不符','異常公出'].includes(d.status))) ? '同意' : d.status}
-                                                 </span>
+                                                 <div className="flex items-center gap-2">
+                                                     <span className={`px-2 py-1 rounded text-xs font-bold ${d.status==='缺公務單'?'bg-red-100 text-red-600':(d.status==='假別不符' || d.status==='異常公出' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600')}`}>
+                                                         {(d.status === '正常' || d.status === '內勤' || (d.leave && !['缺公務單','假別不符','異常公出'].includes(d.status))) ? '同意' : d.status}
+                                                     </span>
+                                                     {/* 🌟 新增：加入行事曆按鈕 (僅限有外勤/排班項目時顯示) */}
+                                                     {!w.isLeaveOnly && w.tag && (
+                                                         <button 
+                                                            onClick={() => addToGoogleCalendar(d.date, w.slot, w.tag.item, w.tag.area, w.tag.note)}
+                                                            className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded shadow-sm flex items-center gap-1 transition-colors"
+                                                            title="將此行程加到我的 Google 行事曆"
+                                                         >
+                                                             <Calendar size={12}/> 加行事曆
+                                                         </button>
+                                                     )}
+                                                 </div>
                                              </td>
                                          </tr>
                                      ));
