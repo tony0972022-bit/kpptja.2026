@@ -228,12 +228,26 @@
                                 // Corrected path to exactly 6 segments for a document reference
                                 const userRef = doc(dbInstance, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', u.uid);
                                 const snap = await getDoc(userRef);
+                                
+                                // 🌟 尋找是否在預設名單中
+                                const matchedUser = PREDEFINED_USERS.find(p => p.email.toLowerCase() === (u.email || '').toLowerCase());
+
                                 if (snap.exists()) {
-                                    setUserData(snap.data());
+                                    let currentData = snap.data();
+                                    // 🌟 如果資料庫已有舊資料，但該用戶在預設名單內且權限/名字不符，則強制更新覆蓋 (修復提早登入的問題)
+                                    if (matchedUser && (currentData.role !== matchedUser.role || currentData.name !== matchedUser.name)) {
+                                        currentData = {
+                                            ...currentData,
+                                            role: matchedUser.role,
+                                            name: matchedUser.name,
+                                            initials: matchedUser.initials,
+                                            color: matchedUser.color,
+                                            borderColor: matchedUser.borderColor
+                                        };
+                                        await updateDoc(userRef, currentData); // 強制寫回資料庫升級
+                                    }
+                                    setUserData(currentData);
                                 } else {
-                                    // 🌟 尋找是否在預設名單中
-                                    const matchedUser = PREDEFINED_USERS.find(p => p.email.toLowerCase() === (u.email || '').toLowerCase());
-                                    
                                     const newP = { 
                                         uid: u.uid, 
                                         email: u.email || '', 
