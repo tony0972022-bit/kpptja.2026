@@ -46,7 +46,7 @@
           Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
           Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight,
           Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
-          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check
+          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo
         } from 'lucide-react';
 
         // --- Firebase 綁定設定 (已寫死) ---
@@ -260,8 +260,9 @@
                                         needsUpdate = true;
                                     }
 
-                                    if (matchedUser && (currentData.role !== matchedUser.role || currentData.name !== matchedUser.name)) {
-                                        currentData = { ...currentData, role: matchedUser.role, name: matchedUser.name, initials: matchedUser.initials, color: matchedUser.color, borderColor: matchedUser.borderColor };
+                                    // 修正 Bug 4：移除強制覆蓋權限的邏輯，以資料庫實際儲存的為準
+                                    if (matchedUser && (!currentData.name)) {
+                                        currentData = { ...currentData, name: matchedUser.name, initials: matchedUser.initials, color: matchedUser.color, borderColor: matchedUser.borderColor };
                                         needsUpdate = true;
                                     }
 
@@ -384,6 +385,10 @@
                   const newTypes = leaveTypes.filter(t => t.id !== val);
                   setLeaveTypes(newTypes);
                   localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
+              } else if (action === 'update' && val) {
+                  const newTypes = leaveTypes.map(t => t.id === val.id ? val : t);
+                  setLeaveTypes(newTypes);
+                  localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
               }
           }
 
@@ -407,7 +412,8 @@
                   toDel.forEach(e => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events', e.id)));
               },
               createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
-              updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() })
+              updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
+              deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id))
           };
 
           if (loading) return (
@@ -491,6 +497,7 @@
                     {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'},
                     ...(userData.role === 'admin' ? [{id:'management', icon:<List size={20}/>, label:'項目管理'}] : []),
                     ...(userData.role === 'admin' ? [{id:'members', icon:<Users size={20}/>, label:'成員管理'}] : []),
+                    ...(userData.role === 'admin' ? [{id:'database', icon:<Database size={20}/>, label:'資料庫管理'}] : []),
                     ...(userData.role === 'admin' ? [{id:'settings', icon:<Settings size={20}/>, label:'系統設定'}] : [])
                   ].map(item => (
                     <button 
@@ -544,9 +551,9 @@
                   {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
-                  {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} />}
-                  {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} />}
+                  {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
+                  {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
@@ -558,29 +565,43 @@
         // --- Sub-Components ---
 
         function Dashboard({ user, leaves, calendarEvents, setView }) {
+          const [weeksToShow, setWeeksToShow] = useState(1);
           const today = new Date();
           const weekDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
           
-          const pendingCount = leaves.filter(l => l.status !== 'approved' && l.status !== 'rejected').length;
+          const pendingCount = leaves.filter(l => l.status === 'pending' || l.status === 'deputy_signed').length;
+          const myPendingCount = leaves.filter(l => (l.requesterId === user.uid || l.requesterId === user.docId) && (l.status === 'pending' || l.status === 'deputy_signed')).length;
           
           const todayStr = today.toISOString().split('T')[0];
-          const todayLeaves = leaves.filter(l => l.start.startsWith(todayStr) && l.status === 'approved').length;
-          const todayExternal = new Set(
-              calendarEvents.filter(e => e.date === todayStr && e.type === 'person')
-              .filter(p => {
-                  const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
-                  return tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item);
-              })
-              .map(p => p.userName)
-          ).size;
+          
+          // 取得今日請假詳細名單
+          const todayLeavesDetails = leaves.filter(l => l.start.startsWith(todayStr) && l.status === 'approved').map(l => {
+              const timeStr = l.hours >= 8 ? '整天' : (l.start.includes('T08') || l.start.includes('T09') ? '上午' : '下午');
+              return `${l.requesterName}(${timeStr})`;
+          });
+
+          // 取得今日外勤詳細名單
+          const todayExternalDetails = [];
+          calendarEvents.filter(e => e.date === todayStr && e.type === 'person').forEach(p => {
+              const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
+              if (tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item)) {
+                  const s = p.slot === 'morning' ? '上午' : (p.slot === 'afternoon' ? '下午' : '整天');
+                  todayExternalDetails.push(`${p.userName}(${s})`);
+              }
+          });
+          const uniqueExternalDetails = [...new Set(todayExternalDetails)];
 
           const getWeekData = () => {
               const start = new Date(today);
               start.setDate(today.getDate() - today.getDay() + 1); 
               const week = [];
-              for(let i=0; i<5; i++) {
+              const totalDays = weeksToShow * 7;
+              
+              for(let i=0; i<totalDays; i++) {
                   const d = new Date(start);
                   d.setDate(start.getDate() + i);
+                  if (d.getDay() === 0 || d.getDay() === 6) continue; // 略過六日
+
                   const dStr = d.toISOString().split('T')[0];
                   
                   const externalPeople = { morning: [], afternoon: [], all_day: [] };
@@ -588,11 +609,13 @@
                       const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
                       if (tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item)) {
                           const s = p.slot || 'all_day';
-                          if(externalPeople[s]) externalPeople[s].push(p.userAvatar); 
+                          if(externalPeople[s] && !externalPeople[s].includes(p.userName)) {
+                              externalPeople[s].push(p.userName); 
+                          }
                       }
                   });
                   
-                  week.push({ day: weekDays[i+1], date: dStr, external: externalPeople });
+                  week.push({ day: weekDays[d.getDay()], date: dStr, external: externalPeople });
               }
               return week;
           };
@@ -618,53 +641,87 @@
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500 h-full flex flex-col">
                     <h3 className="text-gray-500 text-sm font-medium">今日外勤</h3>
-                    <span className="text-2xl font-bold text-blue-700 block mt-1">{todayExternal} 人</span>
+                    <span className="text-2xl font-bold text-blue-700 block mt-1 mb-2">{uniqueExternalDetails.length} 人</span>
+                    <div className="text-xs text-gray-500 mt-auto flex flex-wrap gap-1">
+                        {uniqueExternalDetails.length > 0 ? uniqueExternalDetails.map((detail, i) => <span key={i} className="bg-blue-50 px-1.5 py-0.5 rounded border">{detail}</span>) : '無排定外勤'}
+                    </div>
                   </div>
-                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500">
+                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500 h-full flex flex-col">
                     <h3 className="text-gray-500 text-sm font-medium">今日請假</h3>
-                    <span className="text-2xl font-bold text-green-700 block mt-1">{todayLeaves} 人</span>
+                    <span className="text-2xl font-bold text-green-700 block mt-1 mb-2">{todayLeavesDetails.length} 人</span>
+                    <div className="text-xs text-gray-500 mt-auto flex flex-wrap gap-1">
+                        {todayLeavesDetails.length > 0 ? todayLeavesDetails.map((detail, i) => <span key={i} className="bg-green-50 px-1.5 py-0.5 rounded border">{detail}</span>) : '全體出勤'}
+                    </div>
+                  </div>
+                  <div 
+                    onClick={() => setView('personal')}
+                    className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-purple-500 cursor-pointer hover:bg-purple-50 transition h-full flex flex-col"
+                  >
+                    <h3 className="text-gray-500 text-sm font-medium flex items-center justify-between">
+                        我的請假進度 <ArrowRight size={16}/>
+                    </h3>
+                    <span className="text-2xl font-bold text-purple-600 block mt-1 mb-1">{myPendingCount} 筆</span>
+                    <span className="text-xs text-gray-500 mt-auto">審核中尚未核准</span>
                   </div>
                   <div 
                     onClick={() => setView('approval')}
-                    className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-orange-500 cursor-pointer hover:bg-orange-50 transition"
+                    className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-orange-500 cursor-pointer hover:bg-orange-50 transition h-full flex flex-col"
                   >
                     <h3 className="text-gray-500 text-sm font-medium flex items-center justify-between">
-                        待審核 <ArrowRight size={16}/>
+                        需我審核的差單 <ArrowRight size={16}/>
                     </h3>
-                    <span className="text-2xl font-bold text-orange-600 block mt-1">{pendingCount} 筆</span>
+                    <span className="text-2xl font-bold text-orange-600 block mt-1 mb-1">{pendingCount} 筆</span>
+                    <span className="text-xs text-gray-500 mt-auto">等待簽核處理</span>
                   </div>
               </div>
 
               <div className="bg-white rounded-lg shadow-sm border p-4">
-                  <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Briefcase size={18}/> 本週外勤概況</h3>
-                  <div className="overflow-x-auto">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-bold text-gray-700 flex items-center gap-2"><Briefcase size={18}/> 外勤排班概況</h3>
+                      <select 
+                          className="border border-gray-300 rounded px-2 py-1 text-sm bg-gray-50 outline-none"
+                          value={weeksToShow}
+                          onChange={(e) => setWeeksToShow(Number(e.target.value))}
+                      >
+                          <option value={1}>本週</option>
+                          <option value={2}>未來 2 週</option>
+                          <option value={4}>未來 4 週</option>
+                      </select>
+                  </div>
+                  <div className="overflow-x-auto max-h-[400px]">
                       <table className="w-full text-xs text-left">
-                          <thead>
+                          <thead className="sticky top-0 bg-white z-10 shadow-sm">
                               <tr className="bg-gray-50 border-b text-gray-500">
-                                  <th className="p-2 w-16">日期</th>
+                                  <th className="p-2 w-20">日期</th>
                                   <th className="p-2">上午</th>
                                   <th className="p-2">下午</th>
                                   <th className="p-2">整天</th>
                               </tr>
                           </thead>
                           <tbody>
-                              {weekData.map((d, idx) => (
-                                  <tr key={idx} className="border-b last:border-0">
-                                      <td className="p-2 font-bold text-gray-600">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td>
-                                      <td className="p-2">
-                                          <div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 rounded">{n}</span>) : '-'}</div>
-                                      </td>
-                                      <td className="p-2">
-                                          <div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 rounded">{n}</span>) : '-'}</div>
-                                      </td>
-                                      <td className="p-2">
-                                          <div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 rounded">{n}</span>) : '-'}</div>
-                                      </td>
-                                  </tr>
-                              ))}
+                              {weekData.map((d, idx) => {
+                                  // 判斷是否為新的一週的開始 (週一)
+                                  const isMonday = d.day === '週一';
+                                  return (
+                                  <React.Fragment key={idx}>
+                                      {isMonday && idx !== 0 && <tr><td colSpan="4" className="bg-gray-100/50 py-1"></td></tr>}
+                                      <tr className={`border-b last:border-0 hover:bg-gray-50 transition ${isMonday ? 'border-t-2 border-t-gray-200' : ''}`}>
+                                          <td className="p-2 font-bold text-gray-600 whitespace-nowrap">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td>
+                                          <td className="p-2">
+                                              <div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div>
+                                          </td>
+                                          <td className="p-2">
+                                              <div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div>
+                                          </td>
+                                          <td className="p-2">
+                                              <div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div>
+                                          </td>
+                                      </tr>
+                                  </React.Fragment>
+                              )})}
                           </tbody>
                       </table>
                   </div>
@@ -1213,7 +1270,7 @@
             );
         }
 
-        function PersonalScheduleView({ user, events, leaves, settings, leaveTypes }) {
+        function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud }) {
             const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
             const [leaveFilter, setLeaveFilter] = useState('all');
             const [selectedIds, setSelectedIds] = useState([]);
@@ -1276,7 +1333,8 @@
                             reason: d.leave?.reason || '-',
                             note: w.isLeaveOnly ? '-' : (w.tag?.note || '-'),
                             status: d.status,
-                            rawTag: w.tag
+                            rawTag: w.tag,
+                            rawLeave: d.leave
                         });
                     });
                 });
@@ -1360,6 +1418,17 @@
                 link.click();
             };
 
+            const handleRecallLeave = async (leaveId) => {
+                if(confirm("確定要撤回/刪除這筆請假單嗎？\n(撤回後，若日曆有排班，系統會再次提醒您重新送單)")) {
+                    try {
+                        await crud.deleteLeave(leaveId);
+                        alert("假單已成功撤回！");
+                    } catch (e) {
+                        alert("撤回失敗: " + e.message);
+                    }
+                }
+            };
+
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
@@ -1402,10 +1471,13 @@
                                     <th className="p-3 w-32">事由</th>
                                     <th className="p-3 w-32">備註</th>
                                     <th className="p-3 w-28">狀態</th>
+                                    <th className="p-3 w-20 text-center">操作</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredRows.map((r) => (
+                                {filteredRows.map((r) => {
+                                    const canRecall = r.rawLeave && (r.rawLeave.status === 'pending' || r.rawLeave.status === 'rejected');
+                                    return (
                                     <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 transition ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
                                         <td className="p-3 text-center">
                                             <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
@@ -1436,9 +1508,20 @@
                                                 {r.status}
                                             </span>
                                         </td>
+                                        <td className="p-3 text-center">
+                                            {canRecall && (
+                                                <button 
+                                                    onClick={() => handleRecallLeave(r.rawLeave.id)}
+                                                    className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition flex items-center gap-1 mx-auto"
+                                                    title="撤回未核准的單據"
+                                                >
+                                                    <Undo size={12}/> 撤回
+                                                </button>
+                                            )}
+                                        </td>
                                     </tr>
-                                ))}
-                                {filteredRows.length === 0 && <tr><td colSpan="10" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}
+                                )})}
+                                {filteredRows.length === 0 && <tr><td colSpan="11" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -2212,6 +2295,7 @@
         function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
             const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
             const [newLeave, setNewLeave] = useState({ name: '', category: 'personal', desc: '' });
+            const [editLeaveId, setEditLeaveId] = useState(null);
             const [newArea, setNewArea] = useState(''); 
             const [localRoleNames, setLocalRoleNames] = useState(roleNames);
             const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
@@ -2234,8 +2318,19 @@
 
             const handleAddLeave = () => {
                 if(!newLeave.name) return alert("請輸入假別名稱");
-                handleManageLeaveTypes('add', newLeave);
+                if(editLeaveId) {
+                    handleManageLeaveTypes('update', { ...newLeave, id: editLeaveId });
+                    setEditLeaveId(null);
+                } else {
+                    handleManageLeaveTypes('add', newLeave);
+                }
                 setNewLeave({ name: '', category: 'personal', desc: '' });
+            }
+
+            const startEditLeave = (type) => {
+                setEditLeaveId(type.id);
+                setNewLeave({ name: type.name, category: type.category, desc: type.desc || '' });
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             }
 
             const handleSaveSettings = () => {
@@ -2260,20 +2355,12 @@
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label>
-                                <input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} />
-                            </div>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p>
-                    </div>
-
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
-                    
-                    <div className="bg-white p-6 rounded shadow-sm">
-                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 說明 (區段分類)</h2>
-                        
-                        {/* 新增假別表單 */}
-                        <div className="bg-gray-50 border rounded-lg p-4 mb-6">
-                            <h3 className="text-sm font-bold text-gray-700 mb-3">新增假別</h3>
+                        {/* 新增/修改假別表單 */}
+                        <div className={`border rounded-lg p-4 mb-6 transition-colors ${editLeaveId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
+                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between">
+                                <span>{editLeaveId ? '修改假別' : '新增假別'}</span>
+                                {editLeaveId && <button onClick={()=>{setEditLeaveId(null); setNewLeave({name:'', category:'personal', desc:''});}} className="text-xs text-gray-500 hover:text-gray-800 underline">取消編輯</button>}
+                            </h3>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                                 <div className="md:col-span-1">
                                     <select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newLeave.category} onChange={e=>setNewLeave({...newLeave, category: e.target.value})}>
@@ -2282,11 +2369,13 @@
                                     </select>
                                 </div>
                                 <div className="md:col-span-1">
-                                    <input className="border rounded px-3 py-2 text-sm w-full" placeholder="假別名稱 (例: 特休)" value={newLeave.name} onChange={e=>setNewLeave({...newLeave, name: e.target.value})} />
+                                    <input className="border rounded px-3 py-2 text-sm w-full bg-white" placeholder="假別名稱 (例: 特休)" value={newLeave.name} onChange={e=>setNewLeave({...newLeave, name: e.target.value})} />
                                 </div>
                                 <div className="md:col-span-2 flex gap-2">
-                                    <input className="border rounded px-3 py-2 text-sm flex-1" placeholder="勞基法說明 (例: 有薪，依年資給予)" value={newLeave.desc} onChange={e=>setNewLeave({...newLeave, desc: e.target.value})} />
-                                    <button onClick={handleAddLeave} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold shrink-0">新增</button>
+                                    <input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="勞基法說明 (例: 有薪，依年資給予)" value={newLeave.desc} onChange={e=>setNewLeave({...newLeave, desc: e.target.value})} />
+                                    <button onClick={handleAddLeave} className={`${editLeaveId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>
+                                        {editLeaveId ? '儲存修改' : '新增'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2297,12 +2386,15 @@
                                 <h3 className="text-sm font-bold text-indigo-700 mb-2 border-b pb-1">區段一：公務與加班</h3>
                                 <div className="flex flex-col gap-2">
                                     {leaveTypes.filter(t=>t.category==='official').map(t => (
-                                        <div key={t.id} className="flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-indigo-300">
+                                        <div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-indigo-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}>
                                             <div>
                                                 <span className="font-bold text-gray-800 inline-block w-24">{t.name}</span>
                                                 <span className="text-gray-500 text-xs">{t.desc}</span>
                                             </div>
-                                            <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-300 hover:text-red-500 p-1"><X size={16}/></button>
+                                            <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                                <button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button>
+                                                <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -2311,12 +2403,15 @@
                                 <h3 className="text-sm font-bold text-orange-700 mb-2 border-b pb-1 mt-4">區段二：私假 (依法令給假)</h3>
                                 <div className="flex flex-col gap-2">
                                     {leaveTypes.filter(t=>t.category==='personal').map(t => (
-                                        <div key={t.id} className="flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-orange-300">
+                                        <div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-orange-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}>
                                             <div>
                                                 <span className="font-bold text-gray-800 inline-block w-24">{t.name}</span>
                                                 <span className="text-gray-500 text-xs">{t.desc}</span>
                                             </div>
-                                            <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-300 hover:text-red-500 p-1"><X size={16}/></button>
+                                            <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                                <button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button>
+                                                <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -2374,6 +2469,192 @@
                                 )}
                                 <span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span>
                             </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 新增：資料庫管理元件 (僅管理員可用) ---
+        function DatabaseAdminView({ events, leaves, crud, db }) {
+            const [activeTab, setActiveTab] = useState('events');
+            const [selectedEvents, setSelectedEvents] = useState([]);
+            const [selectedLeaves, setSelectedLeaves] = useState([]);
+            const [isProcessing, setIsProcessing] = useState(false);
+
+            // 分組事件 (依據 groupId) 以便顯示，因為日曆事件是多筆 record 組成一個群組
+            const eventGroups = useMemo(() => {
+                const groups = {};
+                events.forEach(e => {
+                    if (!groups[e.groupId]) groups[e.groupId] = { id: e.groupId, date: e.date, type: '', items: [] };
+                    if (e.type === 'tag') {
+                        groups[e.groupId].type = e.item;
+                        groups[e.groupId].date = e.date;
+                    } else if (e.type === 'person') {
+                        groups[e.groupId].items.push(e.userName);
+                    }
+                });
+                return Object.values(groups).sort((a, b) => new Date(b.date) - new Date(a.date));
+            }, [events]);
+
+            const sortedLeaves = [...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start));
+
+            const handleToggleEvent = (id) => {
+                setSelectedEvents(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+            };
+
+            const handleToggleLeave = (id) => {
+                setSelectedLeaves(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+            };
+
+            const toggleAllEvents = () => {
+                if (selectedEvents.length === eventGroups.length) setSelectedEvents([]);
+                else setSelectedEvents(eventGroups.map(g => g.id));
+            };
+
+            const toggleAllLeaves = () => {
+                if (selectedLeaves.length === leaves.length) setSelectedLeaves([]);
+                else setSelectedLeaves(leaves.map(l => l.id));
+            };
+
+            const handleDeleteSelected = async () => {
+                const targetIds = activeTab === 'events' ? selectedEvents : selectedLeaves;
+                if (targetIds.length === 0) return alert("請先勾選要刪除的資料！");
+                
+                if (!confirm(`警告！您即將刪除 ${targetIds.length} 筆資料。\n刪除後無法復原，確定要繼續嗎？`)) return;
+
+                setIsProcessing(true);
+                try {
+                    if (activeTab === 'events') {
+                        // 刪除群組內的每一筆 event (tag 加上 persons)
+                        for (const gid of targetIds) {
+                            await crud.deleteEventsByGroup(gid);
+                        }
+                        setSelectedEvents([]);
+                    } else {
+                        // 刪除假單
+                        for (const lid of targetIds) {
+                            await crud.deleteLeave(lid);
+                        }
+                        setSelectedLeaves([]);
+                    }
+                    alert("選擇的資料已成功刪除！");
+                } catch (e) {
+                    alert("刪除過程中發生錯誤：" + e.message);
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+
+            return (
+                <div className="max-w-5xl mx-auto space-y-6">
+                    <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                        <h2 className="text-xl font-bold flex items-center gap-2 text-red-600">
+                            <Database /> 資料庫清理與管理
+                        </h2>
+                        <div className="bg-gray-100 p-1 rounded-lg flex text-sm">
+                            <button 
+                                onClick={() => {setActiveTab('events'); setSelectedEvents([]);}} 
+                                className={`px-4 py-2 rounded font-bold transition ${activeTab === 'events' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+                            >
+                                📅 排班紀錄 ({eventGroups.length})
+                            </button>
+                            <button 
+                                onClick={() => {setActiveTab('leaves'); setSelectedLeaves([]);}} 
+                                className={`px-4 py-2 rounded font-bold transition ${activeTab === 'leaves' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+                            >
+                                📋 假單紀錄 ({leaves.length})
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-start gap-3">
+                        <AlertTriangle className="shrink-0 mt-0.5" size={20} />
+                        <div className="text-sm">
+                            <strong>管理員專用功能：</strong> 在此刪除的資料將會從雲端資料庫永久抹除，請謹慎使用。建議僅用於清理測試資料或無效的歷史紀錄。
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded shadow-sm border overflow-hidden">
+                        <div className="p-3 bg-gray-50 border-b flex justify-between items-center">
+                            <span className="text-sm font-bold text-gray-600">
+                                已選取 {activeTab === 'events' ? selectedEvents.length : selectedLeaves.length} 項目
+                            </span>
+                            <button 
+                                onClick={handleDeleteSelected}
+                                disabled={isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0)}
+                                className={`bg-red-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 transition ${isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700'}`}
+                            >
+                                {isProcessing ? <><Loader2 size={16} className="animate-spin" /> 刪除中...</> : <><Trash2 size={16} /> 批次刪除勾選項目</>}
+                            </button>
+                        </div>
+                        
+                        <div className="overflow-x-auto max-h-[60vh]">
+                            {activeTab === 'events' ? (
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm">
+                                        <tr>
+                                            <th className="p-3 w-12 text-center">
+                                                <input type="checkbox" onChange={toggleAllEvents} checked={eventGroups.length > 0 && selectedEvents.length === eventGroups.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" />
+                                            </th>
+                                            <th className="p-3 w-32">日期</th>
+                                            <th className="p-3 w-40">工作項目</th>
+                                            <th className="p-3">排班人員</th>
+                                            <th className="p-3 w-40 text-xs text-gray-400">群組 ID</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {eventGroups.map(g => (
+                                            <tr key={g.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedEvents.includes(g.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleEvent(g.id)}>
+                                                <td className="p-3 text-center" onClick={e=>e.stopPropagation()}>
+                                                    <input type="checkbox" checked={selectedEvents.includes(g.id)} onChange={() => handleToggleEvent(g.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" />
+                                                </td>
+                                                <td className="p-3 font-medium">{g.date}</td>
+                                                <td className="p-3 text-blue-700 font-bold">{g.type || '無標籤'}</td>
+                                                <td className="p-3 flex gap-1 flex-wrap">
+                                                    {g.items.length > 0 ? g.items.map((n, i) => <span key={i} className="bg-gray-200 px-2 py-0.5 rounded-full text-xs">{n}</span>) : '-'}
+                                                </td>
+                                                <td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={g.id}>{g.id}</td>
+                                            </tr>
+                                        ))}
+                                        {eventGroups.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-400">目前沒有排班紀錄。</td></tr>}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm">
+                                        <tr>
+                                            <th className="p-3 w-12 text-center">
+                                                <input type="checkbox" onChange={toggleAllLeaves} checked={leaves.length > 0 && selectedLeaves.length === leaves.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" />
+                                            </th>
+                                            <th className="p-3 w-24">申請人</th>
+                                            <th className="p-3 w-24">假別</th>
+                                            <th className="p-3">時間區間</th>
+                                            <th className="p-3 w-20">狀態</th>
+                                            <th className="p-3 w-40 text-xs text-gray-400">紀錄 ID</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {sortedLeaves.map(l => (
+                                            <tr key={l.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedLeaves.includes(l.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleLeave(l.id)}>
+                                                <td className="p-3 text-center" onClick={e=>e.stopPropagation()}>
+                                                    <input type="checkbox" checked={selectedLeaves.includes(l.id)} onChange={() => handleToggleLeave(l.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" />
+                                                </td>
+                                                <td className="p-3 font-medium text-gray-800">{l.requesterName}</td>
+                                                <td className="p-3 font-bold text-indigo-600">{l.type}</td>
+                                                <td className="p-3 text-xs text-gray-600">{l.start.replace('T', ' ')} ~ {l.end.replace('T', ' ')} <br/>({l.hours} 小時)</td>
+                                                <td className="p-3">
+                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'approved' ? 'bg-green-100 text-green-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                        {l.status}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={l.id}>{l.id}</td>
+                                            </tr>
+                                        ))}
+                                        {sortedLeaves.length === 0 && <tr><td colSpan="6" className="p-8 text-center text-gray-400">目前沒有假單紀錄。</td></tr>}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 </div>
