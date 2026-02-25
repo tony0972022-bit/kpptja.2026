@@ -88,14 +88,15 @@
             admin: '管理員'
         };
 
-        const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出"];
-        const DEFAULT_WORK_TAGS = ["審查會", "訪視", "成效", "試用", "OFF", "專案報告", "大宗案件", "月報"];
+        // 🌟 更新：將「專案報告」、「大宗」也加入外勤判斷清單，這樣才會觸發第一區塊的請假提醒！
+        const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出", "專案報告", "大宗"];
+        const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "OFF", "專案報告", "大宗", "月報"];
         const DEFAULT_AREA_TAGS = ["高雄", "澎湖", "台東", "屏東", "就業通", "訓就", "分署"];
 
         const DEFAULT_ROTATION_RULES = [
           { id: 'visit', name: '澎東訪視', matchTag: '訪視', order: ['高湘怡', '黃國裕', '方姿云', '陳秋媚', '蔡凱宇', '盧怡倫'] },
           { id: 'project', name: '專案報告', matchTag: '專案報告', order: ['盧怡倫', '高湘怡', '黃國裕', '方姿云', '蔡凱宇', '陳秋媚'] },
-          { id: 'large', name: '大宗案件', matchTag: '大宗案件', order: ['高湘怡', '黃國裕', '盧怡倫', '陳秋媚', '蔡凱宇', '方姿云'] },
+          { id: 'large', name: '大宗', matchTag: '大宗', order: ['高湘怡', '黃國裕', '盧怡倫', '陳秋媚', '蔡凱宇', '方姿云'] },
           { id: 'monthly', name: '月報', matchTag: '月報', order: ['陳秋媚', '蔡凱宇', '方姿云', '盧怡倫', '高湘怡'] },
         ];
 
@@ -1427,13 +1428,16 @@
           // 自行請假表單狀態
           const [form, setForm] = useState({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
-          const [preciseTime, setPreciseTime] = useState(false); 
           const [isSubmitting, setIsSubmitting] = useState(false);
           const [submittingTaskId, setSubmittingTaskId] = useState(null);
 
           // 🌟 核心新增：智慧尋找尚未填寫差單的排班任務
           const pendingExternalTasks = useMemo(() => {
-              const todayStr = new Date().toISOString().split('T')[0];
+              // 修正時區問題，確保拿到正確的台灣本地日期
+              const today = new Date();
+              const tzOffset = today.getTimezoneOffset() * 60000;
+              const todayStr = (new Date(today - tzOffset)).toISOString().slice(0, 10);
+              
               const groups = {};
               
               events.forEach(e => {
@@ -1454,7 +1458,7 @@
                   if (!isMe) return;
 
                   const d = g.tag.date; 
-                  // 根據上下午設定建議的時間區間
+                  // 🌟 根據您要求設定的時間區間：整天(08:00-17:00)、上午(08:00-12:00)、下午(13:00-17:00)
                   let startTime = `${d}T08:00`;
                   let endTime = `${d}T17:00`;
                   if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
@@ -1562,9 +1566,6 @@
                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
                    <div className="flex justify-between items-center mb-6 border-b pb-4">
                        <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：自行請假 (特休/病假/事假)</h2>
-                       <button onClick={()=>setPreciseTime(!preciseTime)} className="text-xs text-blue-600 border border-blue-200 px-3 py-1.5 rounded-full hover:bg-blue-50 transition font-medium">
-                           {preciseTime ? "切換為 30分 級距" : "切換為精確時間"}
-                       </button>
                    </div>
                    
                    <form onSubmit={handleManualSubmit} className="space-y-5">
@@ -1577,11 +1578,11 @@
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                            <div>
                                <label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label>
-                               <input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/>
+                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/>
                            </div>
                            <div>
                                <label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label>
-                               <input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/>
+                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/>
                            </div>
                        </div>
                        <div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div>
@@ -2117,7 +2118,7 @@
                     <div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center">
                         <div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div>
                         <h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1>
-                        <p className="text-gray-400 text-sm mb-8">企業內部專用版本</p>
+                        <p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p>
                         
                         <div className="space-y-4">
                             <button 
