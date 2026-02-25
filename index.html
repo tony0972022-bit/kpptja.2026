@@ -78,14 +78,11 @@
         };
 
         const DEFAULT_LEAVE_TYPES = [
-          // 區段一：公務/加班
           { id: 'l1', name: "出差", category: "official", desc: "處理公務" },
           { id: 'l2', name: "公出", category: "official", desc: "短暫外出洽公" },
           { id: 'l3', name: "公假", category: "official", desc: "依法令規定給予之公假" },
-          // 拆分加班申請
           { id: 'l4_1', name: "加班申請(列計)", category: "official", desc: "延長工時，可累積補休時數" },
           { id: 'l4_2', name: "加班申請(不列計)", category: "official", desc: "延長工時，不累積補休" },
-          // 區段二：私假 (依據勞基法等相關規定)
           { id: 'l5', name: "特休(休假)", category: "personal", desc: "有薪，依年資給予" },
           { id: 'l6', name: "事假", category: "personal", desc: "無薪，一年最多14天" },
           { id: 'l7', name: "病假", category: "personal", desc: "半薪，未住院一年最多30天" },
@@ -884,7 +881,7 @@
               };
               const renderLeaves = () => {
                   const leavesOnDay = leaves.filter(l => 
-                      l.status !== 'rejected' && 
+                      l.status !== 'rejected' && l.status !== 'withdrawn' && 
                       dStr >= l.start.split('T')[0] && 
                       dStr <= l.end.split('T')[0] &&
                       !["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)", "榮譽假(獲得)"].includes(l.type)
@@ -1036,11 +1033,11 @@
                     const dateStr = `${month}-${String(i).padStart(2,'0')}`;
                     const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && e.userName === user.name).map(p => { const tag = events.find(t => t.groupId === p.groupId && t.type === 'tag'); return { ...p, tag }; });
                     
-                    // 修正：嚴格限制為「我自己的假單」，避免與我擔任職代的假單混淆
+                    // 修正：嚴格限制為「我自己的假單」，過濾已撤銷與已退回的，使空出日曆
                     const myLeave = leaves.find(l => 
                         (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
                         l.start.startsWith(dateStr) && 
-                        l.status !== 'rejected'
+                        l.status !== 'rejected' && l.status !== 'withdrawn'
                     ); 
                     
                     let status = '正常';
@@ -1055,7 +1052,6 @@
                         if (myLeave.status === 'pending') status = '待職代審查中';
                         else if (myLeave.status === 'deputy_signed') status = '組長審查中';
                         else if (myLeave.status === 'approved') status = '已核准';
-                        else if (myLeave.status === 'rejected') status = '已駁回';
                     }
                     else if (myWork.length > 0) status = '內勤';
                     else status = '無行程';
@@ -1146,7 +1142,7 @@
             };
             
             const handleRecallLeave = async (leaveId) => {
-                if(confirm("確定要撤回/刪除這筆請假單嗎？\n(撤回後，若日曆有外勤排班，系統會自動在「請假申請」頁面再次提醒您重新送單！)")) {
+                if(confirm("確定要撤回/刪除這筆尚未核准的請假單嗎？\n(撤回後，若日曆有外勤排班，系統會自動在「請假申請」頁面再次提醒您重新送單！)")) {
                     try { await crud.deleteLeave(leaveId); alert("假單已成功撤回！"); } catch (e) { alert("撤回失敗: " + e.message); }
                 }
             };
@@ -1208,12 +1204,12 @@
                                                 <td className="p-4 text-sm text-gray-600 max-w-[150px] truncate" title={r.reason}>{r.reason}</td>
                                                 <td className="p-4 text-sm text-gray-500 max-w-[150px] truncate" title={r.note}>{r.note}</td>
                                                 <td className="p-4">
-                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                                         {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}
                                                     </span>
                                                 </td>
                                                 <td className="p-4 text-center">
-                                                    {canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 mx-auto shadow-sm" title="撤回未核准的單據"><Undo size={14}/> 撤回</button>)}
+                                                    {canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 mx-auto shadow-sm" title="撤回尚未核准的單據"><Undo size={14}/> 撤回</button>)}
                                                 </td>
                                             </tr>
                                         ) 
@@ -1294,9 +1290,11 @@
                   let endTime = `${d}T17:00`;
                   if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
                   else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
+                  
+                  // 過濾掉已被退回與已撤銷的假單，允許重送
                   const hasLeave = leaves.some(l => 
                       (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
-                      l.start.startsWith(d) && l.status !== 'rejected'
+                      l.start.startsWith(d) && l.status !== 'rejected' && l.status !== 'withdrawn'
                   );
                   if (!hasLeave) {
                       // 將陣列轄區轉成字串帶入事由
@@ -1358,7 +1356,7 @@
           };
           
           const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
-          const busyIds = leaves.filter(l=>l.status!=='rejected' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
+          const busyIds = leaves.filter(l=>l.status!=='rejected' && l.status!=='withdrawn' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
           
           return (<div className="max-w-3xl mx-auto space-y-8">{pendingExternalTasks.length > 0 && (<div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-6 shadow-md"><h3 className="font-black text-indigo-800 mb-4 flex items-center gap-2 text-lg"><AlertCircle size={22}/> 第一區塊：差勤申請 (您有排定的日曆行程)</h3><div className="space-y-4">{pendingExternalTasks.map(task => (<PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>))}</div></div>)}<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200"><div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2></div><form onSubmit={handleManualSubmit} className="space-y-5"><div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}><optgroup label="區段二：私假 (依法令給假)">{personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="區段一：公務與加班">{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>{currentTypeDesc && (<div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>)}</div>
@@ -1403,18 +1401,229 @@
         function ApprovalView({ leaves, currentUser, crud, users }) {
           const [processingId, setProcessingId] = useState(null);
           const [showAllLeaves, setShowAllLeaves] = useState(false);
-          const exportCSV = () => { let csv = "\uFEFF申請人,假別,開始,結束,時數,狀態\n"; leaves.forEach(l => csv += `${l.requesterName},${l.type},${l.start},${l.end},${l.hours},${l.status}\n`); const link = document.createElement("a"); link.href = encodeURI("data:text/csv;charset=utf-8,"+csv); link.download = "leave_report.csv"; link.click(); };
+          
+          // 撤簽 與 修改 Modal 控制狀態
+          const [recallModal, setRecallModal] = useState({ open: false, leave: null, reason: '' });
+          const [adminEditModal, setAdminEditModal] = useState({ open: false, leave: null, hours: '', status: '' });
+
+          const exportCSV = () => { 
+              let csv = "\uFEFF申請人,假別,職代,開始日期,開始時間,結束日期,結束時間,時數,狀態,備註(撤簽原因)\n"; 
+              leaves.forEach(l => {
+                  const d1 = l.start.split('T')[0];
+                  const t1 = l.start.split('T')[1] || '';
+                  const d2 = l.end.split('T')[0];
+                  const t2 = l.end.split('T')[1] || '';
+                  const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId)?.name || '未知') : '-';
+                  csv += `${l.requesterName},${l.type},${deputyName},${d1},${t1},${d2},${t2},${l.hours},${l.status},${l.recallReason || ''}\n`
+              }); 
+              const link = document.createElement("a"); 
+              link.href = encodeURI("data:text/csv;charset=utf-8,"+csv); 
+              link.download = "全團隊請假紀錄.csv"; 
+              link.click(); 
+          };
+          
           const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === (currentUser.email || '').toLowerCase() || l.deputyId === currentUser.docId) && l.status === 'pending');
           const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
+          
           const handleDeputyAgree = async (leave) => { if (processingId) return; setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'deputy_signed' }); } catch(e) { alert("操作失敗"); } finally { setProcessingId(null); } };
           const handleLeaderApprove = async (leave) => { if (processingId) return; setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid }); } catch(e) { alert("操作失敗"); } finally { setProcessingId(null); } };
           const handleReject = async (leave) => { if (processingId) return; setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'rejected', approverId: currentUser.uid }); } catch(e) { alert("操作失敗"); } finally { setProcessingId(null); } }
+          
+          // 一般人員撤簽 (針對已核准假單)
+          const confirmRecall = async () => {
+              if(!recallModal.reason.trim()) { alert("請填寫撤簽原因！讓主管了解狀況。"); return; }
+              setProcessingId(recallModal.leave.id);
+              try {
+                  await crud.updateLeave(recallModal.leave.id, { 
+                      status: 'withdrawn', 
+                      recallReason: recallModal.reason,
+                      note: (recallModal.leave.note ? recallModal.leave.note + ' | ' : '') + `[撤簽] ${recallModal.reason}`
+                  });
+                  alert("已成功撤銷假單！日曆上該時段已空出，請至「請假申請」重新送單。");
+                  setRecallModal({ open: false, leave: null, reason: '' });
+              } catch(e) { alert("操作失敗"); }
+              setProcessingId(null);
+          };
+
+          // 管理員修改
+          const confirmAdminEdit = async () => {
+              if(!adminEditModal.hours || isNaN(adminEditModal.hours)) { alert("請填寫正確的時數！"); return; }
+              setProcessingId(adminEditModal.leave.id);
+              try {
+                  await crud.updateLeave(adminEditModal.leave.id, { 
+                      hours: Number(adminEditModal.hours),
+                      status: adminEditModal.status
+                  });
+                  setAdminEditModal({ open: false, leave: null, hours: '', status: '' });
+              } catch(e) { alert("操作失敗"); }
+              setProcessingId(null);
+          };
+
+          // 管理員刪除
+          const handleAdminDelete = async (id) => {
+              if(confirm("【管理員權限】確定要永久刪除此假單紀錄嗎？\n(刪除後無法復原)")) {
+                  setProcessingId(id);
+                  try { await crud.deleteLeave(id); } catch(e) { alert("刪除失敗"); }
+                  setProcessingId(null);
+              }
+          };
+
           const StatusStep = ({ status }) => {
               const step1 = status !== 'pending' ? 'text-green-600 font-bold' : 'text-gray-400';
               const step2 = status === 'approved' ? 'text-green-600 font-bold' : (status === 'deputy_signed' ? 'text-blue-600 animate-pulse font-bold' : 'text-gray-400');
               return (<div className="flex items-center text-xs gap-1 bg-gray-100 px-2 py-1 rounded-full"><span className={`flex items-center ${step1}`}>1. 職代 {status !== 'pending' ? '✅' : '⏳'}</span><span className="text-gray-300">→</span><span className={`flex items-center ${step2}`}>2. 主管 {status === 'approved' ? '✅' : '⏳'}</span></div>);
           }
-          return (<div className="max-w-4xl mx-auto space-y-8"><div className="flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle/> 差單審核</h2><button onClick={exportCSV} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1"><FileSpreadsheet size={16}/> 匯出報表</button></div><div className="bg-white rounded shadow overflow-hidden border-t-4 border-blue-500"><div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2"><User size={18}/> 第一關：待我簽核 (我是職代)</div>{pendingMyDeputy.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待辦事項，您目前沒有需要代理的案件。</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingMyDeputy.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3"><span className="font-bold text-blue-600">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2"><button onClick={()=>handleDeputyAgree(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '退回'}</button></td></tr>))}</tbody></table>}</div>{(currentUser.role === 'leader' || currentUser.role === 'admin') && <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>{pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3"><span className="font-bold text-gray-800">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2"><button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button></td></tr>))}</tbody></table>}</div>}<div className="bg-white rounded shadow overflow-hidden border border-gray-200 mt-8"><button onClick={() => setShowAllLeaves(!showAllLeaves)} className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex justify-between items-center transition font-bold text-gray-700"><span className="flex items-center gap-2"><List size={18}/> 檢視全團隊請假紀錄總覽</span>{showAllLeaves ? <ChevronRight className="rotate-90 transition-transform" /> : <ChevronRight className="transition-transform"/>}</button>{showAllLeaves && (<div className="p-0 border-t">{leaves.length === 0 ? (<div className="p-8 text-center text-gray-400 text-sm">系統中尚無任何假單紀錄。</div>) : (<table className="w-full text-sm text-left"><thead className="bg-lang-100 border-b text-gray-600"><tr><th className="p-3">申請人</th><th className="p-3">假別</th><th className="p-3">時間區間</th><th className="p-3">時數</th><th className="p-3">狀態</th></tr></thead><tbody>{[...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start)).map(l => (<tr key={`all-${l.id}`} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-medium text-gray-800">{l.requesterName}</td><td className="p-3 text-blue-600 font-bold">{l.type}</td><td className="p-3 text-xs text-gray-500">{l.start.replace('T', ' ')} <br/>~ {l.end.replace('T', ' ')}</td><td className="p-3">{l.hours} 小時</td><td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'approved' ? 'bg-green-100 text-green-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{l.status === 'approved' ? '已核准' : l.status === 'rejected' ? '已退回' : '審核中'}</span></td></tr>))}</tbody></table>)}</div>)}</div></div>);
+          
+          return (
+            <div className="max-w-6xl mx-auto space-y-8">
+              <div className="flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle/> 差單審核</h2></div>
+              
+              <div className="bg-white rounded shadow overflow-hidden border-t-4 border-blue-500"><div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2"><User size={18}/> 第一關：待我簽核 (我是職代)</div>{pendingMyDeputy.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待辦事項，您目前沒有需要代理的案件。</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingMyDeputy.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3"><span className="font-bold text-blue-600">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2"><button onClick={()=>handleDeputyAgree(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '退回'}</button></td></tr>))}</tbody></table>}</div>
+              
+              {(currentUser.role === 'leader' || currentUser.role === 'admin') && <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>{pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3"><span className="font-bold text-gray-800">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2"><button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button></td></tr>))}</tbody></table>}</div>}
+              
+              <div className="bg-white rounded shadow overflow-hidden border border-gray-200 mt-8">
+                  <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 border-b">
+                      <button onClick={() => setShowAllLeaves(!showAllLeaves)} className="flex-1 px-4 py-3 hover:bg-gray-100 flex justify-between items-center transition font-bold text-gray-700 text-left">
+                          <span className="flex items-center gap-2"><List size={18}/> 檢視全團隊請假紀錄總覽</span>
+                          {showAllLeaves ? <ChevronRight className="rotate-90 transition-transform" /> : <ChevronRight className="transition-transform"/>}
+                      </button>
+                      {showAllLeaves && (
+                          <div className="p-2 border-t md:border-t-0 md:border-l border-gray-200">
+                              <button onClick={exportCSV} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1 w-full md:w-auto justify-center transition shadow-sm"><FileSpreadsheet size={16}/> 匯出報表</button>
+                          </div>
+                      )}
+                  </div>
+                  {showAllLeaves && (
+                      <div className="p-0 overflow-x-auto">
+                          {leaves.length === 0 ? (<div className="p-8 text-center text-gray-400 text-sm">系統中尚無任何假單紀錄。</div>) : (
+                          <table className="w-full text-sm text-left whitespace-nowrap">
+                              <thead className="bg-gray-100 border-b text-gray-600 sticky top-0">
+                                  <tr>
+                                      <th className="p-3 font-bold w-24">申請人</th>
+                                      <th className="p-3 font-bold">假別</th>
+                                      <th className="p-3 font-bold w-24">職代</th>
+                                      <th className="p-3 font-bold">日期</th>
+                                      <th className="p-3 font-bold text-gray-500">時間</th>
+                                      <th className="p-3 font-bold w-16">時數</th>
+                                      <th className="p-3 font-bold w-24">狀態</th>
+                                      <th className="p-3 font-bold text-center">操作</th>
+                                  </tr>
+                              </thead>
+                              <tbody>
+                                  {[...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start)).map(l => {
+                                      const d1 = l.start.split('T')[0];
+                                      const t1 = l.start.split('T')[1] || '';
+                                      const d2 = l.end.split('T')[0];
+                                      const t2 = l.end.split('T')[1] || '';
+                                      const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
+                                      const timeStr = `${t1} ~ ${t2}`;
+                                      const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId)?.name || '未知') : '-';
+                                      
+                                      const isOwner = l.requesterId === currentUser.uid || l.requesterId === currentUser.docId;
+                                      const isAdmin = currentUser.role === 'admin';
+
+                                      return (
+                                          <tr key={`all-${l.id}`} className="border-b last:border-0 hover:bg-indigo-50/30 transition-colors">
+                                              <td className="p-3 font-bold text-gray-800">{l.requesterName}</td>
+                                              <td className="p-3 text-indigo-700 font-bold">{l.type}</td>
+                                              <td className="p-3 text-gray-600">{deputyName}</td>
+                                              <td className="p-3 text-gray-800">{dateStr}</td>
+                                              <td className="p-3 text-xs text-gray-500">{timeStr}</td>
+                                              <td className="p-3 font-medium">{l.hours}h</td>
+                                              <td className="p-3">
+                                                  <span className={`px-2 py-1 rounded text-xs font-bold inline-block
+                                                      ${l.status === 'approved' ? 'bg-green-100 text-green-700' : 
+                                                        l.status === 'rejected' ? 'bg-red-100 text-red-700' : 
+                                                        l.status === 'withdrawn' ? 'bg-gray-200 text-gray-600' : 
+                                                        'bg-orange-100 text-orange-700'}`}>
+                                                      {l.status === 'approved' ? '已核准' : 
+                                                       l.status === 'rejected' ? '已退回' : 
+                                                       l.status === 'withdrawn' ? '已撤銷' : '審核中'}
+                                                  </span>
+                                                  {l.recallReason && <div className="text-[10px] text-red-500 mt-1 max-w-[120px] truncate" title={l.recallReason}>撤銷: {l.recallReason}</div>}
+                                              </td>
+                                              <td className="p-3">
+                                                  <div className="flex justify-center gap-1.5">
+                                                      {/* 本人且已核准，可撤銷 */}
+                                                      {isOwner && l.status === 'approved' && (
+                                                          <button onClick={() => setRecallModal({open: true, leave: l, reason: ''})} className="px-2 py-1 bg-red-50 text-red-600 border border-red-200 rounded text-xs font-bold hover:bg-red-500 hover:text-white transition shadow-sm" title="撤銷這張假單">
+                                                              撤銷核定
+                                                          </button>
+                                                      )}
+                                                      {/* 管理員專屬：修改與刪除 */}
+                                                      {isAdmin && (
+                                                          <>
+                                                              <button onClick={() => setAdminEditModal({open: true, leave: l, hours: l.hours, status: l.status})} className="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-600 hover:text-white transition" title="修改時數/狀態">
+                                                                  <Edit2 size={14}/>
+                                                              </button>
+                                                              <button onClick={() => handleAdminDelete(l.id)} className="p-1.5 bg-gray-100 text-gray-500 rounded hover:bg-red-600 hover:text-white transition" title="永久刪除">
+                                                                  <Trash2 size={14}/>
+                                                              </button>
+                                                          </>
+                                                      )}
+                                                      {!isAdmin && !(isOwner && l.status === 'approved') && <span className="text-gray-300 text-xs">-</span>}
+                                                  </div>
+                                              </td>
+                                          </tr>
+                                      )
+                                  })}
+                              </tbody>
+                          </table>
+                          )}
+                      </div>
+                  )}
+              </div>
+
+              {/* 撤銷確認 Modal */}
+              {recallModal.open && (
+                  <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setRecallModal({open: false, leave: null, reason: ''})}>
+                      <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                          <h3 className="font-bold text-lg mb-2 text-red-600 flex items-center gap-2"><AlertTriangle size={20}/> 撤銷已核准假單</h3>
+                          <p className="text-xs text-gray-500 mb-4 leading-relaxed">撤銷後，此假單將改為「已撤銷」狀態並空出日曆。若需重新請假，請另外送單。<strong>撤銷原因將保留給主管檢視。</strong></p>
+                          <textarea autoFocus className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-200 outline-none resize-none mb-4" rows="3" placeholder="請填寫撤銷/重送的原因 (必填)..." value={recallModal.reason} onChange={e=>setRecallModal({...recallModal, reason: e.target.value})}></textarea>
+                          <div className="flex gap-2">
+                              <button onClick={() => setRecallModal({open: false, leave: null, reason: ''})} className="flex-1 py-2 bg-gray-100 text-gray-600 font-bold rounded-lg hover:bg-gray-200 transition">取消</button>
+                              <button onClick={confirmRecall} disabled={!!processingId} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition flex justify-center items-center gap-2">
+                                  {processingId ? <Loader2 size={16} className="animate-spin"/> : '確認撤銷'}
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+              {/* 管理員修改 Modal */}
+              {adminEditModal.open && (
+                  <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setAdminEditModal({open: false, leave: null, hours: '', status: ''})}>
+                      <div className="bg-white rounded-xl w-full max-w-xs shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                          <h3 className="font-bold text-lg mb-4 text-blue-700 flex items-center gap-2"><Edit size={20}/> 管理員修改假單</h3>
+                          <div className="space-y-4 mb-6">
+                              <div>
+                                  <label className="text-xs font-bold text-gray-600 block mb-1">修改時數</label>
+                                  <input type="number" step="0.5" className="w-full border p-2 rounded bg-gray-50 focus:bg-white outline-none" value={adminEditModal.hours} onChange={e=>setAdminEditModal({...adminEditModal, hours: e.target.value})} />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold text-gray-600 block mb-1">強制變更狀態</label>
+                                  <select className="w-full border p-2 rounded bg-gray-50 focus:bg-white outline-none" value={adminEditModal.status} onChange={e=>setAdminEditModal({...adminEditModal, status: e.target.value})}>
+                                      <option value="approved">已核准 (approved)</option>
+                                      <option value="pending">待職代審 (pending)</option>
+                                      <option value="deputy_signed">待組長審 (deputy_signed)</option>
+                                      <option value="rejected">已退回 (rejected)</option>
+                                      <option value="withdrawn">已撤銷 (withdrawn)</option>
+                                  </select>
+                              </div>
+                          </div>
+                          <div className="flex gap-2">
+                              <button onClick={() => setAdminEditModal({open: false, leave: null, hours: '', status: ''})} className="flex-1 py-2 bg-gray-100 text-gray-600 font-bold rounded-lg hover:bg-gray-200 transition">取消</button>
+                              <button onClick={confirmAdminEdit} disabled={!!processingId} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition flex justify-center items-center gap-2">
+                                  {processingId ? <Loader2 size={16} className="animate-spin"/> : '儲存修改'}
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+            </div>
+          );
         }
 
         function StatisticsView({ users, leaves, currentUser, onUpdateAnyProfile, crud }) {
