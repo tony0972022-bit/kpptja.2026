@@ -542,7 +542,7 @@
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
                   {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} />}
                   {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} />}
-                  {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} />}
+                  {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
@@ -1281,9 +1281,12 @@
             );
         }
 
-        function AttendanceView({ user, db, attendanceRecords }) {
+        function AttendanceView({ user, db, attendanceRecords, leaves, leaveTypes }) {
             const [selectedMonth, setSelectedMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
             const [localRecords, setLocalRecords] = useState({});
+            const [defaultStart, setDefaultStart] = useState('08:00');
+            const [defaultEnd, setDefaultEnd] = useState('17:00');
+            
             const daysInMonth = new Date(selectedMonth.split('-')[0], selectedMonth.split('-')[1], 0).getDate();
             useEffect(() => {
                 const currentMonthRecords = attendanceRecords.filter(r => r.userId === user.uid && r.month === selectedMonth);
@@ -1297,7 +1300,7 @@
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
                     const dayOfWeek = new Date(dateStr).getDay();
-                    if (dayOfWeek !== 0 && dayOfWeek !== 6) { if (!newRecords[dateStr]) { newRecords[dateStr] = { start: '08:00', end: '17:00' }; } }
+                    if (dayOfWeek !== 0 && dayOfWeek !== 6) { if (!newRecords[dateStr]) { newRecords[dateStr] = { start: defaultStart, end: defaultEnd }; } }
                 }
                 setLocalRecords(newRecords);
             };
@@ -1314,16 +1317,48 @@
                 try { await batch.commit(); alert("打卡紀錄已儲存！"); } catch (e) { alert("儲存失敗: " + e.message); }
             };
             const downloadExcel = () => {
-                let csvContent = "\uFEFF日期,星期,上午上班,上午下班,下午上班,下午下班\n";
+                let csvContent = "\uFEFF日期,星期,簽到,簽退\n";
                 const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+                const officialTypes = leaveTypes.filter(t => t.category === 'official').map(t => t.name);
+                
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
                     const d = new Date(dateStr);
                     const dayName = weekDays[d.getDay()];
                     const rec = localRecords[dateStr] || { start: '', end: '' };
-                    const morningEnd = rec.start ? '12:00' : '';
-                    const afternoonStart = rec.end ? '13:00' : '';
-                    csvContent += `${dateStr},${dayName},${rec.start || ''},${morningEnd},${afternoonStart},${rec.end || ''}\n`;
+                    
+                    let morningStart = rec.start || '';
+                    let morningEnd = rec.start ? '12:00' : '';
+                    let afternoonStart = rec.end ? '13:00' : '';
+                    let afternoonEnd = rec.end || '';
+
+                    // 檢查請假紀錄以覆蓋時間為出差/休息
+                    const dayLeaves = leaves.filter(l => 
+                        (l.requesterId === user.uid || l.requesterId === user.docId) && 
+                        l.status === 'approved' && 
+                        l.start.startsWith(dateStr)
+                    );
+
+                    dayLeaves.forEach(dayLeave => {
+                        const isOfficial = officialTypes.includes(dayLeave.type);
+                        const leaveText = isOfficial ? '出差' : '休息';
+                        
+                        const isAllDay = Number(dayLeave.hours) >= 8;
+                        const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
+                        const isAfternoon = dayLeave.start.includes('T13') || dayLeave.start.includes('T12');
+
+                        if (isAllDay) {
+                            morningStart = leaveText; morningEnd = leaveText;
+                            afternoonStart = leaveText; afternoonEnd = leaveText;
+                        } else if (isMorning) {
+                            morningStart = leaveText; morningEnd = leaveText;
+                        } else if (isAfternoon) {
+                            afternoonStart = leaveText; afternoonEnd = leaveText;
+                        }
+                    });
+
+                    csvContent += `${dateStr},${dayName},${morningStart},${morningEnd}\n`;
+                    csvContent += `,,${afternoonStart},${afternoonEnd}\n`;
                 }
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
@@ -1333,8 +1368,23 @@
             };
             return (
                 <div className="max-w-4xl mx-auto space-y-6">
-                    <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-center gap-4"><h2 className="text-xl font-bold flex items-center gap-2"><Clock/> 個人打卡紀錄</h2><div className="flex gap-2"><input type="month" className="border p-2 rounded text-sm" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} /><button onClick={batchFill} className="bg-blue-100 text-blue-700 px-3 py-2 rounded text-sm font-bold flex items-center gap-1 hover:bg-blue-200"><CheckSquare size={16}/> 批量預設</button><button onClick={downloadExcel} className="bg-green-100 text-green-700 px-3 py-2 rounded text-sm font-bold flex items-center gap-1 hover:bg-green-200"><Download size={16}/> 下載 Excel</button></div></div>
-                    <div className="bg-white rounded shadow overflow-hidden border"><div className="max-h-[600px] overflow-y-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-100 sticky top-0 z-10 font-bold text-gray-600"><tr><th className="p-3">日期</th><th className="p-3">星期</th><th className="p-3">上午上班</th><th className="p-3 text-gray-400">上午下班 (隱藏)</th><th className="p-3 text-gray-400">下午上班 (隱藏)</th><th className="p-3">下午下班</th></tr></thead><tbody>{[...Array(daysInMonth)].map((_, i) => { const dateStr = `${selectedMonth}-${String(i + 1).padStart(2, '0')}`; const d = new Date(dateStr); const dayOfWeek = d.getDay(); const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; const rec = localRecords[dateStr] || {}; return (<tr key={dateStr} className={`border-b ${isWeekend ? 'bg-gray-50' : 'hover:bg-blue-50'}`}><td className="p-3 font-medium">{dateStr}</td><td className={`p-3 font-bold ${isWeekend ? 'text-red-500' : 'text-gray-600'}`}>{['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}</td><td className="p-2"><input type="time" className="border rounded p-1 w-full bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.start || ''} onChange={(e) => handleTimeChange(dateStr, 'start', e.target.value)} /></td><td className="p-3 text-gray-400 text-xs">12:00</td><td className="p-3 text-gray-400 text-xs">13:00</td><td className="p-2"><input type="time" className="border rounded p-1 w-full bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.end || ''} onChange={(e) => handleTimeChange(dateStr, 'end', e.target.value)} /></td></tr>); })}</tbody></table></div><div className="p-4 border-t bg-gray-50 flex justify-end"><button onClick={saveAttendance} className="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex items-center gap-2"><CheckCircle size={18}/> 儲存打卡紀錄</button></div></div>
+                    <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                        <h2 className="text-xl font-bold flex items-center gap-2"><Clock/> 個人打卡紀錄</h2>
+                        <div className="flex gap-2 flex-wrap items-center">
+                            <input type="month" className="border p-2 rounded text-sm" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} />
+                            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
+                                <span className="text-xs text-gray-500 font-bold ml-1">預設:</span>
+                                <input type="time" className="border rounded px-1.5 py-1 text-xs outline-none bg-white" value={defaultStart} onChange={e=>setDefaultStart(e.target.value)} />
+                                <span className="text-xs text-gray-400">-</span>
+                                <input type="time" className="border rounded px-1.5 py-1 text-xs outline-none bg-white" value={defaultEnd} onChange={e=>setDefaultEnd(e.target.value)} />
+                                <button onClick={batchFill} className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 hover:bg-blue-200 transition">
+                                    <CheckSquare size={16}/> 批量填入
+                                </button>
+                            </div>
+                            <button onClick={downloadExcel} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-green-200 transition"><Download size={16}/> 下載 Excel</button>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded shadow overflow-hidden border"><div className="max-h-[600px] overflow-y-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-100 sticky top-0 z-10 font-bold text-gray-600"><tr><th className="p-3 w-32">日期</th><th className="p-3 w-20">星期</th><th className="p-3">上班時間</th><th className="p-3">下班時間</th></tr></thead><tbody>{[...Array(daysInMonth)].map((_, i) => { const dateStr = `${selectedMonth}-${String(i + 1).padStart(2, '0')}`; const d = new Date(dateStr); const dayOfWeek = d.getDay(); const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; const rec = localRecords[dateStr] || {}; return (<tr key={dateStr} className={`border-b ${isWeekend ? 'bg-gray-50' : 'hover:bg-blue-50'}`}><td className="p-3 font-medium">{dateStr}</td><td className={`p-3 font-bold ${isWeekend ? 'text-red-500' : 'text-gray-600'}`}>{['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}</td><td className="p-2"><input type="time" className="border rounded p-1 w-full max-w-[150px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.start || ''} onChange={(e) => handleTimeChange(dateStr, 'start', e.target.value)} /></td><td className="p-2"><input type="time" className="border rounded p-1 w-full max-w-[150px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={rec.end || ''} onChange={(e) => handleTimeChange(dateStr, 'end', e.target.value)} /></td></tr>); })}</tbody></table></div><div className="p-4 border-t bg-gray-50 flex justify-end"><button onClick={saveAttendance} className="bg-slate-800 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex items-center gap-2"><CheckCircle size={18}/> 儲存打卡紀錄</button></div></div>
                 </div>
             );
         }
