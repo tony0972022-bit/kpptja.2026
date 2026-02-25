@@ -78,8 +78,22 @@
         };
 
         const DEFAULT_LEAVE_TYPES = [
-          "出差", "公出", "事假", "公假", "病假", "休假", "補休", 
-          "加班申請", "喪假", "生理假", "家庭照顧假", "婚假", "產假", "產前假", "陪產假", "榮譽假"
+          // 區段一：公務/加班
+          { id: 'l1', name: "出差", category: "official", desc: "處理公務" },
+          { id: 'l2', name: "公出", category: "official", desc: "短暫外出洽公" },
+          { id: 'l3', name: "公假", category: "official", desc: "依法令規定給予之公假" },
+          { id: 'l4', name: "加班申請", category: "official", desc: "延長工時" },
+          // 區段二：私假 (依據勞基法等相關規定)
+          { id: 'l5', name: "特休(休假)", category: "personal", desc: "有薪，依年資給予" },
+          { id: 'l6', name: "事假", category: "personal", desc: "無薪，一年最多14天" },
+          { id: 'l7', name: "病假", category: "personal", desc: "半薪，未住院一年最多30天" },
+          { id: 'l8', name: "生理假", category: "personal", desc: "半薪，每月1天(併入病假計算)" },
+          { id: 'l9', name: "婚假", category: "personal", desc: "有薪，8天" },
+          { id: 'l10', name: "喪假", category: "personal", desc: "有薪，依親屬關係3-8天" },
+          { id: 'l11', name: "產假/陪產檢及陪產假", category: "personal", desc: "有薪，產假8星期/陪產假7天" },
+          { id: 'l12', name: "家庭照顧假", category: "personal", desc: "無薪，併入事假計算，一年最多7天" },
+          { id: 'l13', name: "補休", category: "personal", desc: "加班或值班換取補休" },
+          { id: 'l14', name: "榮譽假", category: "personal", desc: "內部獎勵" }
         ];
 
         const DEFAULT_ROLE_NAMES = {
@@ -193,8 +207,23 @@
             if (savedRoleNames) setRoleNames(JSON.parse(savedRoleNames));
             const savedAreaColors = localStorage.getItem('areaColors');
             if(savedAreaColors) setSettings(prev => ({...prev, areaColors: JSON.parse(savedAreaColors)}));
+            
             const savedLeaveTypes = localStorage.getItem('leaveTypes');
-            if(savedLeaveTypes) setLeaveTypes(JSON.parse(savedLeaveTypes));
+            if(savedLeaveTypes) {
+                try {
+                    const parsed = JSON.parse(savedLeaveTypes);
+                    // 相容舊版本 (舊版是單純的字串陣列)
+                    if (parsed.length > 0 && typeof parsed[0] === 'string') {
+                        setLeaveTypes(DEFAULT_LEAVE_TYPES);
+                        localStorage.setItem('leaveTypes', JSON.stringify(DEFAULT_LEAVE_TYPES));
+                    } else {
+                        setLeaveTypes(parsed);
+                    }
+                } catch(e) { setLeaveTypes(DEFAULT_LEAVE_TYPES); }
+            } else {
+                setLeaveTypes(DEFAULT_LEAVE_TYPES);
+            }
+
             const savedRotationRules = localStorage.getItem('rotationRules');
             if(savedRotationRules) setRotationRules(JSON.parse(savedRotationRules));
             const savedWT = localStorage.getItem('workTags');
@@ -347,12 +376,12 @@
 
           const handleManageLeaveTypes = (action, val) => {
               if(action === 'add' && val) {
-                  const newTypes = [...leaveTypes, val];
+                  const newTypes = [...leaveTypes, { id: `l_${Date.now()}`, ...val }];
                   setLeaveTypes(newTypes);
                   localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
               } else if (action === 'delete') {
                   if(!confirm("確定要刪除此假別嗎？")) return;
-                  const newTypes = leaveTypes.filter(t => t !== val);
+                  const newTypes = leaveTypes.filter(t => t.id !== val);
                   setLeaveTypes(newTypes);
                   localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
               }
@@ -456,9 +485,9 @@
                   {[
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
-                    {id:'leave', icon:<ClipboardList size={20}/>, label:'差勤填寫'},
+                    {id:'leave', icon:<ClipboardList size={20}/>, label:'請假申請'},
                     ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
-                    {id:'personal', icon:<FileText size={20}/>, label:'個人班表'},
+                    {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
                     {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'},
                     ...(userData.role === 'admin' ? [{id:'management', icon:<List size={20}/>, label:'項目管理'}] : []),
                     ...(userData.role === 'admin' ? [{id:'members', icon:<Users size={20}/>, label:'成員管理'}] : []),
@@ -1334,12 +1363,17 @@
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
-                        <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 個人出勤狀況一覽</h2>
+                        <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 請假狀況 (個人出勤一覽)</h2>
                         <div className="flex flex-wrap gap-4 w-full md:w-auto">
                             <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
                             <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none">
                                 <option value="all">所有假別/出勤</option>
-                                {leaveTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                <optgroup label="公務與加班">
+                                    {leaveTypes.filter(t=>t.category==='official').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                                </optgroup>
+                                <optgroup label="私假">
+                                    {leaveTypes.filter(t=>t.category==='personal').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                                </optgroup>
                             </select>
                             <div className="flex gap-2 w-full md:w-auto">
                                 <button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-indigo-700 transition">
@@ -1414,8 +1448,11 @@
 
         // 🌟 專屬元件：待送差單小卡
         const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
-            const [type, setType] = useState('出差'); // 預設為出差
+            const officialTypes = leaveTypes.filter(t => t.category === 'official');
+            const [type, setType] = useState(officialTypes.length > 0 ? officialTypes[0].name : '');
             const [deputyId, setDeputyId] = useState('');
+
+            const selectedTypeDesc = officialTypes.find(t => t.name === type)?.desc || '';
 
             const handleSend = () => {
                 if(!deputyId) { alert("請選擇職務代理人"); return; }
@@ -1446,10 +1483,11 @@
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (預設出差)</label>
+                            <label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label>
                             <select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>
-                                {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
+                                {officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
                             </select>
+                            {selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label>
@@ -1475,10 +1513,15 @@
 
         function LeaveForm({ user, users, leaves, events, crud, leaveTypes }) {
           // 自行請假表單狀態
-          const [form, setForm] = useState({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
+          const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
+          const [form, setForm] = useState({ type: defaultPersonalType, start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
           const [isSubmitting, setIsSubmitting] = useState(false);
           const [submittingTaskId, setSubmittingTaskId] = useState(null);
+
+          const officialTypes = leaveTypes.filter(t => t.category === 'official');
+          const personalTypes = leaveTypes.filter(t => t.category === 'personal');
+          const currentTypeDesc = leaveTypes.find(t => t.name === form.type)?.desc || '';
 
           // 🌟 核心新增：智慧尋找尚未填寫差單的排班任務
           const pendingExternalTasks = useMemo(() => {
@@ -1576,7 +1619,7 @@
                       timestamp: new Date() 
                   });
                   alert("請假單已送出，已同步顯示在日曆上！");
-                  setForm({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
+                  setForm({ type: defaultPersonalType, start:'', end:'', reason:'', deputyId:'' });
               } catch (e) {
                   alert("送出失敗，請稍後再試。");
               } finally {
@@ -1614,15 +1657,25 @@
                {/* 🌟 第二區塊：自行請假 */}
                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
                    <div className="flex justify-between items-center mb-6 border-b pb-4">
-                       <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：自行請假 (特休/病假/事假)</h2>
+                       <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2>
                    </div>
                    
                    <form onSubmit={handleManualSubmit} className="space-y-5">
                        <div>
                            <label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label>
                            <select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>
-                               {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
+                               <optgroup label="區段二：私假 (依法令給假)">
+                                   {personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
+                               </optgroup>
+                               <optgroup label="區段一：公務與加班">
+                                   {officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
+                               </optgroup>
                            </select>
+                           {currentTypeDesc && (
+                               <div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2">
+                                   <Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}
+                               </div>
+                           )}
                        </div>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                            <div>
@@ -1659,6 +1712,7 @@
 
         function ApprovalView({ leaves, currentUser, crud, users }) {
           const [processingId, setProcessingId] = useState(null);
+          const [showAllLeaves, setShowAllLeaves] = useState(false); // 新增控制總覽摺疊的狀態
 
           const exportCSV = () => {
               let csv = "\uFEFF申請人,假別,開始,結束,時數,狀態\n";
@@ -1783,6 +1837,59 @@
                        </tr>
                    ))}</tbody></table>}
                </div>}
+
+               {/* 新增：團隊全部請假紀錄總覽 */}
+               <div className="bg-white rounded shadow overflow-hidden border border-gray-200 mt-8">
+                   <button 
+                       onClick={() => setShowAllLeaves(!showAllLeaves)} 
+                       className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex justify-between items-center transition font-bold text-gray-700"
+                   >
+                       <span className="flex items-center gap-2"><List size={18}/> 檢視全團隊請假紀錄總覽</span>
+                       {showAllLeaves ? <ChevronRight className="rotate-90 transition-transform" /> : <ChevronRight className="transition-transform"/>}
+                   </button>
+                   
+                   {showAllLeaves && (
+                       <div className="p-0 border-t">
+                           {leaves.length === 0 ? (
+                               <div className="p-8 text-center text-gray-400 text-sm">系統中尚無任何假單紀錄。</div>
+                           ) : (
+                               <table className="w-full text-sm text-left">
+                                   <thead className="bg-gray-100 border-b text-gray-600">
+                                       <tr>
+                                           <th className="p-3">申請人</th>
+                                           <th className="p-3">假別</th>
+                                           <th className="p-3">時間區間</th>
+                                           <th className="p-3">時數</th>
+                                           <th className="p-3">狀態</th>
+                                       </tr>
+                                   </thead>
+                                   <tbody>
+                                       {[...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start)).map(l => (
+                                           <tr key={`all-${l.id}`} className="border-b last:border-0 hover:bg-gray-50">
+                                               <td className="p-3 font-medium text-gray-800">{l.requesterName}</td>
+                                               <td className="p-3 text-blue-600 font-bold">{l.type}</td>
+                                               <td className="p-3 text-xs text-gray-500">
+                                                   {l.start.replace('T', ' ')} <br/>~ {l.end.replace('T', ' ')}
+                                               </td>
+                                               <td className="p-3">{l.hours} 小時</td>
+                                               <td className="p-3">
+                                                   <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                        l.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                                        l.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                        'bg-orange-100 text-orange-700'
+                                                    }`}>
+                                                       {l.status === 'approved' ? '已核准' : l.status === 'rejected' ? '已退回' : '審核中'}
+                                                   </span>
+                                               </td>
+                                           </tr>
+                                       ))}
+                                   </tbody>
+                               </table>
+                           )}
+                       </div>
+                   )}
+               </div>
+
             </div>
           );
         }
@@ -2104,7 +2211,7 @@
 
         function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
             const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
-            const [newLeave, setNewLeave] = useState('');
+            const [newLeave, setNewLeave] = useState({ name: '', category: 'personal', desc: '' });
             const [newArea, setNewArea] = useState(''); 
             const [localRoleNames, setLocalRoleNames] = useState(roleNames);
             const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
@@ -2123,6 +2230,12 @@
             const handleAddAreaWithColor = (area) => {
                 tags.handleAddTag('area', area);
                 setNewArea('');
+            }
+
+            const handleAddLeave = () => {
+                if(!newLeave.name) return alert("請輸入假別名稱");
+                handleManageLeaveTypes('add', newLeave);
+                setNewLeave({ name: '', category: 'personal', desc: '' });
             }
 
             const handleSaveSettings = () => {
@@ -2154,14 +2267,69 @@
                     </div>
 
                     <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
+                    
+                    <div className="bg-white p-6 rounded shadow-sm">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 說明 (區段分類)</h2>
+                        
+                        {/* 新增假別表單 */}
+                        <div className="bg-gray-50 border rounded-lg p-4 mb-6">
+                            <h3 className="text-sm font-bold text-gray-700 mb-3">新增假別</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div className="md:col-span-1">
+                                    <select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newLeave.category} onChange={e=>setNewLeave({...newLeave, category: e.target.value})}>
+                                        <option value="official">區段一: 公務/加班</option>
+                                        <option value="personal">區段二: 私假</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <input className="border rounded px-3 py-2 text-sm w-full" placeholder="假別名稱 (例: 特休)" value={newLeave.name} onChange={e=>setNewLeave({...newLeave, name: e.target.value})} />
+                                </div>
+                                <div className="md:col-span-2 flex gap-2">
+                                    <input className="border rounded px-3 py-2 text-sm flex-1" placeholder="勞基法說明 (例: 有薪，依年資給予)" value={newLeave.desc} onChange={e=>setNewLeave({...newLeave, desc: e.target.value})} />
+                                    <button onClick={handleAddLeave} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold shrink-0">新增</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 顯示現有假別 (分群) */}
+                        <div className="space-y-4">
+                            <div>
+                                <h3 className="text-sm font-bold text-indigo-700 mb-2 border-b pb-1">區段一：公務與加班</h3>
+                                <div className="flex flex-col gap-2">
+                                    {leaveTypes.filter(t=>t.category==='official').map(t => (
+                                        <div key={t.id} className="flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-indigo-300">
+                                            <div>
+                                                <span className="font-bold text-gray-800 inline-block w-24">{t.name}</span>
+                                                <span className="text-gray-500 text-xs">{t.desc}</span>
+                                            </div>
+                                            <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-300 hover:text-red-500 p-1"><X size={16}/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-orange-700 mb-2 border-b pb-1 mt-4">區段二：私假 (依法令給假)</h3>
+                                <div className="flex flex-col gap-2">
+                                    {leaveTypes.filter(t=>t.category==='personal').map(t => (
+                                        <div key={t.id} className="flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-orange-300">
+                                            <div>
+                                                <span className="font-bold text-gray-800 inline-block w-24">{t.name}</span>
+                                                <span className="text-gray-500 text-xs">{t.desc}</span>
+                                            </div>
+                                            <button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-300 hover:text-red-500 p-1"><X size={16}/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <button 
                         onClick={handleSaveSettings} 
                         className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
                     >
                         {isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}
                     </button>
-                    </div>
                 </div>
             );
         }
