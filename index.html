@@ -1380,6 +1380,63 @@
           const [preciseTime, setPreciseTime] = useState(false); 
           const [isSubmitting, setIsSubmitting] = useState(false);
 
+          // 🌟 核心新增：智慧尋找尚未填寫差單的排班任務
+          const pendingExternalTasks = useMemo(() => {
+              const todayStr = new Date().toISOString().split('T')[0];
+              const groups = {};
+              
+              // 將所有事件依據群組(groupId)打包
+              events.forEach(e => {
+                  if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
+                  if (e.type === 'tag') groups[e.groupId].tag = e;
+                  if (e.type === 'person') groups[e.groupId].people.push(e);
+              });
+
+              const pending = [];
+              Object.values(groups).forEach(g => {
+                  if (!g.tag) return;
+                  if (g.tag.date < todayStr) return; // 忽略過去的排班
+                  
+                  // 檢查是否為外勤 (使用全域變數 EXTERNAL_WORK_TAGS)
+                  const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
+                  if (!isExternal) return;
+
+                  // 檢查這筆排班有沒有包含「目前的登入者」
+                  const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
+                  if (!isMe) return;
+
+                  const d = g.tag.date; 
+                  // 根據上下午設定建議的時間區間 (可根據實際上下班時間微調)
+                  let startTime = `${d}T08:30`;
+                  let endTime = `${d}T17:30`;
+                  if (g.tag.slot === 'morning') { endTime = `${d}T12:30`; }
+                  else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:30`; }
+
+                  // 檢查此人這一天是否已經有送出任何假單了 (排除被退回的)
+                  const hasLeave = leaves.some(l => 
+                      (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
+                      l.start.startsWith(d) && 
+                      l.status !== 'rejected'
+                  );
+
+                  // 如果排了班卻沒有假單，就加入待辦清單
+                  if (!hasLeave) {
+                      pending.push({
+                          id: g.tag.groupId,
+                          date: d,
+                          slot: g.tag.slot,
+                          item: g.tag.item,
+                          area: g.tag.area,
+                          suggestedStart: startTime,
+                          suggestedEnd: endTime,
+                          reason: `[${g.tag.item}] ${g.tag.area ? g.tag.area : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim()
+                      });
+                  }
+              });
+              // 依日期排序，最近的排在最上面
+              return pending.sort((a,b) => a.date.localeCompare(b.date));
+          }, [events, leaves, user]);
+
           useEffect(() => {
               if(form.start && form.end) {
                   const diff = (new Date(form.end)-new Date(form.start))/36e5;
@@ -1392,9 +1449,9 @@
                   });
                   const newAlerts = [];
                   if (needsLeave && !EXTERNAL_WORK_TAGS.some(t => form.type.includes(t)) && form.type !== '公假' && form.type !== '出差') {
-                      newAlerts.push("⚠️ 注意：排班表顯示您當日有「訪視/出差」行程，請確認假別是否正確。");
+                      newAlerts.push("⚠️ 注意：排班表顯示您當日有外勤行程，請確認假別是否正確。");
                   }
-                  if (!needsLeave && (form.type === '出差' || form.type === '公假')) {
+                  if (!needsLeave && (form.type === '出差' || form.type === '公假' || form.type === '公出')) {
                       newAlerts.push("⚠️ 提醒：排班表中當日似乎沒有您的外勤行程，請確認是否遺漏排班。");
                   }
                   setAlerts(newAlerts);
@@ -1430,33 +1487,74 @@
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
 
           return (
-            <div className="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-sm">
-               <div className="flex justify-between items-center mb-6">
-                   <h2 className="text-xl font-bold flex items-center gap-2"><ClipboardList/> 差勤填寫</h2>
-                   <div className="flex gap-2">
-                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded flex items-center gap-1"><Mail size={12}/> 自動開信</span>
-                        <button onClick={()=>setPreciseTime(!preciseTime)} className="text-xs text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-50">
-                            {preciseTime ? "切換為 30分 級距" : "切換為精確時間"}
-                        </button>
+            <div className="max-w-2xl mx-auto space-y-6">
+               {/* 🌟 待辦外勤提示區塊 */}
+               {pendingExternalTasks.length > 0 && (
+                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5 shadow-sm">
+                       <h3 className="font-bold text-indigo-800 mb-3 flex items-center gap-2">
+                           <Briefcase size={18}/> 系統建議：您有未填寫的外勤排班
+                       </h3>
+                       <div className="space-y-3">
+                           {pendingExternalTasks.map(task => (
+                               <div key={task.id} className="bg-white p-3 rounded-lg border border-indigo-100 flex justify-between items-center shadow-sm">
+                                   <div>
+                                       <div className="font-bold text-gray-800 text-sm">
+                                           {task.date} - <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}
+                                       </div>
+                                       <div className="text-xs text-gray-500 mt-1">
+                                           時間：{task.slot === 'morning' ? '上午 (預設 08:30-12:30)' : task.slot === 'afternoon' ? '下午 (預設 13:30-17:30)' : '整天 (預設 08:30-17:30)'}
+                                       </div>
+                                   </div>
+                                   <button 
+                                       onClick={(e) => {
+                                           e.preventDefault();
+                                           setForm(prev => ({
+                                               ...prev, 
+                                               type: '公出', 
+                                               start: task.suggestedStart, 
+                                               end: task.suggestedEnd, 
+                                               reason: task.reason
+                                           }));
+                                           window.scrollTo({ top: 0, behavior: 'smooth' });
+                                       }}
+                                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold transition shadow-sm flex items-center gap-1 shrink-0"
+                                   >
+                                       <ArrowRight size={14}/> 一鍵帶入
+                                   </button>
+                               </div>
+                           ))}
+                       </div>
                    </div>
+               )}
+
+               <div className="bg-white p-6 rounded-lg shadow-sm">
+                   <div className="flex justify-between items-center mb-6">
+                       <h2 className="text-xl font-bold flex items-center gap-2"><ClipboardList/> 差勤填寫</h2>
+                       <div className="flex gap-2">
+                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded flex items-center gap-1"><Mail size={12}/> 自動開信</span>
+                            <button onClick={()=>setPreciseTime(!preciseTime)} className="text-xs text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-50">
+                                {preciseTime ? "切換為 30分 級距" : "切換為精確時間"}
+                            </button>
+                       </div>
+                   </div>
+                   {alerts.length > 0 && <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded mb-4 text-sm font-bold">{alerts.map((a,i) => <div key={i} className="flex items-center gap-2"><AlertTriangle size={16}/> {a}</div>)}</div>}
+                   <form onSubmit={handleSubmit} className="space-y-4">
+                       <div>
+                           <label className="text-xs font-bold text-gray-500 block mb-1">假別</label>
+                           <select className="w-full border p-2 rounded" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                       </div>
+                       <div className="grid grid-cols-2 gap-4">
+                           <div><label className="text-xs font-bold text-gray-500 block mb-1">開始</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded bg-gray-50 focus:bg-white" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
+                           <div><label className="text-xs font-bold text-gray-500 block mb-1">結束</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded bg-gray-50 focus:bg-white" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
+                       </div>
+                       <div className="text-right text-sm text-blue-600 font-bold">時數: {hours} hr</div>
+                       <div><label className="text-xs font-bold text-gray-500 block mb-1">職務代理人</label><select className="w-full border p-2 rounded" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
+                       <div><label className="text-xs font-bold text-gray-500 block mb-1">事由 (將自動帶入地點與備註)</label><textarea className="w-full border p-2 rounded h-20 bg-gray-50 focus:bg-white" required value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
+                       <button disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-3 rounded font-bold transition shadow flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
+                            {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 資料傳送中...</> : '送出申請 (自動通知)'}
+                       </button>
+                   </form>
                </div>
-               {alerts.length > 0 && <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded mb-4 text-sm font-bold">{alerts.map((a,i) => <div key={i} className="flex items-center gap-2"><AlertTriangle size={16}/> {a}</div>)}</div>}
-               <form onSubmit={handleSubmit} className="space-y-4">
-                   <div>
-                       <label className="text-xs font-bold text-gray-500 block mb-1">假別</label>
-                       <select className="w-full border p-2 rounded" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
-                   </div>
-                   <div className="grid grid-cols-2 gap-4">
-                       <div><label className="text-xs font-bold text-gray-500 block mb-1">開始</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
-                       <div><label className="text-xs font-bold text-gray-500 block mb-1">結束</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
-                   </div>
-                   <div className="text-right text-sm text-blue-600 font-bold">時數: {hours} hr</div>
-                   <div><label className="text-xs font-bold text-gray-500 block mb-1">職務代理人</label><select className="w-full border p-2 rounded" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
-                   <div><label className="text-xs font-bold text-gray-500 block mb-1">事由</label><textarea className="w-full border p-2 rounded h-20" required value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
-                   <button disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-3 rounded font-bold transition shadow flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
-                        {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 資料傳送中...</> : '送出申請 (自動通知)'}
-                   </button>
-               </form>
             </div>
           );
         }
