@@ -20,7 +20,8 @@
                 "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
                 "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
                 "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
-                "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
+                "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js",
+                "firebase/analytics": "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js"
             }
         }
     </script>
@@ -32,6 +33,7 @@
         import React, { useState, useEffect, useMemo, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
+        import { getAnalytics } from 'firebase/analytics';
         import { 
           getFirestore, collection, addDoc, query, where, onSnapshot, 
           updateDoc, doc, deleteDoc, orderBy, setDoc, getDoc 
@@ -47,8 +49,7 @@
           Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Mail, Loader2
         } from 'lucide-react';
 
-        // --- 👇👇👇 請將您的 Firebase Config 填入下方引號中 👇👇👇 ---
-        // 取得方式：Firebase Console -> Project Settings -> General -> Your apps -> SDK setup and configuration (Config)
+        // --- Firebase 綁定設定 (已寫死) ---
         const MANUAL_CONFIG = {
             apiKey: "AIzaSyBQ6ttl2QlbQbM4lO_faSEyIK1EVZy5jH4",
             authDomain: "kpptjawork.firebaseapp.com",
@@ -58,10 +59,10 @@
             appId: "1:1082378001168:web:fc12acdeed9ebece762395",
             measurementId: "G-48TSVTHBDM"
         };
+        const APP_ID = 'kpptjawork';
         // -----------------------------------------------------------
 
         // --- Global Constants ---
-
         const WEATHER_LOCATIONS = [
           { location: '高雄', icon: <Sun className="text-orange-500" />, temp: '29°C' },
           { location: '屏東', icon: <Sun className="text-yellow-500" />, temp: '30°C' },
@@ -70,34 +71,17 @@
         ];
 
         const TAIWAN_HOLIDAYS_2026 = {
-            "2026-01-01": "元旦",
-            "2026-02-17": "除夕",
-            "2026-02-18": "春節",
-            "2026-02-19": "春節",
-            "2026-02-20": "春節",
-            "2026-02-28": "二二八",
-            "2026-04-04": "兒童節",
-            "2026-04-05": "清明節",
-            "2026-06-19": "端午節",
-            "2026-09-26": "中秋節",
-            "2026-10-10": "國慶日"
+            "2026-01-01": "元旦", "2026-02-17": "除夕", "2026-02-18": "春節",
+            "2026-02-19": "春節", "2026-02-20": "春節", "2026-02-28": "二二八",
+            "2026-04-04": "兒童節", "2026-04-05": "清明節", "2026-06-19": "端午節",
+            "2026-09-26": "中秋節", "2026-10-10": "國慶日"
         };
-
-        const DEFAULT_USERS = [
-          { name: '高湘怡', email: 'xiangyi@example.com', role: 'staff', initials: '高', color: 'bg-red-200', borderColor: '#ef4444', usePhoto: false, avatarUrl: '' },
-          { name: '黃國裕', email: 'kuoyu@example.com', role: 'leader', initials: '裕', color: 'bg-blue-200', borderColor: '#3b82f6', usePhoto: false, avatarUrl: '' },
-          { name: '方姿云', email: 'tzuYun@example.com', role: 'staff', initials: '方', color: 'bg-green-200', borderColor: '#22c55e', usePhoto: false, avatarUrl: '' },
-          { name: '陳秋媚', email: 'chiumei@example.com', role: 'staff', initials: '媚', color: 'bg-yellow-200', borderColor: '#eab308', usePhoto: false, avatarUrl: '' },
-          { name: '蔡凱宇', email: 'kaiyu@example.com', role: 'admin', initials: '宇', color: 'bg-purple-200', borderColor: '#a855f7', usePhoto: false, avatarUrl: '' },
-          { name: '盧怡倫', email: 'yilun@example.com', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899', usePhoto: false, avatarUrl: '' },
-        ];
 
         const DEFAULT_LEAVE_TYPES = [
           "公出", "事假", "公假", "病假", "休假", "補休", "出差", 
           "加班申請", "喪假", "生理假", "家庭照顧假", "婚假", "產假", "產前假", "陪產假", "榮譽假"
         ];
 
-        // Default Role Names (Customizable)
         const DEFAULT_ROLE_NAMES = {
             staff: '專員',
             leader: '組長',
@@ -105,7 +89,6 @@
         };
 
         const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出"];
-
         const DEFAULT_WORK_TAGS = ["審查會", "訪視", "成效", "試用", "OFF", "專案報告", "大宗案件", "月報"];
         const DEFAULT_AREA_TAGS = ["高雄", "澎湖", "台東", "屏東", "就業通", "訓就", "分署"];
 
@@ -132,14 +115,6 @@
             "分署": "bg-gray-100 text-gray-800"
         };
 
-        const MOCK_LEAVES = [
-            { id: 'm1', requesterName: '方姿云', type: '休假', start: new Date().toISOString().split('T')[0]+'T09:00', end: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0]+'T18:00', hours: 24, status: 'approved', reason: '年度特休' },
-        ];
-        const MOCK_EVENTS = [
-            { id: 'e1', groupId: 'g1', date: new Date().toISOString().split('T')[0], type: 'tag', item: '審查會', area: '高雄', slot: 'morning', note: '09:00' },
-            { id: 'e2', groupId: 'g1', date: new Date().toISOString().split('T')[0], type: 'person', userName: '高湘怡', userAvatar: '高', userColor: 'bg-red-200', userId: '高湘怡', slot: 'morning' },
-        ];
-
         // --- Helper: Send Mail ---
         const openMailClient = (to, subject, body) => {
             if (!to) {
@@ -157,33 +132,27 @@
             const showPhoto = user.usePhoto && user.avatarUrl;
             const borderColor = user.borderColor || 'transparent';
             
-            // Note: Inline style for borderColor to support arbitrary colors
             if (showPhoto) {
                 return (
                     <div 
                         className={`${size} rounded-full border-2 p-[1px] bg-white overflow-hidden relative ${className}`} 
                         style={{ borderColor: borderColor }}
                     >
-                        <img 
-                            src={user.avatarUrl} 
-                            alt={user.name} 
-                            className="w-full h-full rounded-full object-cover" 
-                        />
+                        <img src={user.avatarUrl} alt={user.name} className="w-full h-full rounded-full object-cover" />
                     </div>
                 );
             }
             return (
                 <div 
-                    className={`${size} rounded-full flex items-center justify-center font-bold border-2 ${user.color} ${textSize} text-gray-800 ${className}`}
+                    className={`${size} rounded-full flex items-center justify-center font-bold border-2 ${user.color || 'bg-gray-200'} ${textSize} text-gray-800 ${className}`}
                     style={{ borderColor: borderColor }}
                 >
-                    {user.initials}
+                    {user.initials || '?'}
                 </div>
             );
         };
 
         // --- Main App Component ---
-
         function App() {
           const [user, setUser] = useState(null); 
           const [userData, setUserData] = useState(null);
@@ -197,29 +166,17 @@
           const [rotationRules, setRotationRules] = useState(DEFAULT_ROTATION_RULES);
           const [roleNames, setRoleNames] = useState(DEFAULT_ROLE_NAMES);
           
-          // UI State
-          const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Mobile toggle
-          const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false); // Desktop collapse
-          const [sidebarTheme, setSidebarTheme] = useState('light'); // 'light' | 'dark'
+          const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+          const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false); 
+          const [sidebarTheme, setSidebarTheme] = useState('light'); 
 
-          // Settings
           const [settings, setSettings] = useState({
-            firebaseConfig: '',
-            commonReasons: ['個人因素', '需處理私事', '身體不適', '年度特休', '例行回診', '會議出差'],
             areaColors: DEFAULT_AREA_COLORS
           });
           
           const [loading, setLoading] = useState(true);
-          const [isOffline, setIsOffline] = useState(true);
-          
           const [db, setDb] = useState(null);
           const [auth, setAuth] = useState(null);
-
-          // Update Users List Persistence
-          const handleUpdateUsers = (newUsers) => {
-              setUsersList(newUsers);
-              localStorage.setItem('systemUsers', JSON.stringify(newUsers));
-          };
 
           const handleUpdateRoleNames = (newNames) => {
               setRoleNames(newNames);
@@ -227,80 +184,43 @@
           };
 
           useEffect(() => {
-            let configToUse = null;
-            
-            // Load saved UI preferences
             const savedTheme = localStorage.getItem('sidebarTheme');
             if (savedTheme) setSidebarTheme(savedTheme);
-            
             const savedCollapsed = localStorage.getItem('isDesktopCollapsed');
             if (savedCollapsed) setIsDesktopCollapsed(JSON.parse(savedCollapsed));
-
-            // Load Saved Users
-            const savedUsers = localStorage.getItem('systemUsers');
-            if (savedUsers) {
-                setUsersList(JSON.parse(savedUsers));
-            } else {
-                setUsersList(DEFAULT_USERS.map(u => ({...u, uid: u.name})));
-            }
-
-            // Load Saved Role Names
             const savedRoleNames = localStorage.getItem('roleNames');
-            if (savedRoleNames) {
-                setRoleNames(JSON.parse(savedRoleNames));
-            }
-
-            // Priority 1: Manual Config in Code (MANUAL_CONFIG)
-            if (MANUAL_CONFIG && MANUAL_CONFIG.apiKey && MANUAL_CONFIG.apiKey.trim() !== "") {
-                configToUse = MANUAL_CONFIG;
-            } else {
-                // Priority 2: Environment Variable & Local Storage
-                try {
-                    const savedConfig = localStorage.getItem('firebaseConfig');
-                    const envConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-                    if (envConfig && envConfig.trim() !== "") configToUse = JSON.parse(envConfig);
-                    else if (savedConfig && savedConfig.trim() !== "") configToUse = JSON.parse(savedConfig);
-                } catch (e) {
-                    console.error("Config Parse Error", e);
-                }
-            }
-
+            if (savedRoleNames) setRoleNames(JSON.parse(savedRoleNames));
             const savedAreaColors = localStorage.getItem('areaColors');
             if(savedAreaColors) setSettings(prev => ({...prev, areaColors: JSON.parse(savedAreaColors)}));
-            
             const savedLeaveTypes = localStorage.getItem('leaveTypes');
             if(savedLeaveTypes) setLeaveTypes(JSON.parse(savedLeaveTypes));
-
             const savedRotationRules = localStorage.getItem('rotationRules');
             if(savedRotationRules) setRotationRules(JSON.parse(savedRotationRules));
-
-            const timeoutId = setTimeout(() => {
-                if (!user && loading) {
-                    setIsOffline(true);
-                    setLoading(false);
-                }
-            }, 3000); 
+            const savedWT = localStorage.getItem('workTags');
+            if (savedWT) setWorkTags(JSON.parse(savedWT));
+            const savedAT = localStorage.getItem('areaTags');
+            if (savedAT) setAreaTags(JSON.parse(savedAT));
 
             const init = async () => {
-                if (configToUse) {
-                    try {
-                        const app = initializeApp(configToUse);
-                        const authInstance = getAuth(app);
-                        const dbInstance = getFirestore(app);
-                        setAuth(authInstance);
-                        setDb(dbInstance);
+                try {
+                    const app = initializeApp(MANUAL_CONFIG);
+                    try { getAnalytics(app); } catch(err) { console.warn("Analytics loading skipped", err); }
 
-                        onAuthStateChanged(authInstance, async (u) => {
-                          if (u) {
+                    const authInstance = getAuth(app);
+                    const dbInstance = getFirestore(app);
+                    setAuth(authInstance);
+                    setDb(dbInstance);
+
+                    onAuthStateChanged(authInstance, async (u) => {
+                        if (u) {
                             setUser(u);
-                            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                             try {
-                                const userRef = doc(dbInstance, 'artifacts', appId, 'public', 'data', 'user_profiles_' + u.uid);
+                                // Corrected path to exactly 6 segments for a document reference
+                                const userRef = doc(dbInstance, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', u.uid);
                                 const snap = await getDoc(userRef);
                                 if (snap.exists()) {
                                     setUserData(snap.data());
                                 } else {
-                                    // 透過 Google 帳號首次登入，自動建立設定檔
                                     const newP = { 
                                         uid: u.uid, 
                                         email: u.email || '', 
@@ -315,93 +235,67 @@
                                     await setDoc(userRef, newP);
                                     setUserData(newP);
                                 }
-                            } catch(e) { console.error("Profile fetch error", e); }
-                            setIsOffline(false);
-                          } else {
+                            } catch(e) { 
+                                console.error("Profile fetch error", e); 
+                                alert("資料庫連線或權限設定錯誤！請檢查 Firestore Rules。\n錯誤訊息: " + e.message);
+                                await signOut(authInstance); 
+                            }
+                        } else {
                             setUser(null);
                             setUserData(null);
-                            setIsOffline(false); // 在線但尚未登入
-                          }
-                          setLoading(false);
-                        });
-                    } catch (e) {
-                        console.error("Firebase Init Error", e);
-                        setIsOffline(true);
+                        }
                         setLoading(false);
-                    }
-                } else {
-                    setIsOffline(true);
+                    });
+                } catch (e) {
+                    console.error("Firebase Init Error", e);
                     setLoading(false);
                 }
             };
             init();
-            
-            const savedWT = localStorage.getItem('workTags');
-            if (savedWT) setWorkTags(JSON.parse(savedWT));
-            const savedAT = localStorage.getItem('areaTags');
-            if (savedAT) setAreaTags(JSON.parse(savedAT));
-
-            return () => clearTimeout(timeoutId);
           }, []);
 
+          // Data Synchronization
           useEffect(() => {
-            if (isOffline) {
-                setLeaves(MOCK_LEAVES);
-                setCalendarEvents(MOCK_EVENTS);
-                return;
-            }
             if (!db || !user) return;
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-            const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'leaves')), 
-              (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))), 
-              () => { setIsOffline(true); });
+            // Leaves Sync
+            const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), 
+              (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))),
+              (e) => console.error("Leaves sync error", e)
+            );
               
-            const unsubEvents = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'calendar_events')), 
-              (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
+            // Events Sync
+            const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), 
+              (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))),
+              (e) => console.error("Events sync error", e)
+            );
 
-            return () => { unsubLeaves(); unsubEvents(); };
-          }, [db, user, isOffline]);
+            // Users List Sync (Cloud-based, no more localStorage fallback)
+            const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')),
+              (s) => setUsersList(s.docs.map(d => ({uid: d.id, ...d.data()}))),
+              (e) => console.error("Users sync error", e)
+            );
 
-          const handleDemoLogin = async (u) => {
-              const mockUid = "mock_" + Date.now();
-              setUser({ uid: mockUid, email: 'demo@offline.com' });
-              // Ensure we include new properties if they don't exist in the default user for some reason
-              const fullProfile = { 
-                  ...u, 
-                  uid: mockUid, 
-                  email: 'demo@offline.com',
-                  borderColor: u.borderColor || 'transparent',
-                  usePhoto: u.usePhoto || false,
-                  avatarUrl: u.avatarUrl || ''
-              };
-              setUserData(fullProfile);
-              setIsOffline(true);
-              // Also update the user in the list for this session so the calendar reflects it
-              setUsersList(prev => prev.map(p => p.name === u.name ? fullProfile : p));
-          };
-          
+            return () => { unsubLeaves(); unsubEvents(); unsubUsers(); };
+          }, [db, user]);
+
           const handleLogout = async () => {
               if(auth) await signOut(auth);
-              setUser(null);
           };
 
           const handleUpdateSettings = (s) => {
               setSettings(s);
-              if(s.firebaseConfig) localStorage.setItem('firebaseConfig', s.firebaseConfig);
               if(s.areaColors) localStorage.setItem('areaColors', JSON.stringify(s.areaColors));
-              // alert("設定已儲存"); // Moved to SettingsView for better feedback
           };
           
           const handleUpdateProfile = async (newProfile) => {
-              setUserData(prev => ({...prev, ...newProfile}));
-              setUsersList(prev => prev.map(u => u.uid === user.uid ? { ...u, ...newProfile } : u));
-              
-              if (!isOffline && db && user) {
-                  const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_profiles_' + user.uid), newProfile);
+              try {
+                  await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', user.uid), newProfile);
+                  setUserData(prev => ({...prev, ...newProfile}));
+                  alert("個人設定已更新");
+              } catch(e) {
+                  alert("更新失敗: " + e.message);
               }
-              alert("個人設定已更新");
           };
 
           const handleUpdateRotationRules = (newRules) => {
@@ -461,29 +355,24 @@
           }
 
           const crud = {
-              createEvent: async (d) => isOffline ? setCalendarEvents(p=>[...p, {id:'l'+Date.now(), ...d}]) : addDoc(collection(db, 'artifacts', typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', 'public', 'data', 'calendar_events'), d),
-              deleteEvent: async (id) => isOffline ? setCalendarEvents(p=>p.filter(e=>e.id!==id)) : deleteDoc(doc(db, 'artifacts', typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', 'public', 'data', 'calendar_events', id)),
+              createEvent: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events'), d),
+              deleteEvent: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events', id)),
               deleteEventsByGroup: async (gid) => {
-                  if(isOffline) {
-                      setCalendarEvents(p=>p.filter(e=>e.groupId!==gid));
-                  } else {
-                      const toDel = calendarEvents.filter(e=>e.groupId===gid);
-                      toDel.forEach(e => deleteDoc(doc(db, 'artifacts', typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', 'public', 'data', 'calendar_events', e.id)));
-                  }
+                  const toDel = calendarEvents.filter(e=>e.groupId===gid);
+                  toDel.forEach(e => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events', e.id)));
               },
-              createLeave: async (d) => isOffline ? setLeaves(p=>[...p, {id:'l'+Date.now(), ...d}]) : addDoc(collection(db, 'artifacts', typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', 'public', 'data', 'leaves'), d),
-              updateLeave: async (id, data) => isOffline ? setLeaves(p=>p.map(l=>l.id===id?{...l, ...data}:l)) : updateDoc(doc(db, 'artifacts', typeof __app_id !== 'undefined' ? __app_id : 'default-app-id', 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() })
+              createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
+              updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() })
           };
 
           if (loading) return (
               <div className="h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-600 gap-4">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                  <div className="text-lg font-medium">系統載入中...</div>
-                  <button onClick={() => { setIsOffline(true); setLoading(false); }} className="text-sm text-blue-500 hover:text-blue-700 underline">太久沒反應？點此轉為離線模式</button>
+                  <div className="text-lg font-medium">連線至雲端資料庫...</div>
               </div>
           );
 
-          if (!user || !userData) return <LoginScreen auth={auth} onDemoLogin={handleDemoLogin} setSettings={setSettings} users={usersList} roleNames={roleNames} />;
+          if (!user || !userData) return <LoginScreen auth={auth} />;
 
           const pendingApprovalCount = (userData.role === 'leader' || userData.role === 'admin') 
             ? leaves.filter(l => l.status === 'deputy_signed').length
@@ -491,7 +380,6 @@
           const myPendingDeputy = leaves.filter(l => l.deputyId === userData.uid && l.status === 'pending').length;
           const totalAlert = pendingApprovalCount + myPendingDeputy;
 
-          // Sidebar Styles
           const isLight = sidebarTheme === 'light';
           const sidebarBg = isLight ? 'bg-white border-r border-gray-200 text-gray-800' : 'bg-slate-800 text-gray-100 border-r border-slate-700';
           const sidebarHover = isLight ? 'hover:bg-gray-100' : 'hover:bg-slate-700';
@@ -499,9 +387,6 @@
           const sidebarTextSec = isLight ? 'text-gray-500' : 'text-slate-400';
           const sidebarProfileBg = isLight ? 'bg-gray-50' : 'bg-slate-900/50';
           const iconColor = isLight ? 'text-blue-600' : 'text-blue-400';
-
-          // Display logic for role in Sidebar (Hide Admin as Staff if needed)
-          // Use roleNames mapping but override for admin
           const userDisplayRole = userData.role === 'admin' ? roleNames['staff'] : roleNames[userData.role];
 
           return (
@@ -516,7 +401,6 @@
                 ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full md:translate-x-0'}
                 ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
               `}>
-                {/* Sidebar Header */}
                 <div className={`p-4 border-b flex items-center ${isLight ? 'border-gray-200' : 'border-slate-700'} ${isDesktopCollapsed ? 'justify-center' : 'justify-between'}`}>
                   {!isDesktopCollapsed && (
                       <div className="flex items-center gap-2">
@@ -536,7 +420,6 @@
                   </button>
                 </div>
                 
-                {/* Profile Section */}
                 <div 
                     className={`p-4 flex items-center gap-3 border-b cursor-pointer transition ${sidebarProfileBg} ${isLight ? 'border-gray-200' : 'border-slate-700'} ${sidebarHover} ${isDesktopCollapsed ? 'justify-center' : ''}`} 
                     onClick={()=>setView('profile')}
@@ -553,7 +436,6 @@
                   )}
                 </div>
 
-                {/* Navigation */}
                 <nav className="flex-1 overflow-y-auto py-2 overflow-x-hidden">
                   {[
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
@@ -585,9 +467,7 @@
                   ))}
                 </nav>
                 
-                {/* Sidebar Footer (Toggle Theme & Logout) */}
                 <div className={`p-4 border-t space-y-2 ${isLight ? 'border-gray-200' : 'border-slate-700'}`}>
-                   {/* Theme Toggle */}
                    <button 
                      onClick={toggleSidebarTheme}
                      className={`flex items-center gap-3 w-full px-2 py-2 rounded transition ${sidebarTextSec} ${sidebarHover} ${isDesktopCollapsed ? 'justify-center' : ''}`}
@@ -596,8 +476,6 @@
                      {isLight ? <Moon size={18} /> : <Sun size={18} />}
                      {!isDesktopCollapsed && <span>{isLight ? "深色模式" : "淺色模式"}</span>}
                    </button>
-
-                   {/* Logout */}
                    <button 
                      onClick={handleLogout} 
                      className={`flex items-center gap-3 w-full px-2 py-2 rounded transition ${sidebarTextSec} hover:bg-red-50 hover:text-red-600 ${!isLight && 'hover:bg-red-900/30 hover:text-red-400'} ${isDesktopCollapsed ? 'justify-center' : ''}`}
@@ -623,7 +501,7 @@
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
                   {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} />}
                   {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} />}
-                  {view === 'members' && <MembersView users={usersList} currentUser={userData} onUpdateUsers={handleUpdateUsers} roleNames={roleNames} />}
+                  {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
@@ -760,12 +638,11 @@
           const [selArea, setSelArea] = useState('');
           const [selUsers, setSelUsers] = useState([]);
           const [editGroupId, setEditGroupId] = useState(null);
-          const [isSubmitting, setIsSubmitting] = useState(false); // Add Loading State
+          const [isSubmitting, setIsSubmitting] = useState(false);
 
           const getDaysInMonth = (d) => new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
           const getFirstDayOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1).getDay();
           
-          // Rotation Stats Logic
           const rotationStats = useMemo(() => {
               const currentYear = new Date().getFullYear();
               const stats = {}; 
@@ -885,7 +762,7 @@
                   return;
               }
 
-              setIsSubmitting(true); // Start Loading
+              setIsSubmitting(true);
 
               try {
                   if (editGroupId) {
@@ -911,7 +788,7 @@
               } catch (e) {
                   alert('儲存失敗：' + e.message);
               } finally {
-                  setIsSubmitting(false); // End Loading
+                  setIsSubmitting(false);
               }
           };
 
@@ -980,7 +857,6 @@
                         <span className="text-xs md:text-sm text-blue-700 font-bold truncate">{tagName}</span>
                         {note && <span className="text-[10px] md:text-xs text-gray-500">({note})</span>}
                         {g.people.map(p => {
-                            // Find current user profile for photo
                             const userProfile = users.find(u => u.uid === p.userId || u.name === p.userName);
                             const displayUser = userProfile || { 
                                 initials: p.userAvatar, 
@@ -1003,7 +879,6 @@
               };
 
               const renderLeaves = () => {
-                  // Bottom aligned logic
                   const leavesOnDay = leaves.filter(l => l.status === 'approved' && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
                   return leavesOnDay.map(l => {
                       return (
@@ -1309,11 +1184,9 @@
 
                     const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status === 'approved');
 
-                    // Logic for status
                     let status = '正常';
                     const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
                     
-                    // Check if user took an official leave
                     const officialLeaves = settings.officialLeaveTypes || ["公出", "公假", "出差"];
                     const isOfficialLeave = myLeave && officialLeaves.includes(myLeave.type);
                     const isPersonalLeave = myLeave && !officialLeaves.includes(myLeave.type);
@@ -1429,7 +1302,7 @@
           const [hours, setHours] = useState(0);
           const [alerts, setAlerts] = useState([]);
           const [preciseTime, setPreciseTime] = useState(false); 
-          const [isSubmitting, setIsSubmitting] = useState(false); // Loading State
+          const [isSubmitting, setIsSubmitting] = useState(false);
 
           useEffect(() => {
               if(form.start && form.end) {
@@ -1458,7 +1331,6 @@
               try {
                   await crud.createLeave({ ...form, requesterId: user.uid, requesterName: user.name, hours, status: 'pending', timestamp: new Date() });
                   
-                  // Email Notification to Deputy
                   const deputy = users.find(u => u.uid === form.deputyId);
                   if (deputy && deputy.email) {
                       openMailClient(
@@ -1533,7 +1405,6 @@
               try {
                   await crud.updateLeave(leave.id, { status: 'deputy_signed' });
                   
-                  // Notify Leaders
                   const leaders = users.filter(u => u.role === 'leader' || u.role === 'admin');
                   const leaderEmails = leaders.map(u => u.email).filter(e => e).join(',');
                   
@@ -1557,7 +1428,6 @@
               try {
                   await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid });
                   
-                  // Notify Requester
                   const requester = users.find(u => u.uid === leave.requesterId || u.name === leave.requesterName); 
                   if (requester && requester.email) {
                       openMailClient(
@@ -1664,28 +1534,30 @@
           );
         }
 
-        function MembersView({ users, currentUser, onUpdateUsers, roleNames }) {
+        function MembersView({ db, users, currentUser, roleNames }) {
             const isAdmin = currentUser && currentUser.role === 'admin';
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editUser, setEditUser] = useState(null);
             
-            const handleSave = (userData) => {
-                let newUsers;
-                if (editUser) {
-                    // Update existing
-                    newUsers = users.map(u => u.uid === userData.uid ? userData : u);
-                } else {
-                    // Create new
-                    newUsers = [...users, { ...userData, uid: userData.name }];
+            const handleSave = async (userData) => {
+                try {
+                    // 同步寫入雲端資料庫
+                    const uid = userData.uid || userData.name; // 新增用戶時如果沒有 uid，預設用名稱
+                    await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', uid), { ...userData, uid });
+                    setIsModalOpen(false);
+                    setEditUser(null);
+                } catch (e) {
+                    alert("儲存失敗: " + e.message);
                 }
-                onUpdateUsers(newUsers);
-                setIsModalOpen(false);
-                setEditUser(null);
             };
 
-            const handleDelete = (uid) => {
+            const handleDelete = async (uid) => {
                 if(confirm("確定要刪除此成員嗎？")) {
-                    onUpdateUsers(users.filter(u => u.uid !== uid));
+                    try {
+                        await deleteDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', uid));
+                    } catch (e) {
+                        alert("刪除失敗: " + e.message);
+                    }
                 }
             };
 
@@ -1716,10 +1588,10 @@
                                 <UserAvatar user={u} size="w-12 h-12" textSize="text-base" />
                                 <div className="flex-1 overflow-hidden">
                                     <div className="font-bold text-gray-800 text-lg truncate">{u.name}</div>
-                                    <div className="text-xs text-gray-400 truncate mb-1">{u.email || '無 Email'}</div>
+                                    <div className="text-xs text-gray-400 truncate mb-1">{u.email || '未綁定 Email'}</div>
                                     <div className="flex gap-2 mt-1">
                                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role==='admin'?'bg-purple-100 text-purple-800':(u.role==='leader'?'bg-blue-100 text-blue-800':'bg-gray-100 text-gray-600')}`}>
-                                            {roleNames[u.role]}
+                                            {roleNames[u.role] || u.role}
                                         </span>
                                     </div>
                                 </div>
@@ -1821,8 +1693,8 @@
 
         function ProfileView({ user, onSave, roleNames }) {
             const [p, setP] = useState({ 
-                initials: user.initials, 
-                color: user.color, 
+                initials: user.initials || '', 
+                color: user.color || 'bg-gray-200', 
                 email: user.email || '',
                 password: '',
                 borderColor: user.borderColor || '#e5e7eb',
@@ -1925,14 +1797,13 @@
             );
         }
 
-        function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, onProfileSave, roleNames, onUpdateRoleNames }) {
-            const [json, setJson] = useState(settings.firebaseConfig || '');
+        function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
             const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
             const [officialLeaves, setOfficialLeaves] = useState(settings.officialLeaveTypes || DEFAULT_LEAVE_TYPES);
             const [newLeave, setNewLeave] = useState('');
             const [newArea, setNewArea] = useState(''); 
             const [localRoleNames, setLocalRoleNames] = useState(roleNames);
-            const [isSettingsSaved, setIsSettingsSaved] = useState(false); // Feedback state
+            const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
 
             const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
 
@@ -1956,17 +1827,8 @@
             }
 
             const handleSaveSettings = () => {
-                // Validate JSON before saving
-                if (json.trim()) {
-                    try {
-                        JSON.parse(json);
-                    } catch (e) {
-                        alert("Firebase 設定格式錯誤！請確保是正確的 JSON 格式 (包含 { })");
-                        return;
-                    }
-                }
                 onUpdateRoleNames(localRoleNames);
-                onSave({...settings, firebaseConfig:json, areaColors: areaC, officialLeaveTypes: officialLeaves});
+                onSave({...settings, areaColors: areaC, officialLeaveTypes: officialLeaves});
                 setIsSettingsSaved(true);
                 setTimeout(() => setIsSettingsSaved(false), 2000);
             };
@@ -1993,59 +1855,36 @@
                     </div>
 
                     <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer"><input type="checkbox" checked={officialLeaves.includes(t)} onChange={()=>toggleOfficialLeave(t)}/> 公務</label><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Settings/> 系統連線設定</h2><textarea className="w-full border p-2 rounded h-32 text-xs font-mono bg-gray-50" value={json} onChange={e=>setJson(e.target.value)} placeholder='{"apiKey": "..."}'></textarea>
+                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer"><input type="checkbox" checked={officialLeaves.includes(t)} onChange={()=>toggleOfficialLeave(t)}/> 公務</label><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
                     <button 
                         onClick={handleSaveSettings} 
-                        className={`mt-4 px-6 py-2 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full sm:w-auto ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
+                        className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
                     >
-                        {isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存所有設定'}
+                        {isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}
                     </button>
                     </div>
                 </div>
             );
         }
 
-        function LoginScreen({ auth, onDemoLogin, setSettings, users, roleNames }) {
-            const [showSet, setShowSet] = useState(false);
-            const [selectedUser, setSelectedUser] = useState('');
-            const [configJson, setConfigJson] = useState('');
-            const [configError, setConfigError] = useState('');
+        // 極簡版登入畫面：移除所有離線/測試選擇，只保留單一 Google 登入入口
+        function LoginScreen({ auth }) {
             const [isLoggingIn, setIsLoggingIn] = useState(false);
 
             const handleGoogleLogin = async () => {
                 if (!auth) {
-                    alert("系統尚未正確連線到 Firebase，無法使用 Google 登入。");
+                    alert("Firebase 尚未連線完成，請稍後再試。");
                     return;
                 }
                 setIsLoggingIn(true);
                 const provider = new GoogleAuthProvider();
                 try {
                     await signInWithPopup(auth, provider);
+                    // 登入成功後，元件會因為外層 App state 改變而被直接卸載，不需手動設回 false
                 } catch (error) {
                     console.error("Google Sign-In Error", error);
-                    alert("登入失敗: " + error.message);
+                    alert("登入被中斷或發生錯誤，請重試。\n詳細訊息: " + error.message);
                     setIsLoggingIn(false);
-                }
-            };
-
-            const handleDemoLogin = () => {
-                if (!selectedUser) return;
-                const user = users.find(u => u.name === selectedUser);
-                if (user) onDemoLogin(user);
-            };
-
-            const handleSaveConfig = () => {
-                if (!configJson.trim()) return;
-                try {
-                    // Try to parse to ensure valid JSON
-                    const parsed = JSON.parse(configJson);
-                    // Save to localStorage directly
-                    localStorage.setItem('firebaseConfig', JSON.stringify(parsed));
-                    // Reload page to re-initialize Firebase
-                    window.location.reload();
-                } catch (e) {
-                    setConfigError('JSON 格式錯誤，請檢查是否複製完整 (包含 { })');
                 }
             };
 
@@ -2054,86 +1893,22 @@
                     <div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center">
                         <div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div>
                         <h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1>
-                        <p className="text-gray-400 text-sm mb-8">Mobile & Desktop Ready</p>
+                        <p className="text-gray-400 text-sm mb-8">企業內部專用版本</p>
                         
-                        {!showSet ? (
-                            <div className="space-y-4">
-                                <button 
-                                    onClick={handleGoogleLogin}
-                                    disabled={isLoggingIn}
-                                    className="w-full py-3 rounded-lg font-bold bg-white border border-gray-300 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm"
-                                >
-                                    {isLoggingIn ? (
-                                        <Loader2 className="animate-spin" size={20}/>
-                                    ) : (
-                                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>
-                                    )}
-                                    <span>{isLoggingIn ? '登入中...' : '使用 Google 帳號登入'}</span>
-                                </button>
-                                
-                                <div className="relative flex py-3 items-center">
-                                    <div className="flex-grow border-t border-gray-200"></div>
-                                    <span className="flex-shrink-0 mx-4 text-gray-400 text-xs font-medium">或使用離線測試</span>
-                                    <div className="flex-grow border-t border-gray-200"></div>
-                                </div>
-
-                                <div className="text-left">
-                                    <div className="relative">
-                                        <select 
-                                            className="w-full appearance-none border border-gray-300 rounded-lg p-3 bg-white text-gray-700 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm pl-12"
-                                            value={selectedUser}
-                                            onChange={(e) => setSelectedUser(e.target.value)}
-                                        >
-                                            <option value="" disabled>-- 選擇測試身分 --</option>
-                                            {users.map(u => (
-                                                <option key={u.name} value={u.name}>
-                                                    {u.name} &nbsp; ({roleNames[u.role]})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center px-3">
-                                            {selectedUser ? (
-                                                <UserAvatar user={users.find(u=>u.name===selectedUser)} size="w-6 h-6" textSize="text-[10px]" />
-                                            ) : (
-                                                <User size={20} className="text-gray-400"/>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button 
-                                    onClick={handleDemoLogin}
-                                    disabled={!selectedUser}
-                                    className={`w-full py-3 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2 ${selectedUser ? 'bg-slate-800 hover:bg-slate-900 shadow-sm' : 'bg-gray-300 cursor-not-allowed'}`}
-                                >
-                                    <span>離線進入</span> <ArrowRight size={18}/>
-                                </button>
-                                
-                                <div className="pt-4 border-t mt-4">
-                                    <button onClick={()=>setShowSet(true)} className="text-xs text-gray-400 underline hover:text-gray-600">
-                                        設定資料庫連線 (Firebase)
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                                <div className="text-left">
-                                    <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings size={16}/> 設定連線</h3>
-                                    <p className="text-xs text-gray-500 mb-2">請貼上 Firebase Console 提供的 Config JSON</p>
-                                    <textarea 
-                                        className="w-full border border-gray-300 rounded-lg p-3 h-32 text-xs font-mono bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                        placeholder='{ "apiKey": "AIza...", ... }' 
-                                        value={configJson}
-                                        onChange={(e)=>{setConfigJson(e.target.value); setConfigError('');}}
-                                    />
-                                    {configError && <p className="text-xs text-red-500 mt-1 font-bold flex items-center gap-1"><AlertTriangle size={12}/> {configError}</p>}
-                                </div>
-                                <div className="flex gap-2">
-                                    <button onClick={()=>setShowSet(false)} className="flex-1 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
-                                    <button onClick={handleSaveConfig} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow hover:bg-blue-700">儲存並連線</button>
-                                </div>
-                            </div>
-                        )}
+                        <div className="space-y-4">
+                            <button 
+                                onClick={handleGoogleLogin}
+                                disabled={isLoggingIn}
+                                className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50"
+                            >
+                                {isLoggingIn ? (
+                                    <Loader2 className="animate-spin text-blue-600" size={20}/>
+                                ) : (
+                                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>
+                                )}
+                                <span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
