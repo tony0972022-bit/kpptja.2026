@@ -865,7 +865,7 @@
                       l.status !== 'rejected' && 
                       dStr >= l.start.split('T')[0] && 
                       dStr <= l.end.split('T')[0] &&
-                      !["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)"].includes(l.type)
+                      !["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)", "榮譽假(獲得)"].includes(l.type)
                   );
                   return leavesOnDay.map(l => (
                       <div key={l.id} className="text-[10px] md:text-[11px] border-l-[3px] border-pink-500 bg-pink-50 text-pink-700 pl-1.5 py-0.5 my-0.5 w-full truncate font-medium rounded-r-sm">
@@ -1001,16 +1001,25 @@
         }
 
         function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users }) {
+            const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
             const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7)); 
             const [leaveFilter, setLeaveFilter] = useState('all');
             const [selectedIds, setSelectedIds] = useState([]);
+
             const scheduleData = useMemo(() => {
                 const daysInMonth = new Date(month.split('-')[0], month.split('-')[1], 0).getDate();
                 const data = [];
                 for(let i=1; i<=daysInMonth; i++) {
                     const dateStr = `${month}-${String(i).padStart(2,'0')}`;
                     const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && e.userName === user.name).map(p => { const tag = events.find(t => t.groupId === p.groupId && t.type === 'tag'); return { ...p, tag }; });
-                    const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status !== 'rejected'); 
+                    
+                    // 修正：嚴格限制為「我自己的假單」，避免與我擔任職代的假單混淆
+                    const myLeave = leaves.find(l => 
+                        (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
+                        l.start.startsWith(dateStr) && 
+                        l.status !== 'rejected'
+                    ); 
+                    
                     let status = '正常';
                     const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
                     const officialLeaves = ["公出", "公假", "出差", "加班申請(列計)", "加班申請(不列計)"];
@@ -1027,10 +1036,12 @@
                     }
                     else if (myWork.length > 0) status = '內勤';
                     else status = '無行程';
+                    
                     if (myWork.length > 0 || myLeave) { data.push({ name: user.name, date: dateStr, work: myWork, leave: myLeave, status }); }
                 }
                 return data;
-            }, [events, leaves, month, user.name]);
+            }, [events, leaves, month, user.name, user.uid, user.docId]);
+
             const flatRows = useMemo(() => {
                 let rows = [];
                 scheduleData.forEach((d, idx) => {
@@ -1040,7 +1051,6 @@
                             id: `${d.date}-${subIdx}`, name: d.name, date: d.date, slot: w.isLeaveOnly ? 'all_day' : w.slot,
                             leaveType: d.leave?.type || '-', leaveHours: d.leave?.hours || '-',
                             content: w.isLeaveOnly ? '' : (w.tag?.item || ''), 
-                            // 處理陣列格式的轄區文字
                             area: w.isLeaveOnly ? '' : (Array.isArray(w.tag?.area) ? w.tag.area.join(', ') : (w.tag?.area || '')),
                             reason: d.leave?.reason || '-', note: w.isLeaveOnly ? '-' : (w.tag?.note || '-'),
                             status: d.status, rawTag: w.tag, rawLeave: d.leave
@@ -1049,13 +1059,24 @@
                 });
                 return rows;
             }, [scheduleData]);
+
             const filteredRows = useMemo(() => {
                 if (leaveFilter === 'all') return flatRows;
                 return flatRows.filter(r => r.leaveType === leaveFilter);
             }, [flatRows, leaveFilter]);
+
+            // 第二區：職代情況
+            const deputyLeaves = useMemo(() => {
+                return leaves.filter(l => 
+                    (l.deputyId === user.uid || l.deputyId === user.docId) && 
+                    l.start.startsWith(month)
+                ).sort((a, b) => new Date(a.start) - new Date(b.start));
+            }, [leaves, user.uid, user.docId, month]);
+
             const isAllSelected = filteredRows.length > 0 && selectedIds.length === filteredRows.length;
             const toggleAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(filteredRows.map(r => r.id)); };
             const toggleOne = (id) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
+            
             const downloadBatchICS = () => {
                 const selectedRowsData = filteredRows.filter(r => selectedIds.includes(r.id) && (r.content || r.leaveType !== '-'));
                 if (selectedRowsData.length === 0) { alert("請先勾選要加入行事曆的有效排班或請假項目！"); return; }
@@ -1086,6 +1107,7 @@
                 link.download = `出勤行事曆_${month}.ics`;
                 link.click();
             };
+            
             const exportCSV = () => {
                 let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),職代,排班內容,事由,備註,狀態(同意)\n";
                 filteredRows.forEach(r => {
@@ -1099,18 +1121,92 @@
                 link.download = `${user.name}_${month}_排班表.csv`;
                 link.click();
             };
+            
             const handleRecallLeave = async (leaveId) => {
                 if(confirm("確定要撤回/刪除這筆請假單嗎？\n(撤回後，若日曆有外勤排班，系統會自動在「請假申請」頁面再次提醒您重新送單！)")) {
                     try { await crud.deleteLeave(leaveId); alert("假單已成功撤回！"); } catch (e) { alert("撤回失敗: " + e.message); }
                 }
             };
+
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
-                        <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 請假狀況 (個人出勤一覽)</h2>
-                        <div className="flex flex-wrap gap-4 w-full md:w-auto"><input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} /><select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none"><option value="all">所有假別/出勤</option><optgroup label="公務與加班">{leaveTypes.filter(t=>t.category==='official').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="私假">{leaveTypes.filter(t=>t.category==='personal').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select><div className="flex gap-2 w-full md:w-auto"><button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-indigo-700 transition"><CalendarPlus size={16}/> 批次加行事曆 (.ics)</button><button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-green-700 transition"><FileSpreadsheet size={16}/> 匯出 Excel</button></div></div>
+                        <div className="flex items-center gap-4 flex-wrap">
+                            <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 請假與職代狀況</h2>
+                            <div className="flex bg-gray-100 p-1 rounded-lg">
+                                <button onClick={() => setActiveTab('mine')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'mine' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第一區：個人請假狀況</button>
+                                <button onClick={() => setActiveTab('deputy')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'deputy' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第二區：我是職代</button>
+                            </div>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+                            <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
+                            {activeTab === 'mine' && (
+                                <>
+                                    <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none"><option value="all">所有假別/出勤</option><optgroup label="公務與加班">{leaveTypes.filter(t=>t.category==='official').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="私假">{leaveTypes.filter(t=>t.category==='personal').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>
+                                    <button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-3 py-2 rounded flex items-center gap-1 text-sm hover:bg-indigo-700 transition" title="批次加入行事曆"><CalendarPlus size={16}/></button>
+                                    <button onClick={exportCSV} className="bg-green-600 text-white px-3 py-2 rounded flex items-center gap-1 text-sm hover:bg-green-700 transition" title="匯出 Excel"><FileSpreadsheet size={16}/></button>
+                                </>
+                            )}
+                        </div>
                     </div>
-                    <div className="bg-white rounded shadow overflow-hidden"><table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b font-bold text-gray-600"><tr><th className="p-3 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-3 w-16">姓名</th><th className="p-3 w-28">日期</th><th className="p-3 w-14">時間</th><th className="p-3 w-20">假別</th><th className="p-3 w-14">時數</th><th className="p-3 w-20">職代</th><th className="p-3">排班內容</th><th className="p-3 w-28">事由</th><th className="p-3 w-28">備註</th><th className="p-3 w-28">狀態</th><th className="p-3 w-16 text-center">操作</th></tr></thead><tbody>{filteredRows.map((r) => { const canRecall = r.rawLeave && (r.rawLeave.status === 'pending' || r.rawLeave.status === 'rejected'); const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId)?.name || '未知') : '-'; return (<tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 transition ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}><td className="p-3 text-center"><input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></td><td className="p-3 font-medium">{r.name}</td><td className="p-3 text-xs">{r.date}</td><td className="p-3 text-xs">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td><td className="p-3">{r.leaveType !== '-' ? <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">{r.leaveType}</span> : '-'}</td><td className="p-3 text-xs">{r.leaveHours}</td><td className="p-3 text-xs text-blue-700">{deputyName}</td><td className="p-3 text-xs">{r.content ? (<span className="font-bold text-gray-700">{r.content} {r.area && `(${r.area})`}</span>) : <span className="text-gray-400">-</span>}</td><td className="p-3 text-xs text-gray-500">{r.reason}</td><td className="p-3 text-xs text-gray-500">{r.note}</td><td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold leading-tight inline-block ${r.status === '缺公務單' ? 'bg-red-100 text-red-600' : r.status === '異常公出' || ['假別不符', '已駁回'].includes(r.status) ? 'bg-orange-100 text-orange-600' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{r.status === '異常公出' ? '異常公出 (請確認排班日曆是否已換人員)' : r.status}</span></td><td className="p-3 text-center">{canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition flex items-center gap-1 mx-auto" title="撤回未核准的單據"><Undo size={12}/> 撤回</button>)}</td></tr>) })}{filteredRows.length === 0 && <tr><td colSpan="12" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}</tbody></table></div>
+
+                    {activeTab === 'mine' ? (
+                        <div className="bg-white rounded shadow overflow-hidden animate-in fade-in">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50 border-b font-bold text-gray-600">
+                                    <tr><th className="p-3 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-3 w-16">姓名</th><th className="p-3 w-28">日期</th><th className="p-3 w-14">時間</th><th className="p-3 w-20">假別</th><th className="p-3 w-14">時數</th><th className="p-3 w-20">職代</th><th className="p-3">排班內容</th><th className="p-3 w-28">事由</th><th className="p-3 w-28">備註</th><th className="p-3 w-28">狀態</th><th className="p-3 w-16 text-center">操作</th></tr>
+                                </thead>
+                                <tbody>
+                                    {filteredRows.map((r) => { 
+                                        const canRecall = r.rawLeave && (r.rawLeave.status === 'pending' || r.rawLeave.status === 'rejected'); 
+                                        const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId)?.name || '未知') : '-'; 
+                                        return (
+                                            <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 transition ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
+                                                <td className="p-3 text-center"><input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></td>
+                                                <td className="p-3 font-medium">{r.name}</td>
+                                                <td className="p-3 text-xs">{r.date}</td>
+                                                <td className="p-3 text-xs">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td>
+                                                <td className="p-3">{r.leaveType !== '-' ? <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">{r.leaveType}</span> : '-'}</td>
+                                                <td className="p-3 text-xs">{r.leaveHours}</td>
+                                                <td className="p-3 text-xs text-blue-700">{deputyName}</td>
+                                                <td className="p-3 text-xs">{r.content ? (<span className="font-bold text-gray-700">{r.content} {r.area && `(${r.area})`}</span>) : <span className="text-gray-400">-</span>}</td>
+                                                <td className="p-3 text-xs text-gray-500">{r.reason}</td>
+                                                <td className="p-3 text-xs text-gray-500">{r.note}</td>
+                                                <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold leading-tight inline-block ${r.status === '缺公務單' ? 'bg-red-100 text-red-600' : r.status === '異常公出' || ['假別不符', '已駁回'].includes(r.status) ? 'bg-orange-100 text-orange-600' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{r.status === '異常公出' ? '異常公出 (請確認排班日曆是否已換人員)' : r.status}</span></td>
+                                                <td className="p-3 text-center">{canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition flex items-center gap-1 mx-auto" title="撤回未核准的單據"><Undo size={12}/> 撤回</button>)}</td>
+                                            </tr>
+                                        ) 
+                                    })}
+                                    {filteredRows.length === 0 && <tr><td colSpan="12" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded shadow overflow-hidden animate-in fade-in">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50 border-b font-bold text-gray-600">
+                                    <tr><th className="p-3 w-20">申請人</th><th className="p-3 w-32">日期/時間</th><th className="p-3 w-24">假別</th><th className="p-3 w-16">時數</th><th className="p-3">事由</th><th className="p-3 w-28">單據狀態</th></tr>
+                                </thead>
+                                <tbody>
+                                    {deputyLeaves.length > 0 ? deputyLeaves.map(l => (
+                                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
+                                            <td className="p-3 font-bold text-gray-800">{l.requesterName}</td>
+                                            <td className="p-3 text-xs text-gray-500">{l.start.replace('T', ' ')} <br/>~ {l.end.replace('T', ' ')}</td>
+                                            <td className="p-3 font-bold text-blue-600">{l.type}</td>
+                                            <td className="p-3 text-xs">{l.hours} 小時</td>
+                                            <td className="p-3 text-xs text-gray-600">{l.reason}</td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'pending' ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-500'}`}>
+                                                    {l.status === 'pending' ? '等待您同意' : '已簽核'}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    )) : <tr><td colSpan="6" className="p-8 text-center text-gray-400">目前沒有需要您擔任職代的假單。</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1292,7 +1388,7 @@
 
             const handleEditExtraLeave = () => {
                 if (!isAdminOrLeader) return;
-                const newDays = prompt(`請輸入 ${targetUser.name} 的「單位額外特休」天數 (目前為 ${extraLeaveDays} 天)：\n此為手動加給，不會被系統覆蓋。`, extraLeaveDays);
+                const newDays = prompt(`請輸入 ${targetUser.name} 的「單位額外特休」天數 (目前為 ${extraLeaveDays} 天)：\n*若要取消/刪除配額，請直接輸入 0。`, extraLeaveDays);
                 if (newDays !== null && !isNaN(newDays) && newDays.trim() !== '') {
                     onUpdateAnyProfile(targetUser.docId, { extraLeaveDays: Number(newDays) });
                 }
@@ -1322,6 +1418,27 @@
                     alert('榮譽假發放成功！已自動計入時數餘額與明細中。');
                 } catch (e) {
                     alert('發放失敗: ' + e.message);
+                }
+            };
+
+            // 新增：刪除與編輯榮譽假功能
+            const handleDeleteHonor = async (id) => {
+                if (!isAdminOrLeader) return;
+                if(confirm("確定要刪除這筆「榮譽假(獲得)」紀錄嗎？")) {
+                    try {
+                        await crud.deleteLeave(id);
+                        alert("刪除成功");
+                    } catch(e) { alert("刪除失敗: " + e.message); }
+                }
+            };
+            const handleEditHonor = async (l) => {
+                if (!isAdminOrLeader) return;
+                const newHours = prompt(`修改「榮譽假(獲得)」時數：`, l.hours);
+                if (newHours !== null && !isNaN(newHours) && newHours.trim() !== '') {
+                    try {
+                        await crud.updateLeave(l.id, { hours: Number(newHours) });
+                        alert("修改成功");
+                    } catch(e) { alert("修改失敗: " + e.message); }
                 }
             };
 
@@ -1368,7 +1485,7 @@
                         )}
                     </div>
 
-                    <div className="bg-white rounded shadow overflow-hidden border border-gray-100"><div className="p-4 border-b bg-gray-50"><h3 className="font-bold text-gray-700 flex items-center gap-2"><List size={18}/> 請假使用紀錄 ({selectedMonth === 'all' ? '全年' : `${selectedMonth} 月`})</h3></div><table className="w-full text-sm text-left"><thead className="bg-white border-b text-gray-500"><tr><th className="p-3 w-28">日期</th><th className="p-3 w-28">時間</th><th className="p-3 w-32">假別</th><th className="p-3 w-20">扣除</th><th className="p-3">事由</th></tr></thead><tbody>{filteredLeaves.map(l => {
+                    <div className="bg-white rounded shadow overflow-hidden border border-gray-100"><div className="p-4 border-b bg-gray-50"><h3 className="font-bold text-gray-700 flex items-center gap-2"><List size={18}/> 請假使用紀錄 ({selectedMonth === 'all' ? '全年' : `${selectedMonth} 月`})</h3></div><table className="w-full text-sm text-left"><thead className="bg-white border-b text-gray-500"><tr><th className="p-3 w-28">日期</th><th className="p-3 w-28">時間</th><th className="p-3 w-32">假別</th><th className="p-3 w-20">扣除</th><th className="p-3">事由</th>{isAdminOrLeader && <th className="p-3 w-20 text-center">操作</th>}</tr></thead><tbody>{filteredLeaves.map(l => {
                         // 分解日期與時間
                         const d1 = l.start.split('T')[0];
                         const t1 = l.start.split('T')[1] || '';
@@ -1384,9 +1501,19 @@
                                 <td className="p-3 font-bold text-blue-700">{l.type}</td>
                                 <td className="p-3"><span className="bg-gray-100 px-2 py-0.5 rounded font-bold text-xs">{l.type.includes('加班') || l.type.includes('補休') || l.type.includes('榮譽假') ? `${l.hours} 時` : `${l.hours/8} 天`}</span></td>
                                 <td className="p-3 text-gray-600">{l.reason}</td>
+                                {isAdminOrLeader && (
+                                    <td className="p-3 text-center">
+                                        {l.type === '榮譽假(獲得)' && (
+                                            <div className="flex justify-center gap-1">
+                                                <button onClick={() => handleEditHonor(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded transition" title="修改時數"><Edit2 size={14}/></button>
+                                                <button onClick={() => handleDeleteHonor(l.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition" title="刪除紀錄"><Trash2 size={14}/></button>
+                                            </div>
+                                        )}
+                                    </td>
+                                )}
                             </tr>
                         )
-                    })}{filteredLeaves.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div>
+                    })}{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div>
                 </div>
             );
         }
