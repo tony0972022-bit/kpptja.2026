@@ -131,12 +131,12 @@
         };
 
         const PREDEFINED_USERS = [
-            { email: 'kaiyu097@gmail.com', name: '凱宇', role: 'admin', initials: '宇', color: 'bg-purple-200', borderColor: '#a855f7' },
-            { email: 'n85551@gmail.com', name: '國裕', role: 'leader', initials: '裕', color: 'bg-blue-200', borderColor: '#3b82f6' },
-            { email: 'hkkwork@gmail.com', name: '湘怡', role: 'staff', initials: '湘', color: 'bg-red-200', borderColor: '#ef4444' },
-            { email: 'judyfang1226@gmail.com', name: '姿云', role: 'staff', initials: '姿', color: 'bg-green-200', borderColor: '#22c55e' },
-            { email: 'kppt1110601@gmail.com', name: '秋媚', role: 'staff', initials: '媚', color: 'bg-yellow-200', borderColor: '#eab308' },
-            { email: 'yilun1208@gmail.com', name: '怡倫', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899' },
+            { email: 'kaiyu097@gmail.com', name: '蔡凱宇', role: 'admin', initials: '宇', color: 'bg-purple-200', borderColor: '#a855f7' },
+            { email: 'n85551@gmail.com', name: '黃國裕', role: 'leader', initials: '裕', color: 'bg-blue-200', borderColor: '#3b82f6' },
+            { email: 'hkkwork@gmail.com', name: '高湘怡', role: 'staff', initials: '湘', color: 'bg-red-200', borderColor: '#ef4444' },
+            { email: 'judyfang1226@gmail.com', name: '方姿云', role: 'staff', initials: '姿', color: 'bg-green-200', borderColor: '#22c55e' },
+            { email: 'kppt1110601@gmail.com', name: '陳秋媚', role: 'staff', initials: '媚', color: 'bg-yellow-200', borderColor: '#eab308' },
+            { email: 'yilun1208@gmail.com', name: '盧怡倫', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899' },
             { email: 'tony0972022@gmail.com', name: 'Tony測試', role: 'staff', initials: '測', color: 'bg-gray-200', borderColor: '#9ca3af' }
         ];
 
@@ -1541,7 +1541,7 @@
               const pending = [];
               Object.values(groups).forEach(g => {
                   if (!g.tag) return;
-                  if (g.tag.date < todayStr) return; // 忽略過去的排班
+                  // 移除日期限制：讓過去未送出差單的外勤任務也能夠顯示出來補單
                   
                   const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
                   if (!isExternal) return;
@@ -2030,12 +2030,12 @@
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-500 mb-1">名字 (顯示)</label>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1">姓名 (系統顯示全名)</label>
                                     <input 
                                         className="w-full border p-2 rounded" 
                                         value={form.name} 
-                                        onChange={e=>setForm({...form, name:e.target.value, initials: e.target.value.slice(0,1)})} 
-                                        placeholder="例如: 凱宇"
+                                        onChange={e=>setForm({...form, name:e.target.value, initials: e.target.value.slice(-1)})} 
+                                        placeholder="例如: 蔡凱宇"
                                     />
                                 </div>
                             </div>
@@ -2157,8 +2157,8 @@
                                 <input className="border p-2 rounded w-full h-9 bg-gray-50 focus:bg-white transition" value={p.lastName} onChange={e=>setP({...p, lastName:e.target.value})} placeholder="例如：蔡" />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-gray-600 mb-1">名字 (系統顯示用)</label>
-                                <input className="border p-2 rounded w-full h-9 bg-gray-50 focus:bg-white transition" value={p.name} onChange={e=>setP({...p, name:e.target.value})} placeholder="例如：凱宇" />
+                                <label className="block text-sm font-bold text-gray-600 mb-1">姓名 (系統顯示全名)</label>
+                                <input className="border p-2 rounded w-full h-9 bg-gray-50 focus:bg-white transition" value={p.name} onChange={e=>setP({...p, name:e.target.value})} placeholder="例如：蔡凱宇" />
                             </div>
                         </div>
 
