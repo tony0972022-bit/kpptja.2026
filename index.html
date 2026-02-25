@@ -44,7 +44,7 @@
         import { 
           Calendar, User, Users, ClipboardList, LogOut, Plus, CheckCircle, XCircle, AlertCircle,
           Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
-          Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight,
+          Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight, ChevronDown,
           Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
           Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo, PieChart, Download, CheckSquare
         } from 'lucide-react';
@@ -189,6 +189,7 @@
           const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
           const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false); 
           const [sidebarTheme, setSidebarTheme] = useState('light'); 
+          const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
 
           const [settings, setSettings] = useState({
             areaColors: DEFAULT_AREA_COLORS,
@@ -499,25 +500,59 @@
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
                     {id:'leave', icon:<ClipboardList size={20}/>, label:'請假申請'},
-                    ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
                     {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
                     {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
-                    {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'},
-                    ...(userData.role === 'admin' ? [{id:'management', icon:<List size={20}/>, label:'項目管理'}] : []),
-                    ...(userData.role === 'admin' ? [{id:'members', icon:<Users size={20}/>, label:'成員管理'}] : []),
-                    ...(userData.role === 'admin' ? [{id:'database', icon:<Database size={20}/>, label:'資料庫管理'}] : []),
-                    ...(userData.role === 'admin' ? [{id:'settings', icon:<Settings size={20}/>, label:'系統設定'}] : []),
-                    {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'}
+                    {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'},
+                    {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'}
                   ].map(item => (
                     <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
                       <div className={`flex items-center gap-3 ${isDesktopCollapsed ? '' : 'w-full'}`}>
                           <div className="shrink-0">{item.icon}</div>
                           {!isDesktopCollapsed && <span>{item.label}</span>}
                       </div>
-                      {!isDesktopCollapsed && item.count > 0 && <span className={`${view===item.id ? 'bg-white text-blue-600' : 'bg-red-500 text-white'} text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-auto`}>{item.count}</span>}
-                      {isDesktopCollapsed && item.count > 0 && <div className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
                     </button>
                   ))}
+                  
+                  {/* 管理與審核專區摺疊選單 */}
+                  {(userData.role === 'leader' || userData.role === 'admin') && (
+                    <div className={`mt-2 ${isLight ? 'border-t border-gray-200' : 'border-t border-slate-700'} pt-2`}>
+                      <button onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)} className={`w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`} title={isDesktopCollapsed ? "管理與審核" : ""}>
+                         <div className="flex items-center gap-3">
+                             <div className="shrink-0 relative">
+                                 <Shield size={20}/>
+                                 {isDesktopCollapsed && totalAlert > 0 && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
+                             </div>
+                             {!isDesktopCollapsed && <span className="font-bold text-sm">管理與審核專區</span>}
+                         </div>
+                         {!isDesktopCollapsed && (
+                             <div className="flex items-center gap-2">
+                                 {totalAlert > 0 && !isAdminMenuOpen && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">{totalAlert}</span>}
+                                 {isAdminMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                             </div>
+                         )}
+                      </button>
+                      
+                      {(isAdminMenuOpen || isDesktopCollapsed) && (
+                          <div className={isDesktopCollapsed ? '' : (isLight ? 'bg-gray-100/50' : 'bg-slate-900/30')}>
+                            {[
+                              {id:'approval', icon:<CheckCircle size={18}/>, label:'差單審核', count: totalAlert},
+                              ...(userData.role === 'admin' ? [{id:'members', icon:<Users size={18}/>, label:'成員管理'}] : []),
+                              ...(userData.role === 'admin' ? [{id:'database', icon:<Database size={18}/>, label:'資料庫管理'}] : []),
+                              ...(userData.role === 'admin' ? [{id:'settings', icon:<Settings size={18}/>, label:'系統設定'}] : [])
+                            ].map(item => (
+                              <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`w-full flex items-center py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center px-4' : 'justify-between pl-10 pr-4'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
+                                <div className={`flex items-center gap-3 ${isDesktopCollapsed ? '' : 'w-full'}`}>
+                                    <div className="shrink-0">{item.icon}</div>
+                                    {!isDesktopCollapsed && <span className="text-sm">{item.label}</span>}
+                                </div>
+                                {!isDesktopCollapsed && item.count > 0 && <span className={`${view===item.id ? 'bg-white text-blue-600' : 'bg-red-500 text-white'} text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-auto`}>{item.count}</span>}
+                                {isDesktopCollapsed && item.count > 0 && <div className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></div>}
+                              </button>
+                            ))}
+                          </div>
+                      )}
+                    </div>
+                  )}
                 </nav>
                 <div className={`p-4 border-t space-y-2 ${isLight ? 'border-gray-200' : 'border-slate-700'}`}>
                    <button onClick={toggleSidebarTheme} className={`flex items-center gap-3 w-full px-2 py-2 rounded transition ${sidebarTextSec} ${sidebarHover} ${isDesktopCollapsed ? 'justify-center' : ''}`} title={isLight ? "切換至深色模式" : "切換至淺色模式"}>
@@ -546,7 +581,6 @@
                   {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} settings={settings} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
-                  {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
@@ -2119,14 +2153,6 @@
             return (<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}><div className="bg-white rounded-xl w-full max-w-md shadow-2xl p-6" onClick={e=>e.stopPropagation()}><h3 className="font-bold text-lg mb-4 text-gray-800">{user ? '編輯成員' : '新增成員'}</h3><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">姓氏 (留存)</label><input className="w-full border p-2 rounded" value={form.lastName || ''} onChange={e=>setForm({...form, lastName:e.target.value})} placeholder="例如: 蔡"/></div><div><label className="block text-xs font-bold text-gray-500 mb-1">姓名 (系統顯示全名)</label><input className="w-full border p-2 rounded" value={form.name} onChange={e=>setForm({...form, name:e.target.value, initials: e.target.value.slice(-1)})} placeholder="例如: 蔡凱宇"/></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">Email (登入綁定用)</label><input className="w-full border p-2 rounded" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} placeholder="example@gmail.com"/></div><div><label className="block text-xs font-bold text-gray-500 mb-1">職稱 (角色權限)</label><select className="w-full border p-2 rounded bg-white" value={form.role} onChange={e=>setForm({...form, role:e.target.value})}><option value="staff">{roleNames['staff']} (一般權限)</option><option value="leader">{roleNames['leader']} (可審核)</option><option value="admin">{roleNames['admin']} (完全控制)</option></select></div></div><div className="grid grid-cols-2 gap-4 border-t border-gray-100 pt-3"><div><label className="block text-xs font-bold text-gray-500 mb-1">到職日期 (計算特休用)</label><input type="date" className="w-full border p-2 rounded" value={form.joinDate || ''} onChange={e=>setForm({...form, joinDate:e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">單位額外特休 (手動給假)</label><input type="number" min="0" className="w-full border p-2 rounded" value={form.extraLeaveDays || 0} onChange={e=>setForm({...form, extraLeaveDays: Number(e.target.value)})} /></div></div><div className="grid grid-cols-2 gap-4 pt-1"><div><label className="block text-xs font-bold text-gray-500 mb-1">顯示單字</label><input className="w-full border p-2 rounded" value={form.initials} onChange={e=>setForm({...form, initials:e.target.value})} maxLength={1}/></div><div><label className="block text-xs font-bold text-gray-500 mb-1">預設底色</label><div className="flex gap-1 h-9 items-center">{['bg-red-200','bg-blue-200','bg-green-200','bg-yellow-200','bg-purple-200'].map(c=>(<div key={c} onClick={()=>setForm({...form, color:c})} className={`w-6 h-6 rounded-full cursor-pointer border ${c} ${form.color===c?'ring-2 ring-black':''}`}></div>))}</div></div></div><div className="pt-2 flex gap-3"><button onClick={onClose} className="flex-1 py-2 text-gray-500 hover:bg-gray-100 rounded">取消</button><button onClick={()=>onSave(form)} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-700">儲存</button></div></div></div></div>);
         }
 
-        function ManagementView({ tags }) {
-            const [newWork, setNewWork] = useState('');
-            const [newArea, setNewArea] = useState('');
-            return (
-                <div className="max-w-4xl mx-auto space-y-6"><h2 className="text-xl font-bold flex items-center gap-2"><List/> 項目管理</h2><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-blue-700">工作項目</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newWork} onChange={e=>setNewWork(e.target.value)} /><button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.workTags.map(tag => (<div key={tag} className="bg-blue-50 text-blue-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-blue-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div><div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-green-700">轄區</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>{tags.handleAddTag('area', newArea); setNewArea('')}} className="bg-green-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.areaTags.map(tag => (<div key={tag} className="bg-green-50 text-green-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('area', tag)} className="text-green-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div></div></div>
-            );
-        }
-
         function ProfileView({ user, onSave, roleNames }) {
             const [p, setP] = useState({ lastName: user.lastName || '', name: user.name || '', initials: user.initials || '', color: user.color || 'bg-gray-200', email: user.email || '', password: '', borderColor: user.borderColor || '#e5e7eb', usePhoto: user.usePhoto || false, avatarUrl: user.avatarUrl || '', joinDate: user.joinDate || '' });
             const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2144,6 +2170,7 @@
             
             const [editAreaId, setEditAreaId] = useState(null);
             const [newArea, setNewArea] = useState(''); 
+            const [newWork, setNewWork] = useState(''); 
             
             const [newHolidayDate, setNewHolidayDate] = useState('');
             const [newHolidayName, setNewHolidayName] = useState('');
@@ -2152,7 +2179,7 @@
             const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
             const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
             
-            const handleColorChange = (area, colorClass) => { const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area); if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; } setAreaC({...areaC, [area]: colorClass}); };
+            const handleColorChange = (area, colorClass) => { setAreaC({...areaC, [area]: colorClass}); };
             
             const handleAddAreaWithColor = () => { 
                 if(!newArea) return; 
@@ -2194,6 +2221,25 @@
                 <div className="max-w-3xl mx-auto space-y-8">
                     <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div></div><p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p></div>
                     
+                    <div className="bg-white p-6 rounded shadow-sm">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Briefcase/> 工作項目設定</h2>
+                        <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+                            <h3 className="text-sm font-bold text-gray-700 mb-3">新增工作項目</h3>
+                            <div className="flex gap-2">
+                                <input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="輸入工作項目..." value={newWork} onChange={e=>setNewWork(e.target.value)} />
+                                <button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition">新增項目</button>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {tags.workTags.map(tag => (
+                                <div key={tag} className="bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-full text-sm flex items-center gap-2 shadow-sm">
+                                    <span className="font-bold">{tag}</span>
+                                    <button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="bg-white p-6 rounded shadow-sm">
                         <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色/編輯)</h2>
                         <div className={`border rounded-lg p-4 mb-6 transition-colors ${editAreaId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
