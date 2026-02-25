@@ -46,7 +46,7 @@
           Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
           Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight,
           Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
-          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Clock4, PieChart, Trash, Megaphone, Flag
+          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Clock4, PieChart, Trash
         } from 'lucide-react';
 
         // --- Firebase 綁定設定 ---
@@ -92,6 +92,7 @@
         const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "OFF", "專案報告", "大宗", "月報"];
         const DEFAULT_AREA_TAGS = ["高雄", "澎湖", "台東", "屏東", "就業通", "訓就", "分署"];
 
+        // 🌟 修復：將名稱修改為與預設名單中的「名」一致，解決輪序表沒反應的問題
         const DEFAULT_ROTATION_RULES = [
           { id: 'visit', name: '澎東訪視', matchTag: '訪視', order: ['湘怡', '國裕', '姿云', '秋媚', '凱宇', '怡倫'] },
           { id: 'project', name: '專案報告', matchTag: '專案報告', order: ['怡倫', '湘怡', '國裕', '姿云', '凱宇', '秋媚'] },
@@ -125,26 +126,28 @@
             { email: 'tony0972022@gmail.com', name: 'Tony測試', role: 'staff', initials: '測', color: 'bg-gray-200', borderColor: '#9ca3af' }
         ];
 
-        // 絕對安全的本地時區 ISO 日期產生器
-        const getSafeLocalDateStr = (dObj) => {
-            const tzOffset = dObj.getTimezoneOffset() * 60000;
-            return new Date(dObj.getTime() - tzOffset).toISOString().split('T')[0];
-        };
-
         // --- Helper Component: User Avatar ---
         const UserAvatar = ({ user, size = "w-8 h-8", textSize = "text-xs", className = "" }) => {
             if (!user) return <div className={`${size} rounded-full bg-gray-200 ${className}`}></div>;
+            
             const showPhoto = user.usePhoto && user.avatarUrl;
             const borderColor = user.borderColor || 'transparent';
+            
             if (showPhoto) {
                 return (
-                    <div className={`${size} rounded-full border-2 p-[1px] bg-white overflow-hidden relative flex-shrink-0 ${className}`} style={{ borderColor: borderColor }}>
+                    <div 
+                        className={`${size} rounded-full border-2 p-[1px] bg-white overflow-hidden relative flex-shrink-0 ${className}`} 
+                        style={{ borderColor: borderColor }}
+                    >
                         <img src={user.avatarUrl} alt={user.name} className="w-full h-full rounded-full object-cover" />
                     </div>
                 );
             }
             return (
-                <div className={`${size} rounded-full flex items-center justify-center font-bold border-2 flex-shrink-0 ${user.color || 'bg-gray-200'} ${textSize} text-gray-800 ${className}`} style={{ borderColor: borderColor }}>
+                <div 
+                    className={`${size} rounded-full flex items-center justify-center font-bold border-2 flex-shrink-0 ${user.color || 'bg-gray-200'} ${textSize} text-gray-800 ${className}`}
+                    style={{ borderColor: borderColor }}
+                >
                     {user.initials || '?'}
                 </div>
             );
@@ -160,7 +163,6 @@
           const [calendarEvents, setCalendarEvents] = useState([]);
           const [clockIns, setClockIns] = useState([]);
           const [leaveQuotas, setLeaveQuotas] = useState([]);
-          const [announcements, setAnnouncements] = useState([]); 
           const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
           const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
           const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
@@ -172,7 +174,6 @@
           const [sidebarTheme, setSidebarTheme] = useState('light'); 
 
           const [settings, setSettings] = useState({ areaColors: DEFAULT_AREA_COLORS });
-          const [globalSettings, setGlobalSettings] = useState({ calendarOverrides: {} }); 
           
           const [loading, setLoading] = useState(true);
           const [db, setDb] = useState(null);
@@ -184,32 +185,22 @@
           };
 
           useEffect(() => {
-            // 防呆：確保讀取快取失敗時不會導致陣列變成 undefined 讓畫面全白
-            const safeParse = (key, fallback) => {
-                try {
-                    const item = localStorage.getItem(key);
-                    if (item && item !== 'null' && item !== 'undefined') {
-                        const parsed = JSON.parse(item);
-                        if (parsed !== null && typeof parsed === 'object') return parsed;
-                    }
-                } catch (e) { console.warn(`解析 ${key} 失敗，使用預設值`); }
-                return fallback;
-            };
-
             const savedTheme = localStorage.getItem('sidebarTheme');
             if (savedTheme) setSidebarTheme(savedTheme);
-            
-            setIsDesktopCollapsed(safeParse('isDesktopCollapsed', false));
-            setRoleNames(safeParse('roleNames', DEFAULT_ROLE_NAMES));
-            setSettings(prev => ({...prev, areaColors: safeParse('areaColors', DEFAULT_AREA_COLORS)}));
-            setLeaveTypes(safeParse('leaveTypes', DEFAULT_LEAVE_TYPES));
-            setRotationRules(safeParse('rotationRules', DEFAULT_ROTATION_RULES));
-            
-            const wt = safeParse('workTags', DEFAULT_WORK_TAGS);
-            setWorkTags(Array.isArray(wt) ? wt : DEFAULT_WORK_TAGS);
-            
-            const at = safeParse('areaTags', DEFAULT_AREA_TAGS);
-            setAreaTags(Array.isArray(at) ? at : DEFAULT_AREA_TAGS);
+            const savedCollapsed = localStorage.getItem('isDesktopCollapsed');
+            if (savedCollapsed) setIsDesktopCollapsed(JSON.parse(savedCollapsed));
+            const savedRoleNames = localStorage.getItem('roleNames');
+            if (savedRoleNames) setRoleNames(JSON.parse(savedRoleNames));
+            const savedAreaColors = localStorage.getItem('areaColors');
+            if(savedAreaColors) setSettings(prev => ({...prev, areaColors: JSON.parse(savedAreaColors)}));
+            const savedLeaveTypes = localStorage.getItem('leaveTypes');
+            if(savedLeaveTypes) setLeaveTypes(JSON.parse(savedLeaveTypes));
+            const savedRotationRules = localStorage.getItem('rotationRules');
+            if(savedRotationRules) setRotationRules(JSON.parse(savedRotationRules));
+            const savedWT = localStorage.getItem('workTags');
+            if (savedWT) setWorkTags(JSON.parse(savedWT));
+            const savedAT = localStorage.getItem('areaTags');
+            if (savedAT) setAreaTags(JSON.parse(savedAT));
 
             const init = async () => {
                 try {
@@ -236,6 +227,7 @@
                                     let needsUpdate = false;
 
                                     if (currentData.uid !== u.uid) { currentData.uid = u.uid; needsUpdate = true; }
+
                                     if (matchedUser && (currentData.role !== matchedUser.role || currentData.name !== matchedUser.name)) {
                                         currentData = { ...currentData, role: matchedUser.role, name: matchedUser.name, initials: matchedUser.initials, color: matchedUser.color, borderColor: matchedUser.borderColor };
                                         needsUpdate = true;
@@ -245,12 +237,14 @@
                                     setUserData({ ...currentData, docId });
                                 } else {
                                     const newP = { 
-                                        uid: u.uid, email: u.email || '', 
+                                        uid: u.uid, 
+                                        email: u.email || '', 
                                         name: matchedUser ? matchedUser.name : (u.displayName || '新成員'), 
                                         role: matchedUser ? matchedUser.role : 'staff', 
                                         initials: matchedUser ? matchedUser.initials : (u.displayName ? u.displayName.slice(0, 1) : '新'), 
                                         color: matchedUser ? matchedUser.color : 'bg-blue-200',
-                                        usePhoto: !!u.photoURL, avatarUrl: u.photoURL || '',
+                                        usePhoto: !!u.photoURL,
+                                        avatarUrl: u.photoURL || '',
                                         borderColor: matchedUser ? matchedUser.borderColor : '#3b82f6'
                                     };
                                     await setDoc(userRef, newP);
@@ -266,23 +260,27 @@
                         }
                         setLoading(false);
                     });
-                } catch (e) { setLoading(false); }
+                } catch (e) {
+                    setLoading(false);
+                }
             };
             init();
           }, []);
 
-          // Data Synchronization
           useEffect(() => {
             if (!db || !user) return;
-            const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
-            const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
-            const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
-            const unsubClockIns = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setClockIns(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-            const unsubQuotas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas')), (s) => setLeaveQuotas(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-            const unsubAnnouncements = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements')), (s) => setAnnouncements(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-            const unsubGlobal = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), (docSnap) => { if (docSnap.exists()) setGlobalSettings(docSnap.data()); });
+            const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), 
+              (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
+            const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), 
+              (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
+            const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')),
+              (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
+            const unsubClockIns = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')),
+              (s) => setClockIns(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+            const unsubQuotas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas')),
+              (s) => setLeaveQuotas(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
-            return () => { unsubLeaves(); unsubEvents(); unsubUsers(); unsubClockIns(); unsubQuotas(); unsubAnnouncements(); unsubGlobal(); };
+            return () => { unsubLeaves(); unsubEvents(); unsubUsers(); unsubClockIns(); unsubQuotas(); };
           }, [db, user]);
 
           const handleLogout = async () => { if(auth) await signOut(auth); };
@@ -338,6 +336,7 @@
               },
               createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
               updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
+              // 🌟 新增：刪除假單的方法
               deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id)),
               saveClockIn: async (d) => {
                   const existing = clockIns.find(c => c.date === d.date && c.userId === d.userId);
@@ -348,10 +347,7 @@
                   const existing = leaveQuotas.find(q => q.year === d.year && q.userId === d.userId);
                   if (existing) await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas', existing.id), d);
                   else await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas'), d);
-              },
-              createAnnouncement: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements'), d),
-              deleteAnnouncement: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'announcements', id)),
-              saveGlobalSettings: async (d) => await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), d, { merge: true })
+              }
           };
 
           if (loading) return (
@@ -363,7 +359,8 @@
 
           if (!user || !userData) return <LoginScreen auth={auth} />;
 
-          const pendingApprovalCount = (userData.role === 'leader' || userData.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').length : 0;
+          const pendingApprovalCount = (userData.role === 'leader' || userData.role === 'admin') 
+            ? leaves.filter(l => l.status === 'deputy_signed').length : 0;
           const myPendingDeputy = leaves.filter(l => (l.deputyId === userData.uid || l.deputyId === (userData.email || '').toLowerCase()) && l.status === 'pending').length;
           const totalAlert = pendingApprovalCount + myPendingDeputy;
 
@@ -405,11 +402,11 @@
                 <nav className="flex-1 overflow-y-auto py-2 overflow-x-hidden">
                   {[
                     {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
-                    {id:'clockin', icon:<Clock4 size={20}/>, label:'本月打卡一覽'},
+                    {id:'clockin', icon:<Clock4 size={20}/>, label:'線上打卡'}, 
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
                     {id:'leave', icon:<ClipboardList size={20}/>, label:'差勤填寫'},
                     ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
-                    {id:'personal', icon:<FileText size={20}/>, label:'差勤一覽表'},
+                    {id:'personal', icon:<FileText size={20}/>, label:'差勤一覽表'}, // 🌟 更新名稱
                     {id:'leave_balance', icon:<PieChart size={20}/>, label:'特休與額度查詢'},
                     {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'},
                     ...(userData.role === 'admin' ? [{id:'management', icon:<List size={20}/>, label:'項目管理'}] : []),
@@ -451,15 +448,15 @@
 
                 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
                   {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} />}
-                  {view === 'clockin' && <MonthlyClockInView user={userData} users={usersList} clockIns={clockIns} leaves={leaves} events={calendarEvents} crud={crud} globalSettings={globalSettings} />}
-                  {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} globalSettings={globalSettings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} announcements={announcements} />}
+                  {view === 'clockin' && <ClockInView user={userData} clockIns={clockIns} crud={crud} />}
+                  {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
                   {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} />}
-                  {view === 'personal' && <AttendanceView user={userData} users={usersList} events={calendarEvents} leaves={leaves} clockIns={clockIns} leaveTypes={leaveTypes} crud={crud} globalSettings={globalSettings} />}
+                  {view === 'personal' && <AttendanceView user={userData} users={usersList} events={calendarEvents} leaves={leaves} clockIns={clockIns} leaveTypes={leaveTypes} crud={crud} />}
                   {view === 'leave_balance' && <LeaveBalanceView user={userData} users={usersList} leaves={leaves} quotas={leaveQuotas} crud={crud} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
-                  {view === 'settings' && <SettingsView settings={settings} globalSettings={globalSettings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} crud={crud} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
+                  {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
               </div>
@@ -467,163 +464,101 @@
           );
         }
 
-        // --- 模組：本月打卡一覽 ---
-        function MonthlyClockInView({ user, users, clockIns, leaves, events, crud, globalSettings }) {
-            const [month, setMonth] = useState(getSafeLocalDateStr(new Date()).slice(0, 7));
-            const [localRecords, setLocalRecords] = useState({});
-            const [defaultIn, setDefaultIn] = useState('08:00');
-            const [defaultOut, setDefaultOut] = useState('17:00');
-            const [isSaving, setIsSaving] = useState(false);
-
-            const monthData = useMemo(() => {
-                const parts = month.split('-');
-                const y = parseInt(parts[0], 10);
-                const m = parseInt(parts[1], 10);
-                const daysInMonth = new Date(y, m, 0).getDate();
-                const data = [];
-
-                for(let i=1; i<=daysInMonth; i++) {
-                    const dateStr = `${month}-${String(i).padStart(2,'0')}`;
-                    const dObj = new Date(dateStr);
-                    
-                    const override = globalSettings?.calendarOverrides?.[dateStr];
-                    let isHoliday = !!TAIWAN_HOLIDAYS_2026[dateStr];
-                    let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
-                    let holidayName = TAIWAN_HOLIDAYS_2026[dateStr] || '';
-                    
-                    if (override) {
-                        if (override.type === 'holiday') { isHoliday = true; isWeekend = true; holidayName = override.name; } 
-                        else if (override.type === 'workday') { isHoliday = false; isWeekend = false; }
-                    }
-
-                    const myLeave = (leaves || []).find(l => l.start && l.start.startsWith(dateStr) && l.status === 'approved' && (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name));
-                    const myWork = (events || []).filter(e => e.date === dateStr && e.type === 'person' && (e.userId === user.docId || e.userName === user.name)).map(p => events.find(t => t.groupId === p.groupId && t.type === 'tag'));
-                    const isExternal = myWork.some(w => w && (EXTERNAL_WORK_TAGS || []).includes(w.item));
-
-                    let status = 'workday';
-                    let statusText = '正常出勤';
-                    if (isWeekend || isHoliday) { status = 'holiday'; statusText = holidayName || '例假日'; }
-                    else if (myLeave) { status = 'leave'; statusText = `請假 (${myLeave.type})`; }
-                    else if (isExternal) { status = 'external'; statusText = '外勤任務'; }
-
-                    const dbRecord = (clockIns || []).find(c => c.date === dateStr && c.userId === (user.docId || user.uid));
-
-                    data.push({ date: dateStr, dayOfWeek: ['日','一','二','三','四','五','六'][dObj.getDay()], status, statusText, dbRecord });
-                }
-                return data;
-            }, [month, leaves, events, clockIns, user, globalSettings]);
+        // --- 🌟 模組：線上打卡 ---
+        function ClockInView({ user, clockIns, crud }) {
+            const [currentTime, setCurrentTime] = useState(new Date());
 
             useEffect(() => {
-                const initial = {};
-                monthData.forEach(d => { initial[d.date] = { clockIn: d.dbRecord?.clockIn || '', clockOut: d.dbRecord?.clockOut || '' }; });
-                setLocalRecords(initial);
-            }, [monthData]);
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
 
-            const handleInputChange = (date, field, val) => { setLocalRecords(prev => ({ ...prev, [date]: { ...prev[date], [field]: val } })); };
+            const tzOffset = currentTime.getTimezoneOffset() * 60000;
+            const todayStr = (new Date(currentTime - tzOffset)).toISOString().slice(0, 10);
+            
+            const myTodayRecord = clockIns.find(c => c.date === todayStr && c.userId === (user.docId || user.uid));
 
-            const handleBulkFill = () => {
-                const updated = { ...localRecords };
-                monthData.forEach(d => {
-                    if (d.status === 'workday' || d.status === 'external') {
-                        if (!updated[d.date].clockIn) updated[d.date].clockIn = defaultIn;
-                        if (!updated[d.date].clockOut) updated[d.date].clockOut = defaultOut;
-                    }
-                });
-                setLocalRecords(updated);
-            };
+            const handleClock = async (type) => {
+                const timeStr = currentTime.toTimeString().slice(0, 5); 
+                const record = myTodayRecord || { userId: user.docId || user.uid, userName: user.name, date: todayStr };
+                
+                if (type === 'in') record.clockIn = timeStr;
+                if (type === 'out') record.clockOut = timeStr;
 
-            const handleSaveAll = async () => {
-                setIsSaving(true);
                 try {
-                    for (const d of monthData) {
-                        const local = localRecords[d.date];
-                        const db = d.dbRecord || {};
-                        if (local.clockIn !== (db.clockIn || '') || local.clockOut !== (db.clockOut || '')) {
-                            await crud.saveClockIn({ userId: user.docId || user.uid, userName: user.name, date: d.date, clockIn: local.clockIn, clockOut: local.clockOut });
-                        }
-                    }
-                    alert("打卡紀錄已全部儲存！");
-                } catch (e) { alert("儲存失敗: " + e.message); } 
-                finally { setIsSaving(false); }
-            };
-
-            const exportCSV = () => {
-                let csv = "\uFEFF日期,星期,出勤狀態,上班時間,下班時間\n";
-                monthData.forEach(d => {
-                    const local = localRecords[d.date] || {};
-                    csv += `${d.date},${d.dayOfWeek},${d.statusText},${local.clockIn},${local.clockOut}\n`;
-                });
-                const link = document.createElement("a"); link.href = encodeURI("data:text/csv;charset=utf-8," + csv); link.download = `打卡紀錄_${user.name}_${month}.csv`; link.click();
+                    await crud.saveClockIn(record);
+                    alert(`${type === 'in' ? '上班' : '下班'}打卡成功：${timeStr}`);
+                } catch(e) {
+                    alert('打卡失敗：' + e.message);
+                }
             };
 
             return (
-                <div className="max-w-4xl mx-auto space-y-6">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
-                        <h2 className="text-xl font-bold flex items-center gap-2"><Clock4/> 本月打卡一覽</h2>
-                        <div className="flex gap-2 w-full md:w-auto">
-                            <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
-                            <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition flex-1 md:flex-none"><FileSpreadsheet size={16}/> 下載 Excel</button>
-                        </div>
+                <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8 text-center mt-10">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">線上打卡</h2>
+                    <p className="text-gray-500 mb-8">{todayStr.replace(/-/g, ' / ')}</p>
+                    
+                    <div className="text-6xl font-black text-blue-600 tracking-wider mb-10 font-mono">
+                        {currentTime.toTimeString().slice(0, 8)}
                     </div>
 
-                    <div className="bg-white p-4 rounded shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-end bg-indigo-50/50">
-                        <div><label className="block text-xs font-bold text-gray-600 mb-1">預設上班</label><input type="time" className="border rounded p-2 text-sm bg-white" value={defaultIn} onChange={e=>setDefaultIn(e.target.value)} /></div>
-                        <div><label className="block text-xs font-bold text-gray-600 mb-1">預設下班</label><input type="time" className="border rounded p-2 text-sm bg-white" value={defaultOut} onChange={e=>setDefaultOut(e.target.value)} /></div>
-                        <button onClick={handleBulkFill} className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-indigo-700 transition">批量填寫空白工作日</button>
-                        <div className="flex-1"></div>
-                        <button onClick={handleSaveAll} disabled={isSaving} className={`w-full md:w-auto px-6 py-2 rounded text-sm font-bold shadow-md flex items-center justify-center gap-2 text-white ${isSaving ? 'bg-gray-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900'}`}>{isSaving ? <><Loader2 className="animate-spin" size={16}/> 儲存中...</> : <><Check size={16}/> 儲存所有變更</>}</button>
-                    </div>
-
-                    <div className="bg-white rounded shadow overflow-hidden">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-50 border-b font-bold text-gray-600"><tr><th className="p-3 w-32">日期</th><th className="p-3 w-16 text-center">星期</th><th className="p-3 w-40">出勤狀態</th><th className="p-3">上班時間</th><th className="p-3">下班時間</th></tr></thead>
-                            <tbody>
-                                {monthData.map(d => {
-                                    const local = localRecords[d.date] || { clockIn: '', clockOut: '' };
-                                    const rowBg = d.status === 'holiday' ? 'bg-red-50/30 text-red-800' : d.status === 'leave' ? 'bg-pink-50/50' : d.status === 'external' ? 'bg-blue-50/30' : 'hover:bg-gray-50';
-                                    return (
-                                        <tr key={d.date} className={`border-b last:border-0 transition ${rowBg}`}>
-                                            <td className="p-3 font-medium">{d.date}</td>
-                                            <td className="p-3 text-center">{d.dayOfWeek}</td>
-                                            <td className="p-3 font-bold">{d.statusText}</td>
-                                            <td className="p-3"><input type="time" className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white/80 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none w-32" value={local.clockIn} onChange={e => handleInputChange(d.date, 'clockIn', e.target.value)} /></td>
-                                            <td className="p-3"><input type="time" className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white/80 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none w-32" value={local.clockOut} onChange={e => handleInputChange(d.date, 'clockOut', e.target.value)} /></td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+                    <div className="grid grid-cols-2 gap-4">
+                        <button 
+                            onClick={() => handleClock('in')}
+                            disabled={myTodayRecord?.clockIn}
+                            className={`py-4 rounded-xl font-bold text-lg transition flex flex-col items-center justify-center gap-2 ${myTodayRecord?.clockIn ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-100 text-green-700 hover:bg-green-200 hover:shadow'}`}
+                        >
+                            <span className="text-sm">{myTodayRecord?.clockIn ? `已打卡 ${myTodayRecord.clockIn}` : '上班打卡'}</span>
+                        </button>
+                        <button 
+                            onClick={() => handleClock('out')}
+                            className={`py-4 rounded-xl font-bold text-lg transition flex flex-col items-center justify-center gap-2 bg-blue-100 text-blue-700 hover:bg-blue-200 hover:shadow`}
+                        >
+                            <span className="text-sm">{myTodayRecord?.clockOut ? `已下班 ${myTodayRecord.clockOut} (可覆蓋)` : '下班打卡'}</span>
+                        </button>
                     </div>
                 </div>
             );
         }
 
-        // --- 模組：特休與額度查詢 ---
+        // --- 🌟 模組：特休與額度查詢 ---
         function LeaveBalanceView({ user, users, leaves, quotas, crud }) {
             const currentYear = new Date().getFullYear();
             const isAdmin = user.role === 'admin' || user.role === 'leader';
             
             const getUsedLeave = (uid, type) => {
-                const userLeaves = (leaves || []).filter(l => 
-                    (l.requesterId === uid || l.requesterName === (users || []).find(u=>u.docId===uid)?.name) && 
-                    l.status === 'approved' && l.start && l.start.startsWith(String(currentYear)) && l.type === type
+                const userLeaves = leaves.filter(l => 
+                    (l.requesterId === uid || l.requesterName === users.find(u=>u.docId===uid)?.name) && 
+                    l.status === 'approved' && 
+                    l.start.startsWith(String(currentYear)) && 
+                    l.type === type
                 );
                 return userLeaves.reduce((sum, l) => sum + (Number(l.hours) || 0), 0);
             };
 
             const userListToRender = isAdmin ? users : [user];
+
             const handleUpdateQuota = async (uid, type, currentVal) => {
                 const input = prompt(`請輸入新的【${type}】總時數額度 (小時):`, currentVal || 0);
                 if (input === null || isNaN(input)) return;
+                
                 const val = Number(input);
                 const qData = quotas.find(q => q.userId === uid && q.year === currentYear) || { userId: uid, year: currentYear };
                 qData[type] = val;
-                try { await crud.saveQuota(qData); } catch(e) { alert("更新失敗"); }
+                
+                try {
+                    await crud.saveQuota(qData);
+                } catch(e) {
+                    alert("更新失敗");
+                }
             };
 
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
-                    <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm"><h2 className="text-xl font-bold flex items-center gap-2"><PieChart/> {currentYear} 年度 特休與出缺勤查詢</h2></div>
+                    <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm">
+                        <h2 className="text-xl font-bold flex items-center gap-2"><PieChart/> {currentYear} 年度 特休與出缺勤查詢</h2>
+                    </div>
+
                     <div className="bg-white rounded shadow overflow-hidden">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-50 border-b font-bold text-gray-600">
@@ -641,21 +576,34 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {(userListToRender || []).map(u => {
+                                {userListToRender.map(u => {
                                     const uid = u.docId || u.uid;
                                     const q = quotas.find(q => q.userId === uid && q.year === currentYear) || {};
+                                    
                                     const tTotal = q['特休'] || 0; const tUsed = getUsedLeave(uid, '特休');
                                     const bTotal = q['病假'] || 0; const bUsed = getUsedLeave(uid, '病假');
                                     const sTotal = q['事假'] || 0; const sUsed = getUsedLeave(uid, '事假');
+
                                     return (
                                         <tr key={uid} className="border-b last:border-0 hover:bg-gray-50">
                                             <td className="p-3 font-bold">{u.name}</td>
-                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '特休', tTotal)}>{tTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}</td>
-                                            <td className="p-3 text-center text-red-500">{tUsed}</td><td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{tTotal - tUsed}</td>
-                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '病假', bTotal)}>{bTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}</td>
-                                            <td className="p-3 text-center text-red-500">{bUsed}</td><td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{bTotal - bUsed}</td>
-                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '事假', sTotal)}>{sTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}</td>
-                                            <td className="p-3 text-center text-red-500">{sUsed}</td><td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{sTotal - sUsed}</td>
+                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '特休', tTotal)}>
+                                                {tTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}
+                                            </td>
+                                            <td className="p-3 text-center text-red-500">{tUsed}</td>
+                                            <td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{tTotal - tUsed}</td>
+
+                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '病假', bTotal)}>
+                                                {bTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}
+                                            </td>
+                                            <td className="p-3 text-center text-red-500">{bUsed}</td>
+                                            <td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{bTotal - bUsed}</td>
+
+                                            <td className="p-3 border-l text-center group cursor-pointer" onClick={() => isAdmin && handleUpdateQuota(uid, '事假', sTotal)}>
+                                                {sTotal} {isAdmin && <Edit2 size={12} className="inline opacity-0 group-hover:opacity-100 text-blue-500"/>}
+                                            </td>
+                                            <td className="p-3 text-center text-red-500">{sUsed}</td>
+                                            <td className="p-3 text-center font-bold text-green-600 bg-green-50/30">{sTotal - sUsed}</td>
                                         </tr>
                                     )
                                 })}
@@ -666,18 +614,20 @@
             );
         }
 
-        // --- 模組：儀表板 ---
+        // --- Sub-Components ---
         function Dashboard({ user, leaves, calendarEvents, setView }) {
           const today = new Date();
           const weekDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
-          const todayStr = getSafeLocalDateStr(today);
+          const tzOffset = today.getTimezoneOffset() * 60000;
+          const todayStr = (new Date(today - tzOffset)).toISOString().slice(0, 10);
           
-          const pendingCount = (leaves || []).filter(l => l.status !== 'approved' && l.status !== 'rejected').length;
+          const pendingCount = leaves.filter(l => l.status !== 'approved' && l.status !== 'rejected').length;
           
-          const todayLeaveList = (leaves || []).filter(l => l.start && l.start.startsWith(todayStr) && l.status !== 'rejected');
+          // 🌟 儀表板資訊擴充：提取具體人員名單
+          const todayLeaveList = leaves.filter(l => l.start.startsWith(todayStr) && l.status !== 'rejected');
           const todayLeaveNames = [...new Set(todayLeaveList.map(l => l.requesterName))];
 
-          const todayExternalEvents = (calendarEvents || []).filter(e => e.date === todayStr && e.type === 'person')
+          const todayExternalEvents = calendarEvents.filter(e => e.date === todayStr && e.type === 'person')
               .filter(p => {
                   const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
                   return tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item);
@@ -691,16 +641,17 @@
               for(let i=0; i<5; i++) {
                   const d = new Date(start);
                   d.setDate(start.getDate() + i);
-                  const dStr = getSafeLocalDateStr(d);
+                  const dStr = (new Date(d - d.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
                   
                   const externalPeople = { morning: [], afternoon: [], all_day: [] };
-                  (calendarEvents || []).filter(e => e.date === dStr && e.type === 'person').forEach(p => {
+                  calendarEvents.filter(e => e.date === dStr && e.type === 'person').forEach(p => {
                       const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
                       if (tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item)) {
                           const s = p.slot || 'all_day';
                           if(externalPeople[s]) externalPeople[s].push(p.userAvatar); 
                       }
                   });
+                  
                   week.push({ day: weekDays[i+1], date: dStr, external: externalPeople });
               }
               return week;
@@ -712,29 +663,72 @@
               <div className="bg-white p-6 rounded-lg shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800">早安，{user.name} 👋</h2>
-                  <p className="text-sm text-gray-500 font-medium">{today.getFullYear()}/{today.getMonth()+1}/{today.getDate()} ({weekDays[today.getDay()]})</p>
+                  <p className="text-sm text-gray-500 font-medium">
+                    {today.getFullYear()}/{today.getMonth()+1}/{today.getDate()} ({weekDays[today.getDay()]})
+                  </p>
                 </div>
                 <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-1">
                   {WEATHER_LOCATIONS.map((w,i)=>(
                     <div key={i} className="min-w-[70px] bg-gray-50 p-2 rounded flex flex-col items-center border border-gray-100">
-                      <span className="text-xs text-gray-500">{w.location}</span><div className="my-1">{w.icon}</div><span className="text-xs font-bold">{w.temp}</span>
+                      <span className="text-xs text-gray-500">{w.location}</span>
+                      <div className="my-1">{w.icon}</div>
+                      <span className="text-xs font-bold">{w.temp}</span>
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* 🌟 更新：儀表板改為顯示明確名單 */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500"><h3 className="text-gray-500 text-sm font-medium">今日外勤人員</h3><div className="text-blue-700 mt-2 font-bold flex flex-wrap gap-1">{todayExternalNames.length > 0 ? todayExternalNames.map(n => <span key={n} className="bg-blue-50 px-2 py-1 rounded">{n}</span>) : <span className="text-gray-400">本日無人外勤</span>}</div></div>
-                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500"><h3 className="text-gray-500 text-sm font-medium">今日請假人員</h3><div className="text-green-700 mt-2 font-bold flex flex-wrap gap-1">{todayLeaveNames.length > 0 ? todayLeaveNames.map(n => <span key={n} className="bg-green-50 px-2 py-1 rounded">{n}</span>) : <span className="text-gray-400">本日全員出勤</span>}</div></div>
-                  <div onClick={() => setView('approval')} className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-orange-500 cursor-pointer hover:bg-orange-50 transition"><h3 className="text-gray-500 text-sm font-medium flex items-center justify-between">全系統待審假單 <ArrowRight size={16}/></h3><span className="text-2xl font-bold text-orange-600 block mt-1">{pendingCount} 筆</span></div>
+                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500">
+                    <h3 className="text-gray-500 text-sm font-medium">今日外勤人員</h3>
+                    <div className="text-blue-700 mt-2 font-bold flex flex-wrap gap-1">
+                        {todayExternalNames.length > 0 ? todayExternalNames.map(n => <span key={n} className="bg-blue-50 px-2 py-1 rounded">{n}</span>) : <span className="text-gray-400">本日無人外勤</span>}
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500">
+                    <h3 className="text-gray-500 text-sm font-medium">今日請假人員</h3>
+                    <div className="text-green-700 mt-2 font-bold flex flex-wrap gap-1">
+                        {todayLeaveNames.length > 0 ? todayLeaveNames.map(n => <span key={n} className="bg-green-50 px-2 py-1 rounded">{n}</span>) : <span className="text-gray-400">本日全員出勤</span>}
+                    </div>
+                  </div>
+                  <div 
+                    onClick={() => setView('approval')}
+                    className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-orange-500 cursor-pointer hover:bg-orange-50 transition"
+                  >
+                    <h3 className="text-gray-500 text-sm font-medium flex items-center justify-between">
+                        全系統待審假單 <ArrowRight size={16}/>
+                    </h3>
+                    <span className="text-2xl font-bold text-orange-600 block mt-1">{pendingCount} 筆</span>
+                  </div>
               </div>
+
               <div className="bg-white rounded-lg shadow-sm border p-4">
                   <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Briefcase size={18}/> 本週外勤概況</h3>
                   <div className="overflow-x-auto">
                       <table className="w-full text-xs text-left">
-                          <thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-2 w-16">日期</th><th className="p-2">上午</th><th className="p-2">下午</th><th className="p-2">整天</th></tr></thead>
+                          <thead>
+                              <tr className="bg-gray-50 border-b text-gray-500">
+                                  <th className="p-2 w-16">日期</th>
+                                  <th className="p-2">上午</th>
+                                  <th className="p-2">下午</th>
+                                  <th className="p-2">整天</th>
+                              </tr>
+                          </thead>
                           <tbody>
                               {weekData.map((d, idx) => (
-                                  <tr key={idx} className="border-b last:border-0"><td className="p-2 font-bold text-gray-600">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td><td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 rounded">{n}</span>) : '-'}</div></td><td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 rounded">{n}</span>) : '-'}</div></td><td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 rounded">{n}</span>) : '-'}</div></td></tr>
+                                  <tr key={idx} className="border-b last:border-0">
+                                      <td className="p-2 font-bold text-gray-600">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td>
+                                      <td className="p-2">
+                                          <div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 rounded">{n}</span>) : '-'}</div>
+                                      </td>
+                                      <td className="p-2">
+                                          <div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 rounded">{n}</span>) : '-'}</div>
+                                      </td>
+                                      <td className="p-2">
+                                          <div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 rounded">{n}</span>) : '-'}</div>
+                                      </td>
+                                  </tr>
                               ))}
                           </tbody>
                       </table>
@@ -744,15 +738,12 @@
           );
         }
 
-        // --- 模組：排班日曆 ---
-        function CalendarView({ user, users, events, leaves, crud, tags, settings, globalSettings, rotationRules, onUpdateRotationRules, announcements }) {
+        function CalendarView({ users, events, leaves, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
           const [date, setDate] = useState(new Date());
           const [viewMode, setViewMode] = useState('month');
           const [modalOpen, setModalOpen] = useState(false);
           const [rotationModalOpen, setRotationModalOpen] = useState(false);
-          const [announceModalOpen, setAnnouncementModalOpen] = useState(false);
           const [modalData, setModalData] = useState({ date: '', workItem: '', note: '' });
-          const [announceData, setAnnounceData] = useState({ title: '', date: '', assignee: user?.name || '', description: '' });
           const [selSlot, setSelSlot] = useState('morning'); 
           const [selArea, setSelArea] = useState('');
           const [selUsers, setSelUsers] = useState([]);
@@ -761,25 +752,22 @@
 
           const getDaysInMonth = (d) => new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
           const getFirstDayOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1).getDay();
-          const todayStr = getSafeLocalDateStr(new Date());
           
-          const upcomingAnnouncements = (announcements || [])
-              .filter(a => a && a.date && a.date >= todayStr)
-              .sort((a,b) => (a.date || '').localeCompare(b.date || ''));
-
           const rotationStats = useMemo(() => {
               const currentYear = new Date().getFullYear();
               const stats = {}; 
-              (rotationRules || []).forEach(rule => {
+              rotationRules.forEach(rule => {
                   stats[rule.id] = {};
                   rule.order.forEach(name => stats[rule.id][name] = 0);
               });
-              (events || []).forEach(e => {
-                  if (e && e.type === 'person' && e.date && new Date(e.date).getFullYear() === currentYear) {
+              events.forEach(e => {
+                  if (e.type === 'person' && new Date(e.date).getFullYear() === currentYear) {
                       const tagEv = events.find(t => t.groupId === e.groupId && t.type === 'tag');
                       if (tagEv) {
-                          const rule = (rotationRules || []).find(r => r.matchTag === tagEv.item);
-                          if (rule && stats[rule.id] && stats[rule.id][e.userName] !== undefined) stats[rule.id][e.userName]++;
+                          const rule = rotationRules.find(r => r.matchTag === tagEv.item);
+                          if (rule && stats[rule.id][e.userName] !== undefined) {
+                              stats[rule.id][e.userName]++;
+                          }
                       }
                   }
               });
@@ -787,74 +775,102 @@
           }, [events, rotationRules]);
 
           const getNextRotationPerson = (matchTag) => {
-              const rule = (rotationRules || []).find(r => r.matchTag === matchTag);
+              const rule = rotationRules.find(r => r.matchTag === matchTag);
               if (!rule) return null;
-              const sortedEvents = (events || [])
-                .filter(e => e && e.type === 'tag' && e.item === matchTag && e.date)
+
+              const sortedEvents = [...events]
+                .filter(e => e.type === 'tag' && e.item === matchTag)
                 .sort((a,b) => new Date(b.date) - new Date(a.date));
 
               let next = rule.order[0];
               let lastDate = null;
+              
               if (sortedEvents.length > 0) {
                   lastDate = sortedEvents[0].date;
                   const lastGroup = sortedEvents[0].groupId;
-                  const pplInGroup = (events || []).filter(e => e.groupId === lastGroup && e.type === 'person').map(e=>e.userName);
+                  const pplInGroup = events.filter(e => e.groupId === lastGroup && e.type === 'person').map(e=>e.userName);
+                  
                   const presentIndexes = pplInGroup.map(p => rule.order.indexOf(p)).filter(i => i !== -1);
                   if (presentIndexes.length > 0) {
                       const maxIndex = Math.max(...presentIndexes);
                       next = rule.order[(maxIndex + 1) % rule.order.length];
                   }
               }
-              return { user: (users || []).find(u => (u.name || '') === next), lastDate };
+              
+              // 🌟 根據 Name 來尋找，解決輪序表卡住的問題
+              return { user: users.find(u => u.name === next), lastDate };
           };
 
-          const rotationData = (rotationRules || []).map(rule => {
+          const rotationData = rotationRules.map(rule => {
               const info = getNextRotationPerson(rule.matchTag);
               return { ...rule, nextPerson: info?.user?.name || rule.order[0], lastDate: info?.lastDate };
           });
 
           const handleDayClick = (dObj) => {
-              setModalData({ date: getSafeLocalDateStr(dObj), workItem: '', note: '' });
-              setSelSlot('morning'); setSelArea(''); setSelUsers([]); setEditGroupId(null); setModalOpen(true);
+              const dStr = (new Date(dObj - dObj.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
+              setModalData({ date: dStr, workItem: '', note: '' });
+              setSelSlot('morning');
+              setSelArea('');
+              setSelUsers([]);
+              setEditGroupId(null);
+              setModalOpen(true);
           };
 
           const handleEventClick = (e, groupEvents) => {
               e.stopPropagation();
               const tagEv = groupEvents.find(ev => ev.type === 'tag');
               const personEvs = groupEvents.filter(ev => ev.type === 'person');
+              
               if (tagEv) {
                   setModalData({ date: tagEv.date, workItem: tagEv.item, note: tagEv.note || '' });
-                  setSelSlot(tagEv.slot || 'all_day'); setSelArea(tagEv.area || '');
-                  setSelUsers(personEvs.map(p => p.userId)); setEditGroupId(tagEv.groupId); setModalOpen(true);
+                  setSelSlot(tagEv.slot || 'all_day');
+                  setSelArea(tagEv.area || '');
+                  setSelUsers(personEvs.map(p => p.userId));
+                  setEditGroupId(tagEv.groupId);
+                  setModalOpen(true);
               }
           };
 
           const handleRotationClick = (rule) => {
               setModalData(prev => ({...prev, workItem: rule.matchTag}));
               const info = getNextRotationPerson(rule.matchTag);
-              if (info?.user) setSelUsers([info.user.uid || info.user.docId]); else setSelUsers([]);
+              if (info?.user) setSelUsers([info.user.uid || info.user.docId]);
+              else setSelUsers([]);
           };
 
           const handleDeleteGroup = async () => {
               if(!editGroupId) return;
-              if(confirm('確定要刪除此行程嗎？')) { await crud.deleteEventsByGroup(editGroupId); setModalOpen(false); }
+              if(confirm('確定要刪除此行程嗎？')) {
+                  await crud.deleteEventsByGroup(editGroupId);
+                  setModalOpen(false);
+              }
           }
 
           const handleModalSave = async () => {
               if(!modalData.workItem) { alert("請選擇工作項目"); return; }
+              
               let conflictMsg = "";
               for(const uid of selUsers) {
                   const userEvents = events.filter(e => e.date === modalData.date && e.type === 'person' && e.userId === uid && e.groupId !== editGroupId);
+                  
                   const hasAllDay = userEvents.find(e => e.slot === 'all_day');
                   const hasMorning = userEvents.find(e => e.slot === 'morning');
                   const hasAfternoon = userEvents.find(e => e.slot === 'afternoon');
+                  
                   const uName = users.find(u=>u.uid === uid || u.docId === uid)?.name;
-                  if (selSlot === 'all_day' && (hasMorning || hasAfternoon || hasAllDay)) conflictMsg = `衝突警示：\n${uName} 在該日已有行程，無法再排整天。`;
-                  else if (selSlot === 'morning' && (hasAllDay || hasMorning)) conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasAllDay?'整天':'上午'}」行程。`;
-                  else if (selSlot === 'afternoon' && (hasAllDay || hasAfternoon)) conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasAllDay?'整天':'下午'}」行程。`;
+
+                  if (selSlot === 'all_day' && (hasMorning || hasAfternoon || hasAllDay)) {
+                      conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasMorning?'上午':(hasAfternoon?'下午':'整天')}」行程，無法再排整天。`;
+                  } else if (selSlot === 'morning' && (hasAllDay || hasMorning)) {
+                      conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasAllDay?'整天':'上午'}」行程。`;
+                  } else if (selSlot === 'afternoon' && (hasAllDay || hasAfternoon)) {
+                      conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasAllDay?'整天':'下午'}」行程。`;
+                  }
               }
+
               if (conflictMsg) { alert(conflictMsg); return; }
               setIsSubmitting(true);
+
               try {
                   if (editGroupId) await crud.deleteEventsByGroup(editGroupId);
                   const groupId = `g_${Date.now()}`; 
@@ -863,16 +879,13 @@
                       const u = users.find(x=>x.uid === uid || x.docId === uid);
                       if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, timestamp: new Date() });
                   }
-                  setModalOpen(false); alert(editGroupId ? '行程修改完成' : '行程新增完成');
-              } catch (e) { alert('儲存失敗：' + e.message); } finally { setIsSubmitting(false); }
-          };
-
-          const handleSaveAnnouncement = async () => {
-              if(!announceData.title || !announceData.date) { alert("標題和日期必填！"); return; }
-              try {
-                  await crud.createAnnouncement({ ...announceData, creator: user.name, timestamp: new Date() });
-                  setAnnouncementModalOpen(false); setAnnounceData({ title: '', date: '', assignee: user.name, description: '' });
-              } catch(e) { alert("發布失敗"); }
+                  setModalOpen(false);
+                  alert(editGroupId ? '行程修改完成' : '行程新增完成');
+              } catch (e) {
+                  alert('儲存失敗：' + e.message);
+              } finally {
+                  setIsSubmitting(false);
+              }
           };
 
           const renderGrid = () => {
@@ -892,7 +905,8 @@
                   const weekStart = new Date(date);
                   weekStart.setDate(diff);
                   for(let i=0; i<7; i++) {
-                      const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+                      const d = new Date(weekStart);
+                      d.setDate(weekStart.getDate() + i);
                       cells.push(renderDayCell(d));
                   }
               }
@@ -900,19 +914,13 @@
           };
 
           const renderDayCell = (dObj) => {
-              const dStr = getSafeLocalDateStr(dObj);
-              const dayEvs = (events || []).filter(e => e.date === dStr);
-              const isToday = dStr === todayStr;
-              
-              const override = globalSettings?.calendarOverrides?.[dStr];
-              let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
-              let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
-              let holidayName = TAIWAN_HOLIDAYS_2026[dStr] || '';
-              
-              if (override) {
-                  if (override.type === 'holiday') { isHoliday = true; isWeekend = true; holidayName = override.name; } 
-                  else if (override.type === 'workday') { isHoliday = false; isWeekend = false; holidayName = override.name; }
-              }
+              const dStr = (new Date(dObj - dObj.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
+              const dayEvs = events.filter(e => e.date === dStr);
+              const tzOffsetToday = new Date().getTimezoneOffset() * 60000;
+              const isToday = dStr === (new Date(Date.now() - tzOffsetToday)).toISOString().slice(0, 10);
+              const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+              const holidayName = TAIWAN_HOLIDAYS_2026[dStr];
+              const isHoliday = !!holidayName;
               
               const slots = { morning: [], afternoon: [], all_day: [] };
               const groups = {};
@@ -928,7 +936,7 @@
                   const tagName = g.tag?.item || '未命名';
                   const areaName = g.tag?.area || '';
                   const note = g.tag?.note || '';
-                  const areaColor = settings?.areaColors?.[areaName] || "bg-gray-100 text-gray-800";
+                  const areaColor = settings.areaColors[areaName] || "bg-gray-100 text-gray-800";
                   const groupEvents = [g.tag, ...g.people].filter(Boolean);
 
                   return (
@@ -937,7 +945,7 @@
                         <span className="text-xs md:text-sm text-blue-700 font-bold truncate">{tagName}</span>
                         {note && <span className="text-[10px] md:text-xs text-gray-500">({note})</span>}
                         {g.people.map(p => {
-                            const userProfile = (users || []).find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
+                            const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
                             const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
                             return <UserAvatar key={p.id} user={displayUser} size="w-5 h-5 md:w-6 md:h-6" textSize="text-[10px] md:text-xs" />;
                         })}
@@ -947,12 +955,14 @@
               };
 
               const renderLeaves = () => {
-                  const leavesOnDay = (leaves || []).filter(l => l.status !== 'rejected' && l.start && l.end && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
-                  return leavesOnDay.map(l => (
-                      <div key={l.id} className="text-[10px] md:text-xs border border-pink-200 bg-pink-100 text-pink-700 shadow-sm rounded px-1 py-0.5 my-0.5 w-full select-none truncate font-bold text-center">
-                          {l.requesterName} ({l.type})
-                      </div>
-                  ));
+                  const leavesOnDay = leaves.filter(l => l.status !== 'rejected' && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
+                  return leavesOnDay.map(l => {
+                      return (
+                          <div key={l.id} className="text-[10px] md:text-xs border border-pink-200 bg-pink-100 text-pink-700 shadow-sm rounded px-1 py-0.5 my-0.5 w-full select-none truncate font-bold text-center">
+                              {l.requesterName} ({l.type})
+                          </div>
+                      );
+                  });
               };
 
               return (
@@ -960,13 +970,12 @@
                       <div className="w-full flex justify-between items-start mb-1">
                           <div className="flex flex-col items-center w-full">
                               <span className={`text-sm md:text-base font-bold px-3 py-0.5 w-full text-center ${isToday ? 'bg-yellow-300 text-black rounded-md shadow-sm' : (isWeekend || isHoliday ? 'text-red-500' : 'text-gray-700')}`}>
-                                  {dObj.getDate()} 
-                                  {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1 rounded align-middle">{holidayName}</span>}
-                                  {override?.type === 'workday' && <span className="ml-1 text-[10px] md:text-xs bg-blue-500 text-white px-1 rounded align-middle">{holidayName}</span>}
+                                  {dObj.getDate()} {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1 rounded align-middle">{holidayName}</span>}
                               </span>
                           </div>
                           <div className="absolute top-1 right-1"><Edit2 size={14} className="text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"/></div>
                       </div>
+                      
                       <div className="flex-1 flex flex-col gap-1 overflow-hidden" onClick={e=>e.stopPropagation()}>
                           {slots.all_day.length > 0 && <div className="bg-sky-500/10 p-0.5 rounded border border-sky-200"><div className="text-[10px] md:text-xs text-sky-700 font-bold mb-0.5 px-1">整天</div>{slots.all_day.map(renderGroup)}</div>}
                           {slots.morning.length > 0 && <div className="bg-sky-100/30 p-0.5 rounded border border-sky-100"><div className="text-[10px] md:text-xs text-sky-600 font-bold mb-0.5 px-1">上午</div>{slots.morning.map(renderGroup)}</div>}
@@ -979,42 +988,7 @@
 
           return (
             <div className="flex flex-col h-full gap-4">
-               {upcomingAnnouncements.length > 0 && (
-                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 shadow-sm shrink-0">
-                       <div className="flex justify-between items-center mb-2">
-                           <h3 className="text-amber-800 font-bold flex items-center gap-2"><Megaphone size={18}/> 近期重大事項公告</h3>
-                           <button onClick={()=>setAnnouncementModalOpen(true)} className="text-xs bg-amber-200 text-amber-800 px-3 py-1.5 font-bold rounded hover:bg-amber-300 transition shadow-sm">+ 新增公告</button>
-                       </div>
-                       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                           {upcomingAnnouncements.map(a => {
-                               const diffTime = Math.abs(new Date(a.date) - new Date(todayStr));
-                               const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                               return (
-                                  <div key={a.id} className="min-w-[260px] bg-white border border-amber-100 p-3 rounded-lg shadow-sm relative group">
-                                      <div className="flex justify-between items-start mb-1">
-                                          <span className="text-sm font-bold text-gray-800 flex-1 truncate pr-2">{a.title}</span>
-                                          <span className={`text-[10px] font-bold px-2 py-1 rounded shrink-0 ${daysLeft===0 ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-amber-100 text-amber-700'}`}>
-                                              {daysLeft === 0 ? '🔥 就是今天' : `倒數 ${daysLeft} 天`}
-                                          </span>
-                                      </div>
-                                      <div className="text-xs text-gray-500 font-medium">📅 {a.date} | 👤 主責: {a.assignee}</div>
-                                      {a.description && <div className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded line-clamp-2" title={a.description}>{a.description}</div>}
-                                      {(user.role === 'admin' || user.role === 'leader' || user.name === a.creator) && (
-                                          <button onClick={()=>crud.deleteAnnouncement(a.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 bg-white rounded-full p-1 shadow transition"><Trash2 size={14}/></button>
-                                      )}
-                                  </div>
-                               )
-                           })}
-                       </div>
-                   </div>
-               )}
-               {upcomingAnnouncements.length === 0 && (
-                    <div className="flex justify-end">
-                        <button onClick={()=>setAnnouncementModalOpen(true)} className="text-xs bg-white border border-gray-300 text-gray-600 px-3 py-1.5 font-bold rounded hover:bg-gray-50 transition shadow-sm flex items-center gap-1"><Megaphone size={14}/> 發布新公告</button>
-                    </div>
-               )}
-
-               <div className="flex-1 flex flex-col bg-white rounded-lg shadow-sm border h-full min-h-[500px]">
+               <div className="flex-1 flex flex-col bg-white rounded-lg shadow-sm border h-full">
                   <div className="p-4 border-b flex justify-between items-center bg-gray-50">
                       <div className="flex items-center gap-2">
                         <span className="text-xl font-bold text-gray-700">{date.getFullYear()}年{date.getMonth()+1}月</span>
@@ -1042,28 +1016,6 @@
                   </div>
                </div>
 
-               {announceModalOpen && (
-                   <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setAnnouncementModalOpen(false)}>
-                       <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
-                           <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
-                               <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2"><Megaphone size={20}/> 新增重大事項公告</h3>
-                               <button onClick={()=>setAnnouncementModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
-                           </div>
-                           <div className="p-4 space-y-4">
-                               <div><label className="text-xs font-bold text-gray-700 block mb-1">事項標題 <span className="text-red-500">*</span></label><input className="w-full border p-2 rounded" placeholder="例如: 繳交期中成果報告" value={announceData.title} onChange={e=>setAnnounceData({...announceData, title:e.target.value})}/></div>
-                               <div className="grid grid-cols-2 gap-4">
-                                   <div><label className="text-xs font-bold text-gray-700 block mb-1">截止/發生日期 <span className="text-red-500">*</span></label><input type="date" className="w-full border p-2 rounded" value={announceData.date} onChange={e=>setAnnounceData({...announceData, date:e.target.value})}/></div>
-                                   <div><label className="text-xs font-bold text-gray-700 block mb-1">主責人</label><select className="w-full border p-2 rounded bg-white text-sm" value={announceData.assignee} onChange={e=>setAnnounceData({...announceData, assignee:e.target.value})}><option value="">無</option>{(users || []).map(u=><option key={u.docId} value={u.name}>{u.name}</option>)}</select></div>
-                               </div>
-                               <div><label className="text-xs font-bold text-gray-700 block mb-1">說明備註</label><textarea className="w-full border p-2 rounded h-20 resize-none" placeholder="補充細節..." value={announceData.description} onChange={e=>setAnnounceData({...announceData, description:e.target.value})}/></div>
-                           </div>
-                           <div className="p-4 border-t bg-gray-50 rounded-b-xl">
-                               <button onClick={handleSaveAnnouncement} className="w-full bg-amber-600 text-white py-3 rounded-lg font-bold shadow hover:bg-amber-700 transition">發布公告</button>
-                           </div>
-                       </div>
-                   </div>
-               )}
-
                <RotationModal open={rotationModalOpen} onClose={()=>setRotationModalOpen(false)} rules={rotationRules} onUpdateRules={onUpdateRotationRules} rotationData={rotationData} rotationStats={rotationStats}/>
 
                {modalOpen && (
@@ -1081,7 +1033,7 @@
                                <div>
                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block flex items-center gap-1"><RefreshCw size={12}/> 快速輪值 (自動帶入)</label>
                                    <div className="grid grid-cols-2 gap-2">
-                                       {(rotationRules || []).map(rule => (
+                                       {rotationRules.map(rule => (
                                            <button key={rule.id} onClick={() => handleRotationClick(rule)} className="text-xs py-2 px-3 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition text-left flex justify-between items-center group">
                                                <span>{rule.name}</span><span className="opacity-0 group-hover:opacity-100 text-[10px]">自動填入 →</span>
                                            </button>
@@ -1096,7 +1048,7 @@
                                        <label className="block text-xs font-bold text-gray-700 mb-1">工作項目</label>
                                        <select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>setModalData({...modalData, workItem:e.target.value})}>
                                            <option value="">請選擇...</option>
-                                           {(tags && tags.workTags ? tags.workTags : []).map(t=><option key={t} value={t}>{t}</option>)}
+                                           {tags.workTags.map(t=><option key={t} value={t}>{t}</option>)}
                                        </select>
                                    </div>
                                    <div>
@@ -1113,7 +1065,7 @@
                                    <label className="block text-xs font-bold text-gray-700 mb-1">選擇轄區 (選填)</label>
                                    <select className="w-full border p-2 rounded bg-white text-sm" value={selArea} onChange={e=>setSelArea(e.target.value)}>
                                            <option value="">-- 無 --</option>
-                                           {(tags && tags.areaTags ? tags.areaTags : []).map(a=><option key={a} value={a}>{a}</option>)}
+                                           {tags.areaTags.map(a=><option key={a} value={a}>{a}</option>)}
                                    </select>
                                </div>
 
@@ -1125,7 +1077,7 @@
                                <div>
                                    <label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label>
                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                                       {(users || []).map(u => {
+                                       {users.map(u => {
                                            const active = selUsers.includes(u.uid || u.docId);
                                            return (
                                                <div key={u.docId} onClick={()=>setSelUsers(p=>active?p.filter(x=>x!==(u.uid || u.docId)):[...p,(u.uid || u.docId)])} className={`flex flex-col items-center p-2 rounded-lg border cursor-pointer transition select-none ${active?'bg-blue-50 border-blue-500 ring-1 ring-blue-500':'bg-white hover:bg-gray-50 border-gray-200'}`}>
@@ -1151,15 +1103,15 @@
           );
         }
 
-        // --- 差勤一覽表與報表匯出 ---
-        function AttendanceView({ user, users, events, leaves, settings, leaveTypes, clockIns, crud, globalSettings }) {
-            const [month, setMonth] = useState(getSafeLocalDateStr(new Date()).slice(0, 7)); 
+        // 🌟 更新：差勤一覽表 (支援選取所有人、包含撤銷假單功能)
+        function AttendanceView({ user, users, events, leaves, settings, leaveTypes, clockIns, crud }) {
+            const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
             const [leaveFilter, setLeaveFilter] = useState('all');
-            const [viewUser, setViewUser] = useState(user.name); 
+            const [viewUser, setViewUser] = useState(user.name); // 預設顯示自己
             const [selectedIds, setSelectedIds] = useState([]);
 
-            const targetUsers = viewUser === 'all' ? (users || []) : (users || []).filter(u => u.name === viewUser);
-            if (targetUsers.length === 0 && viewUser === user.name) targetUsers.push(user); 
+            const targetUsers = viewUser === 'all' ? users : users.filter(u => u.name === viewUser);
+            if (targetUsers.length === 0 && viewUser === user.name) targetUsers.push(user); // fallback
 
             const scheduleData = useMemo(() => {
                 const parts = month.split('-');
@@ -1172,13 +1124,13 @@
                     for(let i=1; i<=daysInMonth; i++) {
                         const dateStr = `${month}-${String(i).padStart(2,'0')}`;
                         
-                        const myWork = (events || []).filter(e => e.date === dateStr && e.type === 'person' && e.userName === tu.name).map(p => {
+                        const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && e.userName === tu.name).map(p => {
                             const tag = events.find(t => t.groupId === p.groupId && t.type === 'tag');
                             return { ...p, tag };
                         });
 
-                        const myLeave = (leaves || []).find(l => l.start && l.start.startsWith(dateStr) && l.status !== 'rejected' && l.requesterName === tu.name); 
-                        const myClock = (clockIns || []).find(c => c.date === dateStr && c.userId === (tu.docId || tu.uid));
+                        const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status !== 'rejected' && l.requesterName === tu.name); 
+                        const myClock = clockIns.find(c => c.date === dateStr && c.userId === (tu.docId || tu.uid));
 
                         let status = '正常';
                         const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
@@ -1199,12 +1151,12 @@
                         else if (myWork.length > 0) status = '內勤';
                         else status = '無行程';
 
-                        if (myWork.length > 0 || myLeave || myClock || viewUser !== 'all') { 
+                        if (myWork.length > 0 || myLeave || myClock || viewUser !== 'all') { // 全覽時過濾空白
                             data.push({ name: tu.name, date: dateStr, work: myWork, leave: myLeave, clock: myClock, status });
                         }
                     }
                 });
-                return data.sort((a,b) => a.date.localeCompare(b.date)); 
+                return data.sort((a,b) => a.date.localeCompare(b.date)); // 依照日期排序
             }, [events, leaves, clockIns, month, targetUsers, viewUser]);
 
             const flatRows = useMemo(() => {
@@ -1219,7 +1171,7 @@
                             slot: w.isLeaveOnly ? 'all_day' : w.slot,
                             leaveType: d.leave?.type || '-',
                             leaveHours: d.leave?.hours || '-',
-                            leaveId: d.leave?.id, 
+                            leaveId: d.leave?.id, // 用於撤銷
                             content: w.isLeaveOnly ? '' : (w.tag?.item || ''),
                             area: w.isLeaveOnly ? '' : (w.tag?.area || ''),
                             reason: d.leave?.reason || '-',
@@ -1235,7 +1187,7 @@
 
             const filteredRows = useMemo(() => {
                 let fr = flatRows;
-                if (viewUser === 'all') fr = fr.filter(r => r.content !== '' || r.leaveType !== '-'); 
+                if (viewUser === 'all') fr = fr.filter(r => r.content !== '' || r.leaveType !== '-'); // 全團隊視角只看有紀錄的
                 if (leaveFilter !== 'all') fr = fr.filter(r => r.leaveType === leaveFilter);
                 return fr;
             }, [flatRows, leaveFilter, viewUser]);
@@ -1244,6 +1196,7 @@
             const toggleAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(filteredRows.map(r => r.id)); };
             const toggleOne = (id) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 
+            // 🌟 新增：撤銷/刪除假單
             const handleDeleteLeave = async (leaveId) => {
                 if (confirm('確定要撤銷此假單嗎？撤銷後如果有排班，會重新提示您送差單。')) {
                     try {
@@ -1317,21 +1270,13 @@
                         if (dayNum > daysInMonth) return { empty: true };
                         const dStr = `${month}-${String(dayNum).padStart(2,'0')}`;
                         const dObj = new Date(dStr);
+                        const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+                        const isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
                         
-                        const override = globalSettings?.calendarOverrides?.[dStr];
-                        let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
-                        let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
-                        let holidayName = TAIWAN_HOLIDAYS_2026[dStr];
+                        const myLeave = leaves.find(l => l.start.startsWith(dStr) && l.status === 'approved' && l.requesterName === tu.name);
+                        const myClock = clockIns.find(c => c.date === dStr && c.userId === (tu.docId || tu.uid));
 
-                        if (override) {
-                            if (override.type === 'holiday') { isHoliday = true; isWeekend = true; holidayName = override.name; } 
-                            else if (override.type === 'workday') { isHoliday = false; isWeekend = false; }
-                        }
-                        
-                        const myLeave = (leaves || []).find(l => l.start && l.start.startsWith(dStr) && l.status === 'approved' && l.requesterName === tu.name);
-                        const myClock = (clockIns || []).find(c => c.date === dStr && c.userId === (tu.docId || tu.uid));
-
-                        if (isWeekend || isHoliday) return { type: 'holiday', text: holidayName || '例 假 日' };
+                        if (isWeekend || isHoliday) return { type: 'holiday', text: '例 假 日' };
                         if (myLeave) return { type: 'leave', text: myLeave.type };
                         
                         let amIn = '', amOut = '', pmIn = '', pmOut = '';
@@ -1371,18 +1316,10 @@
                     tableRows += tr1 + tr2;
                 }
 
-                const override31 = globalSettings?.calendarOverrides?.[`${month}-31`];
-                let isHol31 = !!TAIWAN_HOLIDAYS_2026[`${month}-31`] || new Date(`${month}-31`).getDay() === 0 || new Date(`${month}-31`).getDay() === 6;
-                let text31 = '例 假 日';
-                if (override31) {
-                    if (override31.type === 'workday') isHol31 = false;
-                    else { isHol31 = true; text31 = override31.name; }
-                }
-
                 const footerRows = `
                 <tr>
                     <td colspan="6" rowspan="4" style="text-align: left; font-size: 12px; padding: 10px; line-height: 1.5;">備註：<br>1.計畫人員請依照上、下班時間確實辦理簽到(退)，如有不實願依本校規定懲處，並與計畫主持人負一切法律責任。<br>2.本表請填列一式二份，請於申請次月薪資時併同檢附，由主計室及人事室各留存一份，俾利作為是否扣薪依據。<br>3.如當日因請假而未出勤，請於當日欄位填寫假別。相關請假及扣薪規定，請依勞動基準法、性別工作平等法及勞工請假規則辦理。<br>　□事假(含家庭照顧假)共_____時；扣薪：__________(月薪) ÷ 30天 ÷ 8 × _______ (事假時數) = _____________元。<br>　□病假(含生理假)共_____時；扣薪：__________ (月薪) ÷ 30天 ÷ 8 ÷ 2 × _______(病假時數) =____________元。</td>
-                    <td align="center">31</td><td colspan="2" align="center">${daysInMonth === 31 ? (isHol31 ? text31 : '') : ''}</td>
+                    <td align="center">31</td><td colspan="2" align="center">${daysInMonth === 31 ? (!!TAIWAN_HOLIDAYS_2026[`${month}-31`] || new Date(`${month}-31`).getDay() === 0 || new Date(`${month}-31`).getDay() === 6 ? '例 假 日' : '') : ''}</td>
                 </tr>
                 <tr><td colspan="3" align="left">本人簽章：</td></tr><tr><td colspan="3" align="left">計畫主持人簽章：</td></tr><tr><td colspan="3" align="left">單位主管簽章：</td></tr>`;
 
@@ -1397,15 +1334,16 @@
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
                         <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 差勤一覽表</h2>
                         <div className="flex flex-wrap gap-4 w-full md:w-auto">
+                            {/* 🌟 篩選功能 */}
                             <select value={viewUser} onChange={e => setViewUser(e.target.value)} className="border p-2 rounded text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200">
                                 <option value={user.name}>看我的出勤</option>
                                 <option value="all">看全團隊出勤</option>
-                                {(users || []).filter(u => u.name !== user.name).map(u => <option key={u.docId} value={u.name}>{u.name}</option>)}
+                                {users.filter(u => u.name !== user.name).map(u => <option key={u.docId} value={u.name}>{u.name}</option>)}
                             </select>
                             <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
                             <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none">
                                 <option value="all">所有假別/出勤</option>
-                                {(leaveTypes || []).map(t => <option key={t} value={t}>{t}</option>)}
+                                {leaveTypes.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
                             <div className="flex gap-2 w-full md:w-auto">
                                 <button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-3 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-indigo-700 transition">
@@ -1471,6 +1409,7 @@
                                             </span>
                                         </td>
                                         <td className="p-3 text-center">
+                                            {/* 🌟 撤銷假單按鈕：只有本人的單或管理員才可見 */}
                                             {r.leaveId && (r.name === user.name || user.role === 'admin') && (
                                                 <button onClick={() => handleDeleteLeave(r.leaveId)} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded border border-red-200 text-xs flex items-center justify-center gap-1 w-full" title="撤銷這張假單">
                                                     <Trash size={12}/> 撤銷
@@ -1487,14 +1426,20 @@
             );
         }
 
-        // --- 待送差單小卡 ---
         const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
             const [type, setType] = useState('出差'); 
             const [deputyId, setDeputyId] = useState('');
 
             const handleSend = () => {
                 if(!deputyId) { alert("請選擇職務代理人"); return; }
-                onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, hours: task.slot === 'all_day' ? 8 : 4 });
+                onSubmit({
+                    type,
+                    start: task.suggestedStart,
+                    end: task.suggestedEnd,
+                    reason: task.reason,
+                    deputyId,
+                    hours: task.slot === 'all_day' ? 8 : 4
+                });
             }
 
             return (
@@ -1511,12 +1456,29 @@
                             </div>
                         </div>
                     </div>
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (預設出差)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{(leaveTypes||[]).map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-                        <div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{(deputies||[]).map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (預設出差)</label>
+                            <select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>
+                                {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label>
+                            <select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}>
+                                <option value="">-- 點此選擇職代 --</option>
+                                {deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}
+                            </select>
+                        </div>
                     </div>
+
                     <div className="pt-2 text-right">
-                        <button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">
+                        <button 
+                            onClick={handleSend} 
+                            disabled={isSubmitting} 
+                            className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto"
+                        >
                             {isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}
                         </button>
                     </div>
@@ -1524,7 +1486,6 @@
             )
         }
 
-        // --- 差勤表單 ---
         function LeaveForm({ user, users, leaves, events, crud, leaveTypes }) {
           const [form, setForm] = useState({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
@@ -1533,7 +1494,7 @@
 
           const pendingExternalTasks = useMemo(() => {
               const groups = {};
-              (events || []).forEach(e => {
+              events.forEach(e => {
                   if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
                   if (e.type === 'tag') groups[e.groupId].tag = e;
                   if (e.type === 'person') groups[e.groupId].people.push(e);
@@ -1542,8 +1503,11 @@
               const pending = [];
               Object.values(groups).forEach(g => {
                   if (!g.tag) return;
+                  
+                  // 🌟 修復：拿掉 (g.tag.date < todayStr) 的判斷！現在就算漏補過去的排班，也會出現在這邊讓您補送假單！
                   const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
                   if (!isExternal) return;
+
                   const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
                   if (!isMe) return;
 
@@ -1553,20 +1517,27 @@
                   if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
                   else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
 
-                  const hasLeave = (leaves || []).some(l => 
+                  const hasLeave = leaves.some(l => 
                       (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
-                      l.start && l.start.startsWith(d) && l.status !== 'rejected' 
+                      l.start.startsWith(d) && 
+                      l.status !== 'rejected' // 只要還沒被駁回就算填了
                   );
 
                   if (!hasLeave) {
                       pending.push({
-                          id: g.tag.groupId, date: d, slot: g.tag.slot, item: g.tag.item, area: g.tag.area,
-                          suggestedStart: startTime, suggestedEnd: endTime,
+                          id: g.tag.groupId,
+                          date: d,
+                          slot: g.tag.slot,
+                          item: g.tag.item,
+                          area: g.tag.area,
+                          suggestedStart: startTime,
+                          suggestedEnd: endTime,
                           reason: `[${g.tag.item}] ${g.tag.area ? g.tag.area : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim()
                       });
                   }
               });
-              return pending.sort((a,b) => (a.date || '').localeCompare(b.date || ''));
+              // 按照時間舊到新排序 (最久沒補的會排在最上面)
+              return pending.sort((a,b) => a.date.localeCompare(b.date));
           }, [events, leaves, user]);
 
           useEffect(() => {
@@ -1579,25 +1550,44 @@
           const handleTaskSubmit = async (taskData, taskId) => {
               setSubmittingTaskId(taskId);
               try {
-                  await crud.createLeave({ ...taskData, requesterId: user.docId || user.uid, requesterName: user.name, status: 'pending', timestamp: new Date() });
+                  await crud.createLeave({ 
+                      ...taskData, 
+                      requesterId: user.docId || user.uid, 
+                      requesterName: user.name, 
+                      status: 'pending', 
+                      timestamp: new Date() 
+                  });
                   alert("差單已送出，已顯示在日曆上！");
-              } catch (e) { alert("送出失敗"); } 
-              finally { setSubmittingTaskId(null); }
+              } catch (e) {
+                  alert("送出失敗");
+              } finally {
+                  setSubmittingTaskId(null);
+              }
           }
 
           const handleManualSubmit = async (e) => {
               e.preventDefault();
               setIsSubmitting(true);
               try {
-                  await crud.createLeave({ ...form, requesterId: user.docId || user.uid, requesterName: user.name, hours, status: 'pending', timestamp: new Date() });
+                  await crud.createLeave({ 
+                      ...form, 
+                      requesterId: user.docId || user.uid, 
+                      requesterName: user.name, 
+                      hours, 
+                      status: 'pending', 
+                      timestamp: new Date() 
+                  });
                   alert("請假單已送出，已同步顯示在日曆上！");
                   setForm({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
-              } catch (e) { alert("送出失敗，請稍後再試。"); } 
-              finally { setIsSubmitting(false); }
+              } catch (e) {
+                  alert("送出失敗，請稍後再試。");
+              } finally {
+                  setIsSubmitting(false);
+              }
           };
 
-          const busyIds = (leaves||[]).filter(l=>l.status!=='rejected' && l.start && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
-          const deputies = (users||[]).filter(u=>u.name!==user.name && !busyIds.includes(u.name));
+          const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
+          const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
 
           return (
             <div className="max-w-3xl mx-auto space-y-8">
@@ -1608,7 +1598,14 @@
                        </h3>
                        <div className="space-y-4">
                            {pendingExternalTasks.map(task => (
-                               <PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={(users||[]).filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>
+                               <PendingLeaveCard 
+                                   key={task.id} 
+                                   task={task} 
+                                   leaveTypes={leaveTypes} 
+                                   deputies={users.filter(u=>u.name!==user.name)} 
+                                   onSubmit={(data) => handleTaskSubmit(data, task.id)}
+                                   isSubmitting={submittingTaskId === task.id}
+                               />
                            ))}
                        </div>
                    </div>
@@ -1618,17 +1615,41 @@
                    <div className="flex justify-between items-center mb-6 border-b pb-4">
                        <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：自行請假 (特休/病假/事假)</h2>
                    </div>
+                   
                    <form onSubmit={handleManualSubmit} className="space-y-5">
-                       <div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{(leaveTypes||[]).map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+                       <div>
+                           <label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label>
+                           <select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>
+                               {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
+                           </select>
+                       </div>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
-                           <div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
+                           <div>
+                               <label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label>
+                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/>
+                           </div>
+                           <div>
+                               <label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label>
+                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/>
+                           </div>
                        </div>
                        <div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div>
                        <div className="clear-both"></div>
-                       <div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
-                       <div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
-                       <button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button>
+
+                       <div>
+                           <label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label>
+                           <select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}>
+                               <option value="">請選擇</option>
+                               {deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}
+                           </select>
+                       </div>
+                       <div>
+                           <label className="text-sm font-bold text-gray-700 block mb-1">事由</label>
+                           <textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/>
+                       </div>
+                       <button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>
+                            {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}
+                       </button>
                    </form>
                </div>
             </div>
@@ -1638,31 +1659,42 @@
         function ApprovalView({ leaves, currentUser, crud, users }) {
           const [processingId, setProcessingId] = useState(null);
 
-          const pendingMyDeputy = (leaves || []).filter(l => (l.deputyId === currentUser.uid || l.deputyId === (currentUser.email || '').toLowerCase() || l.deputyId === currentUser.docId) && l.status === 'pending');
-          const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? (leaves || []).filter(l => l.status === 'deputy_signed') : [];
+          const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === (currentUser.email || '').toLowerCase() || l.deputyId === currentUser.docId) && l.status === 'pending');
+          const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
 
           const handleDeputyAgree = async (leave) => {
-              if (processingId) return; setProcessingId(leave.id);
+              if (processingId) return;
+              setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'deputy_signed' }); } 
-              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } 
+              finally { setProcessingId(null); }
           };
+
           const handleLeaderApprove = async (leave) => {
-              if (processingId) return; setProcessingId(leave.id);
+              if (processingId) return;
+              setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid }); } 
-              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } 
+              finally { setProcessingId(null); }
           };
+
           const handleReject = async (leave) => {
-              if (processingId) return; setProcessingId(leave.id);
+              if (processingId) return;
+              setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'rejected', approverId: currentUser.uid }); } 
-              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } 
+              finally { setProcessingId(null); }
           }
 
           const StatusStep = ({ status }) => {
               const step1 = status !== 'pending' ? 'text-green-600 font-bold' : 'text-gray-400';
               const step2 = status === 'approved' ? 'text-green-600 font-bold' : (status === 'deputy_signed' ? 'text-blue-600 animate-pulse font-bold' : 'text-gray-400');
+              
               return (
                   <div className="flex items-center text-xs gap-1 bg-gray-100 px-2 py-1 rounded-full">
-                      <span className={`flex items-center ${step1}`}>1. 職代 {status !== 'pending' ? '✅' : '⏳'}</span><span className="text-gray-300">→</span><span className={`flex items-center ${step2}`}>2. 主管 {status === 'approved' ? '✅' : '⏳'}</span>
+                      <span className={`flex items-center ${step1}`}>1. 職代 {status !== 'pending' ? '✅' : '⏳'}</span>
+                      <span className="text-gray-300">→</span>
+                      <span className={`flex items-center ${step2}`}>2. 主管 {status === 'approved' ? '✅' : '⏳'}</span>
                   </div>
               );
           }
@@ -1670,16 +1702,31 @@
           return (
             <div className="max-w-4xl mx-auto space-y-8">
                <div className="flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle/> 差單審核</h2></div>
+               
                <div className="bg-white rounded shadow overflow-hidden border-t-4 border-blue-500">
-                   <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2"><User size={18}/> 第一關：待我簽核 (我是職代)</div>
+                   <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2">
+                       <User size={18}/> 第一關：待我簽核 (我是職代)
+                   </div>
                    {pendingMyDeputy.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待辦事項，您目前沒有需要代理的案件。</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingMyDeputy.map(l => (
                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                            <td className="p-3 font-bold text-gray-700">{l.requesterName}</td>
-                           <td className="p-3"><span className="font-bold text-blue-600">{l.type}</span><div className="text-xs text-gray-500 mt-1">{(l.start || '').replace('T',' ')} <br/>~ {(l.end || '').replace('T',' ')}</div></td>
+                           <td className="p-3"><span className="font-bold text-blue-600">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td>
                            <td className="p-3"><StatusStep status={l.status}/></td>
                            <td className="p-3 flex gap-2">
-                               <button onClick={()=>handleDeputyAgree(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意</button>
-                               <button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '退回'}</button>
+                               <button 
+                                   onClick={()=>handleDeputyAgree(l)} 
+                                   disabled={processingId === l.id}
+                                   className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}
+                               >
+                                   {processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意
+                               </button>
+                               <button 
+                                   onClick={()=>handleReject(l)} 
+                                   disabled={processingId === l.id}
+                                   className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}
+                               >
+                                   {processingId === l.id ? '...' : '退回'}
+                               </button>
                            </td>
                        </tr>
                    ))}</tbody></table>}
@@ -1687,15 +1734,29 @@
 
                {(currentUser.role === 'leader' || currentUser.role === 'admin') && 
                <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500">
-                   <div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>
+                   <div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2">
+                       <CheckCircle size={18}/> 第二關：待最終核准 (組長權限)
+                   </div>
                    {pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (
                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                            <td className="p-3 font-bold text-gray-700">{l.requesterName}</td>
-                           <td className="p-3"><span className="font-bold text-gray-800">{l.type}</span><div className="text-xs text-gray-500 mt-1">{(l.start || '').replace('T',' ')} <br/>~ {(l.end || '').replace('T',' ')}</div></td>
+                           <td className="p-3"><span className="font-bold text-gray-800">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td>
                            <td className="p-3"><StatusStep status={l.status}/></td>
                            <td className="p-3 flex gap-2">
-                               <button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button>
-                               <button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button>
+                               <button 
+                                   onClick={()=>handleLeaderApprove(l)} 
+                                   disabled={processingId === l.id}
+                                   className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
+                               >
+                                   {processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准
+                               </button>
+                               <button 
+                                   onClick={()=>handleReject(l)} 
+                                   disabled={processingId === l.id}
+                                   className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}
+                               >
+                                   {processingId === l.id ? '...' : '駁回'}
+                               </button>
                            </td>
                        </tr>
                    ))}</tbody></table>}
@@ -1704,154 +1765,6 @@
           );
         }
 
-        // --- 系統設定模組 (完美還原 Working 版本的結構並加上防呆) ---
-        function ManagementView({ tags }) {
-            const [newWork, setNewWork] = useState('');
-            const [newArea, setNewArea] = useState('');
-            return (
-                <div className="max-w-4xl mx-auto space-y-6">
-                    <h2 className="text-xl font-bold flex items-center gap-2"><List/> 項目管理</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-white p-6 rounded-lg shadow-sm border">
-                            <h3 className="font-bold text-lg mb-4 text-blue-700">工作項目</h3>
-                            <div className="flex gap-2 mb-4">
-                                <input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newWork} onChange={e=>setNewWork(e.target.value)} />
-                                <button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm">新增</button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {(tags.workTags && Array.isArray(tags.workTags) ? tags.workTags : []).map(tag => (
-                                    <div key={tag} className="bg-blue-50 text-blue-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">
-                                        {tag}
-                                        <button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-blue-400 hover:text-red-500"><X size={14}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="bg-white p-6 rounded-lg shadow-sm border">
-                            <h3 className="font-bold text-lg mb-4 text-green-700">轄區</h3>
-                            <div className="flex gap-2 mb-4">
-                                <input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newArea} onChange={e=>setNewArea(e.target.value)} />
-                                <button onClick={()=>{tags.handleAddTag('area', newArea); setNewArea('')}} className="bg-green-600 text-white px-4 py-2 rounded text-sm">新增</button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {(tags.areaTags && Array.isArray(tags.areaTags) ? tags.areaTags : []).map(tag => (
-                                    <div key={tag} className="bg-green-50 text-green-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">
-                                        {tag}
-                                        <button onClick={()=>tags.handleDeleteTag('area', tag)} className="text-green-400 hover:text-red-500"><X size={14}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        function SettingsView({ settings, globalSettings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, crud, roleNames, onUpdateRoleNames }) {
-            const [areaC, setAreaC] = useState(settings?.areaColors || DEFAULT_AREA_COLORS);
-            const [newLeave, setNewLeave] = useState('');
-            const [newArea, setNewArea] = useState(''); 
-            const [localRoleNames, setLocalRoleNames] = useState(roleNames);
-            const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
-            
-            const [calendarOverrides, setCalendarOverrides] = useState(globalSettings?.calendarOverrides || {});
-            const [newOverrideDate, setNewOverrideDate] = useState('');
-            const [newOverrideType, setNewOverrideType] = useState('holiday');
-            const [newOverrideName, setNewOverrideName] = useState('');
-
-            const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
-
-            const handleColorChange = (area, colorClass) => {
-                const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area);
-                if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; }
-                setAreaC({...areaC, [area]: colorClass});
-            };
-            const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
-
-            const handleAddOverride = () => {
-                if (!newOverrideDate || !newOverrideName) { alert("日期與原因必填"); return; }
-                setCalendarOverrides(prev => ({
-                    ...prev,
-                    [newOverrideDate]: { type: newOverrideType, name: newOverrideName }
-                }));
-                setNewOverrideDate(''); setNewOverrideName('');
-            };
-            const handleDeleteOverride = (dateKey) => {
-                const updated = { ...calendarOverrides };
-                delete updated[dateKey];
-                setCalendarOverrides(updated);
-            };
-
-            const handleSaveSettings = async () => {
-                onUpdateRoleNames(localRoleNames); 
-                onSave({...settings, areaColors: areaC});
-                try {
-                    await crud.saveGlobalSettings({ calendarOverrides });
-                    setIsSettingsSaved(true); 
-                    setTimeout(() => setIsSettingsSaved(false), 2000);
-                } catch(e) { alert("設定儲存失敗"); }
-            };
-
-            return (
-                <div className="max-w-3xl mx-auto space-y-8">
-                    <div className="bg-white p-6 rounded shadow-sm border-t-4 border-red-500">
-                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Flag className="text-red-500"/> 📅 行事曆特殊日設定 (例假日/補班補休)</h2>
-                        <p className="text-sm text-gray-500 mb-4">在此設定的特殊日子，會即時同步到全公司的排班日曆與簽到表。若某天原本是補班日但單位放假，您可以設定為「自訂放假日」。</p>
-                        
-                        <div className="flex gap-2 mb-6 items-end">
-                            <div className="flex-1">
-                                <label className="block text-xs font-bold text-gray-600 mb-1">日期</label>
-                                <input type="date" className="border rounded px-3 py-2 text-sm w-full" value={newOverrideDate} onChange={e=>setNewOverrideDate(e.target.value)} />
-                            </div>
-                            <div className="w-32 shrink-0">
-                                <label className="block text-xs font-bold text-gray-600 mb-1">類型</label>
-                                <select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newOverrideType} onChange={e=>setNewOverrideType(e.target.value)}>
-                                    <option value="holiday">放假 (紅字)</option>
-                                    <option value="workday">補班/上班</option>
-                                </select>
-                            </div>
-                            <div className="flex-1">
-                                <label className="block text-xs font-bold text-gray-600 mb-1">原因 / 說明</label>
-                                <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例如: 補假、端午補休" value={newOverrideName} onChange={e=>setNewOverrideName(e.target.value)} />
-                            </div>
-                            <button onClick={handleAddOverride} className="bg-red-500 text-white px-4 py-2 rounded text-sm font-bold hover:bg-red-600">新增</button>
-                        </div>
-
-                        <div className="space-y-2">
-                            {Object.entries(calendarOverrides).sort((a,b)=>a[0].localeCompare(b[0])).map(([dateKey, info]) => (
-                                <div key={dateKey} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                                    <div className="flex items-center gap-3">
-                                        <span className="font-bold text-gray-700">{dateKey}</span>
-                                        <span className={`text-xs px-2 py-1 rounded font-bold ${info.type==='holiday' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                                            {info.type === 'holiday' ? '放假日' : '上班日'}
-                                        </span>
-                                        <span className="text-sm text-gray-600">{info.name}</span>
-                                    </div>
-                                    <button onClick={()=>handleDeleteOverride(dateKey)} className="text-gray-400 hover:text-red-500"><X size={16}/></button>
-                                </div>
-                            ))}
-                            {Object.keys(calendarOverrides).length === 0 && <div className="text-center text-sm text-gray-400 p-4">目前沒有任何自訂的特殊假日</div>}
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-6 rounded shadow-sm">
-                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div>
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div>
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{(tags.areaTags && Array.isArray(tags.areaTags) ? tags.areaTags : []).map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{(leaveTypes || []).map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
-                    <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定 (包含特殊節日)'}</button>
-                    </div>
-                </div>
-            );
-        }
-
-        // --- 成員管理與個人設定模組 ---
         function MembersView({ db, users, currentUser, roleNames }) {
             const isAdmin = currentUser && currentUser.role === 'admin';
             const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1862,7 +1775,7 @@
                 try {
                     for(const p of PREDEFINED_USERS) {
                         const docId = p.email.toLowerCase();
-                        const exists = (users || []).find(u => u.docId === docId);
+                        const exists = users.find(u => u.docId === docId);
                         if (!exists) {
                             await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', docId), {
                                 uid: docId, email: p.email, name: p.name, role: p.role, initials: p.initials, color: p.color, borderColor: p.borderColor, usePhoto: false, avatarUrl: ''
@@ -1870,7 +1783,9 @@
                         }
                     }
                     alert("預設名單匯入完成！");
-                } catch (e) { alert("匯入失敗: " + e.message); }
+                } catch (e) {
+                    alert("匯入失敗: " + e.message);
+                }
             };
 
             const handleSave = async (userData) => {
@@ -1890,9 +1805,6 @@
                 }
             };
 
-            const openAdd = () => { setEditUser(null); setIsModalOpen(true); };
-            const openEdit = (u) => { setEditUser(u); setIsModalOpen(true); };
-
             return (
                 <div className="max-w-5xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow-sm gap-4">
@@ -1900,12 +1812,13 @@
                         {isAdmin && (
                             <div className="flex gap-2">
                                 <button onClick={handleImportPredefined} className="bg-purple-100 text-purple-700 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-purple-200 transition"><Users size={16}/> 一鍵匯入預設名單</button>
-                                <button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button>
+                                <button onClick={()=>{setEditUser(null); setIsModalOpen(true);}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button>
                             </div>
                         )}
                     </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        {(users || []).map(u => (
+                        {users.map(u => (
                             <div key={u.docId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group">
                                 <UserAvatar user={u} size="w-12 h-12" textSize="text-base" />
                                 <div className="flex-1 overflow-hidden">
@@ -1958,6 +1871,20 @@
             );
         }
 
+        function ManagementView({ tags }) {
+            const [newWork, setNewWork] = useState('');
+            const [newArea, setNewArea] = useState('');
+            return (
+                <div className="max-w-4xl mx-auto space-y-6">
+                    <h2 className="text-xl font-bold flex items-center gap-2"><List/> 項目管理</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-blue-700">工作項目</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newWork} onChange={e=>setNewWork(e.target.value)} /><button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.workTags.map(tag => (<div key={tag} className="bg-blue-50 text-blue-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-blue-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div>
+                        <div className="bg-white p-6 rounded-lg shadow-sm border"><h3 className="font-bold text-lg mb-4 text-green-700">轄區</h3><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="新增..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>{tags.handleAddTag('area', newArea); setNewArea('')}} className="bg-green-600 text-white px-4 py-2 rounded text-sm">新增</button></div><div className="flex flex-wrap gap-2">{tags.areaTags.map(tag => (<div key={tag} className="bg-green-50 text-green-800 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1">{tag}<button onClick={()=>tags.handleDeleteTag('area', tag)} className="text-green-400 hover:text-red-500"><X size={14}/></button></div>))}</div></div>
+                    </div>
+                </div>
+            );
+        }
+
         function ProfileView({ user, onSave, roleNames }) {
             const [p, setP] = useState({ 
                 lastName: user.lastName || '', name: user.name || '', initials: user.initials || '', color: user.color || 'bg-gray-200', 
@@ -1969,6 +1896,7 @@
                 const file = e.target.files[0];
                 if (file) { const reader = new FileReader(); reader.onloadend = () => { setP({ ...p, avatarUrl: reader.result }); }; reader.readAsDataURL(file); }
             };
+
             const handleSubmit = async () => { setIsSubmitting(true); await onSave(p); setIsSubmitting(false); };
 
             return (
@@ -2000,6 +1928,48 @@
                             <div className="flex gap-2 flex-wrap">{['bg-red-200', 'bg-orange-200', 'bg-yellow-200', 'bg-green-200', 'bg-blue-200', 'bg-indigo-200', 'bg-purple-200', 'bg-pink-200', 'bg-gray-200'].map(c => (<div key={c} onClick={()=>setP({...p, color:c})} className={`w-8 h-8 rounded-full cursor-pointer border-2 ${c} ${p.color===c?'border-black':'border-transparent'}`}></div>))}</div>
                         </div>
                         <div className="pt-4"><button onClick={handleSubmit} disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-2 rounded font-bold transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={18} /> 更新中...</> : '更新個人資料'}</button></div>
+                    </div>
+                </div>
+            );
+        }
+
+        function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
+            const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
+            const [newLeave, setNewLeave] = useState('');
+            const [newArea, setNewArea] = useState(''); 
+            const [localRoleNames, setLocalRoleNames] = useState(roleNames);
+            const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
+
+            const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
+
+            const handleColorChange = (area, colorClass) => {
+                const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area);
+                if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; }
+                setAreaC({...areaC, [area]: colorClass});
+            };
+            
+            const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
+
+            const handleSaveSettings = () => {
+                onUpdateRoleNames(localRoleNames); onSave({...settings, areaColors: areaC});
+                setIsSettingsSaved(true); setTimeout(() => setIsSettingsSaved(false), 2000);
+            };
+
+            return (
+                <div className="max-w-3xl mx-auto space-y-8">
+                    <div className="bg-white p-6 rounded shadow-sm">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div>
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div>
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p>
+                    </div>
+
+                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
+                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
+                    <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}</button>
                     </div>
                 </div>
             );
