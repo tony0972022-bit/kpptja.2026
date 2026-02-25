@@ -46,7 +46,7 @@
           Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
           Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight,
           Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
-          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Clock4, PieChart, Trash
+          Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Clock4, PieChart, Trash, Megaphone, Flag
         } from 'lucide-react';
 
         // --- Firebase 綁定設定 ---
@@ -92,7 +92,6 @@
         const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "OFF", "專案報告", "大宗", "月報"];
         const DEFAULT_AREA_TAGS = ["高雄", "澎湖", "台東", "屏東", "就業通", "訓就", "分署"];
 
-        // 🌟 修復：將名稱修改為與預設名單中的「名」一致，解決輪序表沒反應的問題
         const DEFAULT_ROTATION_RULES = [
           { id: 'visit', name: '澎東訪視', matchTag: '訪視', order: ['湘怡', '國裕', '姿云', '秋媚', '凱宇', '怡倫'] },
           { id: 'project', name: '專案報告', matchTag: '專案報告', order: ['怡倫', '湘怡', '國裕', '姿云', '凱宇', '秋媚'] },
@@ -163,6 +162,7 @@
           const [calendarEvents, setCalendarEvents] = useState([]);
           const [clockIns, setClockIns] = useState([]);
           const [leaveQuotas, setLeaveQuotas] = useState([]);
+          const [announcements, setAnnouncements] = useState([]); // 🌟 新增：公告事項
           const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
           const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
           const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
@@ -174,6 +174,7 @@
           const [sidebarTheme, setSidebarTheme] = useState('light'); 
 
           const [settings, setSettings] = useState({ areaColors: DEFAULT_AREA_COLORS });
+          const [globalSettings, setGlobalSettings] = useState({ calendarOverrides: {} }); // 🌟 新增：全域設定(如自訂假日)
           
           const [loading, setLoading] = useState(true);
           const [db, setDb] = useState(null);
@@ -267,6 +268,7 @@
             init();
           }, []);
 
+          // Data Synchronization
           useEffect(() => {
             if (!db || !user) return;
             const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), 
@@ -279,8 +281,17 @@
               (s) => setClockIns(s.docs.map(d => ({ id: d.id, ...d.data() }))));
             const unsubQuotas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas')),
               (s) => setLeaveQuotas(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+              
+            // 🌟 監聽公告事項
+            const unsubAnnouncements = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements')),
+              (s) => setAnnouncements(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+              
+            // 🌟 監聽全域設定 (包含自訂節假日)
+            const unsubGlobal = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), (docSnap) => {
+                if (docSnap.exists()) setGlobalSettings(docSnap.data());
+            });
 
-            return () => { unsubLeaves(); unsubEvents(); unsubUsers(); unsubClockIns(); unsubQuotas(); };
+            return () => { unsubLeaves(); unsubEvents(); unsubUsers(); unsubClockIns(); unsubQuotas(); unsubAnnouncements(); unsubGlobal(); };
           }, [db, user]);
 
           const handleLogout = async () => { if(auth) await signOut(auth); };
@@ -336,7 +347,6 @@
               },
               createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
               updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
-              // 🌟 新增：刪除假單的方法
               deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id)),
               saveClockIn: async (d) => {
                   const existing = clockIns.find(c => c.date === d.date && c.userId === d.userId);
@@ -347,7 +357,11 @@
                   const existing = leaveQuotas.find(q => q.year === d.year && q.userId === d.userId);
                   if (existing) await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas', existing.id), d);
                   else await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leave_quotas'), d);
-              }
+              },
+              // 🌟 新增公告與全域設定 CRUD
+              createAnnouncement: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'announcements'), d),
+              deleteAnnouncement: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'announcements', id)),
+              saveGlobalSettings: async (d) => await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'global_settings', 'main'), d, { merge: true })
           };
 
           if (loading) return (
@@ -406,7 +420,7 @@
                     {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆'},
                     {id:'leave', icon:<ClipboardList size={20}/>, label:'差勤填寫'},
                     ...(userData.role !== 'staff' ? [{id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: totalAlert}] : []),
-                    {id:'personal', icon:<FileText size={20}/>, label:'差勤一覽表'}, // 🌟 更新名稱
+                    {id:'personal', icon:<FileText size={20}/>, label:'差勤一覽表'},
                     {id:'leave_balance', icon:<PieChart size={20}/>, label:'特休與額度查詢'},
                     {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'},
                     ...(userData.role === 'admin' ? [{id:'management', icon:<List size={20}/>, label:'項目管理'}] : []),
@@ -449,14 +463,15 @@
                 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
                   {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} />}
                   {view === 'clockin' && <ClockInView user={userData} clockIns={clockIns} crud={crud} />}
-                  {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
+                  {/* 🌟 傳入 announcements 與 globalSettings 到 CalendarView */}
+                  {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} globalSettings={globalSettings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} announcements={announcements} />}
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
                   {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} />}
-                  {view === 'personal' && <AttendanceView user={userData} users={usersList} events={calendarEvents} leaves={leaves} clockIns={clockIns} leaveTypes={leaveTypes} crud={crud} />}
+                  {view === 'personal' && <AttendanceView user={userData} users={usersList} events={calendarEvents} leaves={leaves} clockIns={clockIns} leaveTypes={leaveTypes} crud={crud} globalSettings={globalSettings} />}
                   {view === 'leave_balance' && <LeaveBalanceView user={userData} users={usersList} leaves={leaves} quotas={leaveQuotas} crud={crud} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
-                  {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
+                  {view === 'settings' && <SettingsView settings={settings} globalSettings={globalSettings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} crud={crud} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
               </div>
@@ -464,7 +479,7 @@
           );
         }
 
-        // --- 🌟 模組：線上打卡 ---
+        // --- 模組：線上打卡 ---
         function ClockInView({ user, clockIns, crud }) {
             const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -521,7 +536,7 @@
             );
         }
 
-        // --- 🌟 模組：特休與額度查詢 ---
+        // --- 模組：特休與額度查詢 ---
         function LeaveBalanceView({ user, users, leaves, quotas, crud }) {
             const currentYear = new Date().getFullYear();
             const isAdmin = user.role === 'admin' || user.role === 'leader';
@@ -623,7 +638,6 @@
           
           const pendingCount = leaves.filter(l => l.status !== 'approved' && l.status !== 'rejected').length;
           
-          // 🌟 儀表板資訊擴充：提取具體人員名單
           const todayLeaveList = leaves.filter(l => l.start.startsWith(todayStr) && l.status !== 'rejected');
           const todayLeaveNames = [...new Set(todayLeaveList.map(l => l.requesterName))];
 
@@ -678,7 +692,6 @@
                 </div>
               </div>
 
-              {/* 🌟 更新：儀表板改為顯示明確名單 */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500">
                     <h3 className="text-gray-500 text-sm font-medium">今日外勤人員</h3>
@@ -738,12 +751,14 @@
           );
         }
 
-        function CalendarView({ users, events, leaves, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
+        function CalendarView({ user, users, events, leaves, crud, tags, settings, globalSettings, rotationRules, onUpdateRotationRules, announcements }) {
           const [date, setDate] = useState(new Date());
           const [viewMode, setViewMode] = useState('month');
           const [modalOpen, setModalOpen] = useState(false);
           const [rotationModalOpen, setRotationModalOpen] = useState(false);
+          const [announceModalOpen, setAnnouncementModalOpen] = useState(false);
           const [modalData, setModalData] = useState({ date: '', workItem: '', note: '' });
+          const [announceData, setAnnounceData] = useState({ title: '', date: '', assignee: user.name, description: '' });
           const [selSlot, setSelSlot] = useState('morning'); 
           const [selArea, setSelArea] = useState('');
           const [selUsers, setSelUsers] = useState([]);
@@ -752,7 +767,15 @@
 
           const getDaysInMonth = (d) => new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
           const getFirstDayOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1).getDay();
+          const todayObj = new Date();
+          const tzOffsetToday = todayObj.getTimezoneOffset() * 60000;
+          const todayStr = (new Date(todayObj - tzOffsetToday)).toISOString().slice(0, 10);
           
+          // 🌟 公告過濾與排序 (顯示今天以後的)
+          const upcomingAnnouncements = announcements
+              .filter(a => a.date >= todayStr)
+              .sort((a,b) => a.date.localeCompare(b.date));
+
           const rotationStats = useMemo(() => {
               const currentYear = new Date().getFullYear();
               const stats = {}; 
@@ -777,7 +800,6 @@
           const getNextRotationPerson = (matchTag) => {
               const rule = rotationRules.find(r => r.matchTag === matchTag);
               if (!rule) return null;
-
               const sortedEvents = [...events]
                 .filter(e => e.type === 'tag' && e.item === matchTag)
                 .sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -796,8 +818,6 @@
                       next = rule.order[(maxIndex + 1) % rule.order.length];
                   }
               }
-              
-              // 🌟 根據 Name 來尋找，解決輪序表卡住的問題
               return { user: users.find(u => u.name === next), lastDate };
           };
 
@@ -888,6 +908,15 @@
               }
           };
 
+          const handleSaveAnnouncement = async () => {
+              if(!announceData.title || !announceData.date) { alert("標題和日期必填！"); return; }
+              try {
+                  await crud.createAnnouncement({ ...announceData, creator: user.name, timestamp: new Date() });
+                  setAnnouncementModalOpen(false);
+                  setAnnounceData({ title: '', date: '', assignee: user.name, description: '' });
+              } catch(e) { alert("發布失敗"); }
+          };
+
           const renderGrid = () => {
               const cells = [];
               const isMonth = viewMode === 'month';
@@ -916,11 +945,21 @@
           const renderDayCell = (dObj) => {
               const dStr = (new Date(dObj - dObj.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
               const dayEvs = events.filter(e => e.date === dStr);
-              const tzOffsetToday = new Date().getTimezoneOffset() * 60000;
-              const isToday = dStr === (new Date(Date.now() - tzOffsetToday)).toISOString().slice(0, 10);
-              const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
-              const holidayName = TAIWAN_HOLIDAYS_2026[dStr];
-              const isHoliday = !!holidayName;
+              const isToday = dStr === todayStr;
+              
+              // 🌟 整合自訂節假日 (全域設定)
+              const override = globalSettings.calendarOverrides?.[dStr];
+              let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
+              let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+              let holidayName = TAIWAN_HOLIDAYS_2026[dStr] || '';
+              
+              if (override) {
+                  if (override.type === 'holiday') {
+                      isHoliday = true; isWeekend = true; holidayName = override.name;
+                  } else if (override.type === 'workday') {
+                      isHoliday = false; isWeekend = false; holidayName = override.name;
+                  }
+              }
               
               const slots = { morning: [], afternoon: [], all_day: [] };
               const groups = {};
@@ -970,7 +1009,9 @@
                       <div className="w-full flex justify-between items-start mb-1">
                           <div className="flex flex-col items-center w-full">
                               <span className={`text-sm md:text-base font-bold px-3 py-0.5 w-full text-center ${isToday ? 'bg-yellow-300 text-black rounded-md shadow-sm' : (isWeekend || isHoliday ? 'text-red-500' : 'text-gray-700')}`}>
-                                  {dObj.getDate()} {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1 rounded align-middle">{holidayName}</span>}
+                                  {dObj.getDate()} 
+                                  {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1 rounded align-middle">{holidayName}</span>}
+                                  {override?.type === 'workday' && <span className="ml-1 text-[10px] md:text-xs bg-blue-500 text-white px-1 rounded align-middle">{holidayName}</span>}
                               </span>
                           </div>
                           <div className="absolute top-1 right-1"><Edit2 size={14} className="text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"/></div>
@@ -988,7 +1029,44 @@
 
           return (
             <div className="flex flex-col h-full gap-4">
-               <div className="flex-1 flex flex-col bg-white rounded-lg shadow-sm border h-full">
+               {/* 🌟 頂部：重大事項公告區 */}
+               {upcomingAnnouncements.length > 0 && (
+                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 shadow-sm shrink-0">
+                       <div className="flex justify-between items-center mb-2">
+                           <h3 className="text-amber-800 font-bold flex items-center gap-2"><Megaphone size={18}/> 近期重大事項公告</h3>
+                           <button onClick={()=>setAnnouncementModalOpen(true)} className="text-xs bg-amber-200 text-amber-800 px-3 py-1.5 font-bold rounded hover:bg-amber-300 transition shadow-sm">+ 新增公告</button>
+                       </div>
+                       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                           {upcomingAnnouncements.map(a => {
+                               const diffTime = Math.abs(new Date(a.date) - new Date(todayStr));
+                               const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                               return (
+                                  <div key={a.id} className="min-w-[260px] bg-white border border-amber-100 p-3 rounded-lg shadow-sm relative group">
+                                      <div className="flex justify-between items-start mb-1">
+                                          <span className="text-sm font-bold text-gray-800 flex-1 truncate pr-2">{a.title}</span>
+                                          <span className={`text-[10px] font-bold px-2 py-1 rounded shrink-0 ${daysLeft===0 ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-amber-100 text-amber-700'}`}>
+                                              {daysLeft === 0 ? '🔥 就是今天' : `倒數 ${daysLeft} 天`}
+                                          </span>
+                                      </div>
+                                      <div className="text-xs text-gray-500 font-medium">📅 {a.date} | 👤 主責: {a.assignee}</div>
+                                      {a.description && <div className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded line-clamp-2" title={a.description}>{a.description}</div>}
+                                      {(user.role === 'admin' || user.role === 'leader' || user.name === a.creator) && (
+                                          <button onClick={()=>crud.deleteAnnouncement(a.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 bg-white rounded-full p-1 shadow transition"><Trash2 size={14}/></button>
+                                      )}
+                                  </div>
+                               )
+                           })}
+                       </div>
+                   </div>
+               )}
+               {/* 當沒有公告時，顯示一個按鈕可以加 */}
+               {upcomingAnnouncements.length === 0 && (
+                    <div className="flex justify-end">
+                        <button onClick={()=>setAnnouncementModalOpen(true)} className="text-xs bg-white border border-gray-300 text-gray-600 px-3 py-1.5 font-bold rounded hover:bg-gray-50 transition shadow-sm flex items-center gap-1"><Megaphone size={14}/> 發布新公告</button>
+                    </div>
+               )}
+
+               <div className="flex-1 flex flex-col bg-white rounded-lg shadow-sm border h-full min-h-[500px]">
                   <div className="p-4 border-b flex justify-between items-center bg-gray-50">
                       <div className="flex items-center gap-2">
                         <span className="text-xl font-bold text-gray-700">{date.getFullYear()}年{date.getMonth()+1}月</span>
@@ -1015,6 +1093,29 @@
                       </div>
                   </div>
                </div>
+
+               {/* 🌟 公告表單 Modal */}
+               {announceModalOpen && (
+                   <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setAnnouncementModalOpen(false)}>
+                       <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+                           <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+                               <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2"><Megaphone size={20}/> 新增重大事項公告</h3>
+                               <button onClick={()=>setAnnouncementModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                           </div>
+                           <div className="p-4 space-y-4">
+                               <div><label className="text-xs font-bold text-gray-700 block mb-1">事項標題 <span className="text-red-500">*</span></label><input className="w-full border p-2 rounded" placeholder="例如: 繳交期中成果報告" value={announceData.title} onChange={e=>setAnnounceData({...announceData, title:e.target.value})}/></div>
+                               <div className="grid grid-cols-2 gap-4">
+                                   <div><label className="text-xs font-bold text-gray-700 block mb-1">截止/發生日期 <span className="text-red-500">*</span></label><input type="date" className="w-full border p-2 rounded" value={announceData.date} onChange={e=>setAnnounceData({...announceData, date:e.target.value})}/></div>
+                                   <div><label className="text-xs font-bold text-gray-700 block mb-1">主責人</label><select className="w-full border p-2 rounded bg-white text-sm" value={announceData.assignee} onChange={e=>setAnnounceData({...announceData, assignee:e.target.value})}><option value="">無</option>{users.map(u=><option key={u.docId} value={u.name}>{u.name}</option>)}</select></div>
+                               </div>
+                               <div><label className="text-xs font-bold text-gray-700 block mb-1">說明備註</label><textarea className="w-full border p-2 rounded h-20 resize-none" placeholder="補充細節..." value={announceData.description} onChange={e=>setAnnounceData({...announceData, description:e.target.value})}/></div>
+                           </div>
+                           <div className="p-4 border-t bg-gray-50 rounded-b-xl">
+                               <button onClick={handleSaveAnnouncement} className="w-full bg-amber-600 text-white py-3 rounded-lg font-bold shadow hover:bg-amber-700 transition">發布公告</button>
+                           </div>
+                       </div>
+                   </div>
+               )}
 
                <RotationModal open={rotationModalOpen} onClose={()=>setRotationModalOpen(false)} rules={rotationRules} onUpdateRules={onUpdateRotationRules} rotationData={rotationData} rotationStats={rotationStats}/>
 
@@ -1103,15 +1204,15 @@
           );
         }
 
-        // 🌟 更新：差勤一覽表 (支援選取所有人、包含撤銷假單功能)
-        function AttendanceView({ user, users, events, leaves, settings, leaveTypes, clockIns, crud }) {
+        // --- 差勤一覽表與報表匯出 ---
+        function AttendanceView({ user, users, events, leaves, settings, leaveTypes, clockIns, crud, globalSettings }) {
             const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
             const [leaveFilter, setLeaveFilter] = useState('all');
-            const [viewUser, setViewUser] = useState(user.name); // 預設顯示自己
+            const [viewUser, setViewUser] = useState(user.name); 
             const [selectedIds, setSelectedIds] = useState([]);
 
             const targetUsers = viewUser === 'all' ? users : users.filter(u => u.name === viewUser);
-            if (targetUsers.length === 0 && viewUser === user.name) targetUsers.push(user); // fallback
+            if (targetUsers.length === 0 && viewUser === user.name) targetUsers.push(user); 
 
             const scheduleData = useMemo(() => {
                 const parts = month.split('-');
@@ -1151,12 +1252,12 @@
                         else if (myWork.length > 0) status = '內勤';
                         else status = '無行程';
 
-                        if (myWork.length > 0 || myLeave || myClock || viewUser !== 'all') { // 全覽時過濾空白
+                        if (myWork.length > 0 || myLeave || myClock || viewUser !== 'all') { 
                             data.push({ name: tu.name, date: dateStr, work: myWork, leave: myLeave, clock: myClock, status });
                         }
                     }
                 });
-                return data.sort((a,b) => a.date.localeCompare(b.date)); // 依照日期排序
+                return data.sort((a,b) => a.date.localeCompare(b.date)); 
             }, [events, leaves, clockIns, month, targetUsers, viewUser]);
 
             const flatRows = useMemo(() => {
@@ -1171,7 +1272,7 @@
                             slot: w.isLeaveOnly ? 'all_day' : w.slot,
                             leaveType: d.leave?.type || '-',
                             leaveHours: d.leave?.hours || '-',
-                            leaveId: d.leave?.id, // 用於撤銷
+                            leaveId: d.leave?.id, 
                             content: w.isLeaveOnly ? '' : (w.tag?.item || ''),
                             area: w.isLeaveOnly ? '' : (w.tag?.area || ''),
                             reason: d.leave?.reason || '-',
@@ -1187,7 +1288,7 @@
 
             const filteredRows = useMemo(() => {
                 let fr = flatRows;
-                if (viewUser === 'all') fr = fr.filter(r => r.content !== '' || r.leaveType !== '-'); // 全團隊視角只看有紀錄的
+                if (viewUser === 'all') fr = fr.filter(r => r.content !== '' || r.leaveType !== '-'); 
                 if (leaveFilter !== 'all') fr = fr.filter(r => r.leaveType === leaveFilter);
                 return fr;
             }, [flatRows, leaveFilter, viewUser]);
@@ -1196,7 +1297,6 @@
             const toggleAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(filteredRows.map(r => r.id)); };
             const toggleOne = (id) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 
-            // 🌟 新增：撤銷/刪除假單
             const handleDeleteLeave = async (leaveId) => {
                 if (confirm('確定要撤銷此假單嗎？撤銷後如果有排班，會重新提示您送差單。')) {
                     try {
@@ -1270,13 +1370,22 @@
                         if (dayNum > daysInMonth) return { empty: true };
                         const dStr = `${month}-${String(dayNum).padStart(2,'0')}`;
                         const dObj = new Date(dStr);
-                        const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
-                        const isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
+                        
+                        // 🌟 整合自訂節假日 (全域設定)
+                        const override = globalSettings.calendarOverrides?.[dStr];
+                        let isHoliday = !!TAIWAN_HOLIDAYS_2026[dStr];
+                        let isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+                        let holidayName = TAIWAN_HOLIDAYS_2026[dStr];
+
+                        if (override) {
+                            if (override.type === 'holiday') { isHoliday = true; isWeekend = true; holidayName = override.name; } 
+                            else if (override.type === 'workday') { isHoliday = false; isWeekend = false; }
+                        }
                         
                         const myLeave = leaves.find(l => l.start.startsWith(dStr) && l.status === 'approved' && l.requesterName === tu.name);
                         const myClock = clockIns.find(c => c.date === dStr && c.userId === (tu.docId || tu.uid));
 
-                        if (isWeekend || isHoliday) return { type: 'holiday', text: '例 假 日' };
+                        if (isWeekend || isHoliday) return { type: 'holiday', text: holidayName || '例 假 日' };
                         if (myLeave) return { type: 'leave', text: myLeave.type };
                         
                         let amIn = '', amOut = '', pmIn = '', pmOut = '';
@@ -1316,10 +1425,19 @@
                     tableRows += tr1 + tr2;
                 }
 
+                // 處理第31天的備註格
+                const override31 = globalSettings.calendarOverrides?.[`${month}-31`];
+                let isHol31 = !!TAIWAN_HOLIDAYS_2026[`${month}-31`] || new Date(`${month}-31`).getDay() === 0 || new Date(`${month}-31`).getDay() === 6;
+                let text31 = '例 假 日';
+                if (override31) {
+                    if (override31.type === 'workday') isHol31 = false;
+                    else { isHol31 = true; text31 = override31.name; }
+                }
+
                 const footerRows = `
                 <tr>
                     <td colspan="6" rowspan="4" style="text-align: left; font-size: 12px; padding: 10px; line-height: 1.5;">備註：<br>1.計畫人員請依照上、下班時間確實辦理簽到(退)，如有不實願依本校規定懲處，並與計畫主持人負一切法律責任。<br>2.本表請填列一式二份，請於申請次月薪資時併同檢附，由主計室及人事室各留存一份，俾利作為是否扣薪依據。<br>3.如當日因請假而未出勤，請於當日欄位填寫假別。相關請假及扣薪規定，請依勞動基準法、性別工作平等法及勞工請假規則辦理。<br>　□事假(含家庭照顧假)共_____時；扣薪：__________(月薪) ÷ 30天 ÷ 8 × _______ (事假時數) = _____________元。<br>　□病假(含生理假)共_____時；扣薪：__________ (月薪) ÷ 30天 ÷ 8 ÷ 2 × _______(病假時數) =____________元。</td>
-                    <td align="center">31</td><td colspan="2" align="center">${daysInMonth === 31 ? (!!TAIWAN_HOLIDAYS_2026[`${month}-31`] || new Date(`${month}-31`).getDay() === 0 || new Date(`${month}-31`).getDay() === 6 ? '例 假 日' : '') : ''}</td>
+                    <td align="center">31</td><td colspan="2" align="center">${daysInMonth === 31 ? (isHol31 ? text31 : '') : ''}</td>
                 </tr>
                 <tr><td colspan="3" align="left">本人簽章：</td></tr><tr><td colspan="3" align="left">計畫主持人簽章：</td></tr><tr><td colspan="3" align="left">單位主管簽章：</td></tr>`;
 
@@ -1334,7 +1452,6 @@
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
                         <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 差勤一覽表</h2>
                         <div className="flex flex-wrap gap-4 w-full md:w-auto">
-                            {/* 🌟 篩選功能 */}
                             <select value={viewUser} onChange={e => setViewUser(e.target.value)} className="border p-2 rounded text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200">
                                 <option value={user.name}>看我的出勤</option>
                                 <option value="all">看全團隊出勤</option>
@@ -1409,7 +1526,6 @@
                                             </span>
                                         </td>
                                         <td className="p-3 text-center">
-                                            {/* 🌟 撤銷假單按鈕：只有本人的單或管理員才可見 */}
                                             {r.leaveId && (r.name === user.name || user.role === 'admin') && (
                                                 <button onClick={() => handleDeleteLeave(r.leaveId)} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded border border-red-200 text-xs flex items-center justify-center gap-1 w-full" title="撤銷這張假單">
                                                     <Trash size={12}/> 撤銷
@@ -1426,6 +1542,7 @@
             );
         }
 
+        // --- 待送差單小卡 ---
         const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
             const [type, setType] = useState('出差'); 
             const [deputyId, setDeputyId] = useState('');
@@ -1486,6 +1603,7 @@
             )
         }
 
+        // --- 差勤表單 ---
         function LeaveForm({ user, users, leaves, events, crud, leaveTypes }) {
           const [form, setForm] = useState({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
@@ -1504,7 +1622,6 @@
               Object.values(groups).forEach(g => {
                   if (!g.tag) return;
                   
-                  // 🌟 修復：拿掉 (g.tag.date < todayStr) 的判斷！現在就算漏補過去的排班，也會出現在這邊讓您補送假單！
                   const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
                   if (!isExternal) return;
 
@@ -1520,7 +1637,7 @@
                   const hasLeave = leaves.some(l => 
                       (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
                       l.start.startsWith(d) && 
-                      l.status !== 'rejected' // 只要還沒被駁回就算填了
+                      l.status !== 'rejected' 
                   );
 
                   if (!hasLeave) {
@@ -1536,7 +1653,6 @@
                       });
                   }
               });
-              // 按照時間舊到新排序 (最久沒補的會排在最上面)
               return pending.sort((a,b) => a.date.localeCompare(b.date));
           }, [events, leaves, user]);
 
@@ -1558,11 +1674,8 @@
                       timestamp: new Date() 
                   });
                   alert("差單已送出，已顯示在日曆上！");
-              } catch (e) {
-                  alert("送出失敗");
-              } finally {
-                  setSubmittingTaskId(null);
-              }
+              } catch (e) { alert("送出失敗"); } 
+              finally { setSubmittingTaskId(null); }
           }
 
           const handleManualSubmit = async (e) => {
@@ -1579,11 +1692,8 @@
                   });
                   alert("請假單已送出，已同步顯示在日曆上！");
                   setForm({ type: '休假', start:'', end:'', reason:'', deputyId:'' });
-              } catch (e) {
-                  alert("送出失敗，請稍後再試。");
-              } finally {
-                  setIsSubmitting(false);
-              }
+              } catch (e) { alert("送出失敗，請稍後再試。"); } 
+              finally { setIsSubmitting(false); }
           };
 
           const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
@@ -1598,14 +1708,7 @@
                        </h3>
                        <div className="space-y-4">
                            {pendingExternalTasks.map(task => (
-                               <PendingLeaveCard 
-                                   key={task.id} 
-                                   task={task} 
-                                   leaveTypes={leaveTypes} 
-                                   deputies={users.filter(u=>u.name!==user.name)} 
-                                   onSubmit={(data) => handleTaskSubmit(data, task.id)}
-                                   isSubmitting={submittingTaskId === task.id}
-                               />
+                               <PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>
                            ))}
                        </div>
                    </div>
@@ -1615,47 +1718,24 @@
                    <div className="flex justify-between items-center mb-6 border-b pb-4">
                        <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：自行請假 (特休/病假/事假)</h2>
                    </div>
-                   
                    <form onSubmit={handleManualSubmit} className="space-y-5">
-                       <div>
-                           <label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label>
-                           <select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>
-                               {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
-                           </select>
-                       </div>
+                       <div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div>
-                               <label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label>
-                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/>
-                           </div>
-                           <div>
-                               <label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label>
-                               <input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/>
-                           </div>
+                           <div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
+                           <div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
                        </div>
                        <div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div>
                        <div className="clear-both"></div>
-
-                       <div>
-                           <label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label>
-                           <select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}>
-                               <option value="">請選擇</option>
-                               {deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}
-                           </select>
-                       </div>
-                       <div>
-                           <label className="text-sm font-bold text-gray-700 block mb-1">事由</label>
-                           <textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/>
-                       </div>
-                       <button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>
-                            {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}
-                       </button>
+                       <div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
+                       <div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
+                       <button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button>
                    </form>
                </div>
             </div>
           );
         }
 
+        // --- 審核模組 ---
         function ApprovalView({ leaves, currentUser, crud, users }) {
           const [processingId, setProcessingId] = useState(null);
 
@@ -1663,38 +1743,27 @@
           const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
 
           const handleDeputyAgree = async (leave) => {
-              if (processingId) return;
-              setProcessingId(leave.id);
+              if (processingId) return; setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'deputy_signed' }); } 
-              catch(e) { alert("操作失敗"); } 
-              finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
           };
-
           const handleLeaderApprove = async (leave) => {
-              if (processingId) return;
-              setProcessingId(leave.id);
+              if (processingId) return; setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid }); } 
-              catch(e) { alert("操作失敗"); } 
-              finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
           };
-
           const handleReject = async (leave) => {
-              if (processingId) return;
-              setProcessingId(leave.id);
+              if (processingId) return; setProcessingId(leave.id);
               try { await crud.updateLeave(leave.id, { status: 'rejected', approverId: currentUser.uid }); } 
-              catch(e) { alert("操作失敗"); } 
-              finally { setProcessingId(null); }
+              catch(e) { alert("操作失敗"); } finally { setProcessingId(null); }
           }
 
           const StatusStep = ({ status }) => {
               const step1 = status !== 'pending' ? 'text-green-600 font-bold' : 'text-gray-400';
               const step2 = status === 'approved' ? 'text-green-600 font-bold' : (status === 'deputy_signed' ? 'text-blue-600 animate-pulse font-bold' : 'text-gray-400');
-              
               return (
                   <div className="flex items-center text-xs gap-1 bg-gray-100 px-2 py-1 rounded-full">
-                      <span className={`flex items-center ${step1}`}>1. 職代 {status !== 'pending' ? '✅' : '⏳'}</span>
-                      <span className="text-gray-300">→</span>
-                      <span className={`flex items-center ${step2}`}>2. 主管 {status === 'approved' ? '✅' : '⏳'}</span>
+                      <span className={`flex items-center ${step1}`}>1. 職代 {status !== 'pending' ? '✅' : '⏳'}</span><span className="text-gray-300">→</span><span className={`flex items-center ${step2}`}>2. 主管 {status === 'approved' ? '✅' : '⏳'}</span>
                   </div>
               );
           }
@@ -1702,31 +1771,16 @@
           return (
             <div className="max-w-4xl mx-auto space-y-8">
                <div className="flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle/> 差單審核</h2></div>
-               
                <div className="bg-white rounded shadow overflow-hidden border-t-4 border-blue-500">
-                   <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2">
-                       <User size={18}/> 第一關：待我簽核 (我是職代)
-                   </div>
+                   <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2"><User size={18}/> 第一關：待我簽核 (我是職代)</div>
                    {pendingMyDeputy.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待辦事項，您目前沒有需要代理的案件。</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingMyDeputy.map(l => (
                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                            <td className="p-3 font-bold text-gray-700">{l.requesterName}</td>
                            <td className="p-3"><span className="font-bold text-blue-600">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td>
                            <td className="p-3"><StatusStep status={l.status}/></td>
                            <td className="p-3 flex gap-2">
-                               <button 
-                                   onClick={()=>handleDeputyAgree(l)} 
-                                   disabled={processingId === l.id}
-                                   className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}
-                               >
-                                   {processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意
-                               </button>
-                               <button 
-                                   onClick={()=>handleReject(l)} 
-                                   disabled={processingId === l.id}
-                                   className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}
-                               >
-                                   {processingId === l.id ? '...' : '退回'}
-                               </button>
+                               <button onClick={()=>handleDeputyAgree(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意</button>
+                               <button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '退回'}</button>
                            </td>
                        </tr>
                    ))}</tbody></table>}
@@ -1734,29 +1788,15 @@
 
                {(currentUser.role === 'leader' || currentUser.role === 'admin') && 
                <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500">
-                   <div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2">
-                       <CheckCircle size={18}/> 第二關：待最終核准 (組長權限)
-                   </div>
+                   <div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>
                    {pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請人</th><th className="p-3">項目</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (
                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                            <td className="p-3 font-bold text-gray-700">{l.requesterName}</td>
                            <td className="p-3"><span className="font-bold text-gray-800">{l.type}</span><div className="text-xs text-gray-500 mt-1">{l.start.replace('T',' ')} <br/>~ {l.end.replace('T',' ')}</div></td>
                            <td className="p-3"><StatusStep status={l.status}/></td>
                            <td className="p-3 flex gap-2">
-                               <button 
-                                   onClick={()=>handleLeaderApprove(l)} 
-                                   disabled={processingId === l.id}
-                                   className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
-                               >
-                                   {processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准
-                               </button>
-                               <button 
-                                   onClick={()=>handleReject(l)} 
-                                   disabled={processingId === l.id}
-                                   className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}
-                               >
-                                   {processingId === l.id ? '...' : '駁回'}
-                               </button>
+                               <button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button>
+                               <button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-xs bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button>
                            </td>
                        </tr>
                    ))}</tbody></table>}
@@ -1765,6 +1805,117 @@
           );
         }
 
+        // --- 系統設定相關模組 ---
+        function SettingsView({ settings, globalSettings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, crud, roleNames, onUpdateRoleNames }) {
+            const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
+            const [newLeave, setNewLeave] = useState('');
+            const [newArea, setNewArea] = useState(''); 
+            const [localRoleNames, setLocalRoleNames] = useState(roleNames);
+            const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
+            
+            // 🌟 處理全域自訂假日的狀態
+            const [calendarOverrides, setCalendarOverrides] = useState(globalSettings.calendarOverrides || {});
+            const [newOverrideDate, setNewOverrideDate] = useState('');
+            const [newOverrideType, setNewOverrideType] = useState('holiday');
+            const [newOverrideName, setNewOverrideName] = useState('');
+
+            const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
+
+            const handleColorChange = (area, colorClass) => {
+                const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area);
+                if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; }
+                setAreaC({...areaC, [area]: colorClass});
+            };
+            const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
+
+            // 新增自訂假日
+            const handleAddOverride = () => {
+                if (!newOverrideDate || !newOverrideName) { alert("日期與原因必填"); return; }
+                setCalendarOverrides(prev => ({
+                    ...prev,
+                    [newOverrideDate]: { type: newOverrideType, name: newOverrideName }
+                }));
+                setNewOverrideDate(''); setNewOverrideName('');
+            };
+            // 刪除自訂假日
+            const handleDeleteOverride = (dateKey) => {
+                const updated = { ...calendarOverrides };
+                delete updated[dateKey];
+                setCalendarOverrides(updated);
+            };
+
+            const handleSaveSettings = async () => {
+                onUpdateRoleNames(localRoleNames); 
+                onSave({...settings, areaColors: areaC});
+                // 儲存全域設定到 Firestore
+                try {
+                    await crud.saveGlobalSettings({ calendarOverrides });
+                    setIsSettingsSaved(true); 
+                    setTimeout(() => setIsSettingsSaved(false), 2000);
+                } catch(e) { alert("設定儲存失敗"); }
+            };
+
+            return (
+                <div className="max-w-3xl mx-auto space-y-8">
+                    {/* 🌟 新增：行事曆特殊日設定區塊 */}
+                    <div className="bg-white p-6 rounded shadow-sm border-t-4 border-red-500">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Flag className="text-red-500"/> 📅 行事曆特殊日設定 (例假日/補班補休)</h2>
+                        <p className="text-sm text-gray-500 mb-4">在此設定的特殊日子，會即時同步到全公司的排班日曆與簽到表。若某天原本是補班日但單位放假，您可以設定為「自訂放假日」。</p>
+                        
+                        <div className="flex gap-2 mb-6 items-end">
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-600 mb-1">日期</label>
+                                <input type="date" className="border rounded px-3 py-2 text-sm w-full" value={newOverrideDate} onChange={e=>setNewOverrideDate(e.target.value)} />
+                            </div>
+                            <div className="w-32 shrink-0">
+                                <label className="block text-xs font-bold text-gray-600 mb-1">類型</label>
+                                <select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newOverrideType} onChange={e=>setNewOverrideType(e.target.value)}>
+                                    <option value="holiday">放假 (紅字)</option>
+                                    <option value="workday">補班/上班</option>
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-600 mb-1">原因 / 說明</label>
+                                <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例如: 補假、端午補休" value={newOverrideName} onChange={e=>setNewOverrideName(e.target.value)} />
+                            </div>
+                            <button onClick={handleAddOverride} className="bg-red-500 text-white px-4 py-2 rounded text-sm font-bold hover:bg-red-600">新增</button>
+                        </div>
+
+                        <div className="space-y-2">
+                            {Object.entries(calendarOverrides).sort((a,b)=>a[0].localeCompare(b[0])).map(([dateKey, info]) => (
+                                <div key={dateKey} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-bold text-gray-700">{dateKey}</span>
+                                        <span className={`text-xs px-2 py-1 rounded font-bold ${info.type==='holiday' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                            {info.type === 'holiday' ? '放假日' : '上班日'}
+                                        </span>
+                                        <span className="text-sm text-gray-600">{info.name}</span>
+                                    </div>
+                                    <button onClick={()=>handleDeleteOverride(dateKey)} className="text-gray-400 hover:text-red-500"><X size={16}/></button>
+                                </div>
+                            ))}
+                            {Object.keys(calendarOverrides).length === 0 && <div className="text-center text-sm text-gray-400 p-4">目前沒有任何自訂的特殊假日</div>}
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded shadow-sm">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div>
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div>
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
+                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
+                    <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定 (包含特殊節日)'}</button>
+                    </div>
+                </div>
+            );
+        }
+
+        // 成員管理與個人設定模組 (略去重複修改，維持先前的姓氏與名字分離)
         function MembersView({ db, users, currentUser, roleNames }) {
             const isAdmin = currentUser && currentUser.role === 'admin';
             const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1783,9 +1934,7 @@
                         }
                     }
                     alert("預設名單匯入完成！");
-                } catch (e) {
-                    alert("匯入失敗: " + e.message);
-                }
+                } catch (e) { alert("匯入失敗: " + e.message); }
             };
 
             const handleSave = async (userData) => {
@@ -1816,7 +1965,6 @@
                             </div>
                         )}
                     </div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         {users.map(u => (
                             <div key={u.docId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group">
@@ -1928,48 +2076,6 @@
                             <div className="flex gap-2 flex-wrap">{['bg-red-200', 'bg-orange-200', 'bg-yellow-200', 'bg-green-200', 'bg-blue-200', 'bg-indigo-200', 'bg-purple-200', 'bg-pink-200', 'bg-gray-200'].map(c => (<div key={c} onClick={()=>setP({...p, color:c})} className={`w-8 h-8 rounded-full cursor-pointer border-2 ${c} ${p.color===c?'border-black':'border-transparent'}`}></div>))}</div>
                         </div>
                         <div className="pt-4"><button onClick={handleSubmit} disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-2 rounded font-bold transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={18} /> 更新中...</> : '更新個人資料'}</button></div>
-                    </div>
-                </div>
-            );
-        }
-
-        function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
-            const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
-            const [newLeave, setNewLeave] = useState('');
-            const [newArea, setNewArea] = useState(''); 
-            const [localRoleNames, setLocalRoleNames] = useState(roleNames);
-            const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
-
-            const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
-
-            const handleColorChange = (area, colorClass) => {
-                const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area);
-                if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; }
-                setAreaC({...areaC, [area]: colorClass});
-            };
-            
-            const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
-
-            const handleSaveSettings = () => {
-                onUpdateRoleNames(localRoleNames); onSave({...settings, areaColors: areaC});
-                setIsSettingsSaved(true); setTimeout(() => setIsSettingsSaved(false), 2000);
-            };
-
-            return (
-                <div className="max-w-3xl mx-auto space-y-8">
-                    <div className="bg-white p-6 rounded shadow-sm">
-                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div>
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div>
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p>
-                    </div>
-
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 屬性</h2><div className="flex gap-2 mb-4"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新假別..." value={newLeave} onChange={e=>setNewLeave(e.target.value)} /><button onClick={()=>{handleManageLeaveTypes('add', newLeave); setNewLeave('')}} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold">新增</button></div><div className="flex flex-wrap gap-3">{leaveTypes.map(t => (<div key={t} className="flex items-center gap-2 bg-gray-50 border px-3 py-2 rounded-lg text-sm"><span className="font-bold text-gray-700">{t}</span><button onClick={()=>handleManageLeaveTypes('delete', t)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14}/></button></div>))}</div>
-                    <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}</button>
                     </div>
                 </div>
             );
