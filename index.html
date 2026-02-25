@@ -876,22 +876,111 @@
                   <div className="mt-auto flex flex-col-reverse w-full pt-1">{renderLeaves()}</div>
               </div></div>);
           };
-<hr className="border-gray-100"/><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-700 mb-1">工作項目</label><select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>setModalData({...modalData, workItem:e.target.value})}><option value="">請選擇...</option>{tags.workTags.map(t=><option key={t} value={t}>{t}</option>)}</select></div><div><label className="block text-xs font-bold text-gray-700 mb-1">選擇時段</label><div className="flex bg-gray-100 rounded p-1">{TIME_SLOTS.map(s => (<button key={s.id} onClick={()=>setSelSlot(s.id)} className={`flex-1 py-1.5 text-xs rounded transition ${selSlot===s.id ? 'bg-white shadow text-black font-bold' : 'text-gray-500'}`}>{s.label}</button>))}</div></div></div>
-<div>
-    <label className="block text-xs font-bold text-gray-700 mb-1">選擇轄區 (可點擊複選)</label>
-    <div className="flex flex-wrap gap-2 p-2 border rounded bg-gray-50">
-        {tags.areaTags.map(a => {
-            const active = selAreas.includes(a);
-            return (
-                <button key={a} type="button" onClick={() => setSelAreas(prev => active ? prev.filter(x=>x!==a) : [...prev, a])} 
-                        className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'bg-green-100 border-green-500 text-green-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}`}>
-                    {a}
-                </button>
-            )
-        })}
-    </div>
-</div>
-<div><label className="block text-xs font-bold text-gray-700 mb-1">時間/備註 (選填)</label><input className="w-full border p-2 rounded bg-white text-sm" placeholder="例如: 09:00 或 備註事項" value={modalData.note} onChange={e=>setModalData({...modalData, note:e.target.value})}/></div><div><label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label><div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{users.map(u => { const active = selUsers.includes(u.uid || u.docId); return (<div key={u.docId} onClick={()=>setSelUsers(p=>active?p.filter(x=>x!==(u.uid || u.docId)):[...p,(u.uid || u.docId)])} className={`flex flex-col items-center p-2 rounded-lg border cursor-pointer transition select-none ${active?'bg-blue-50 border-blue-500 ring-1 ring-blue-500':'bg-white hover:bg-gray-50 border-gray-200'}`}><UserAvatar user={u} size="w-8 h-8" textSize="text-xs" /><span className="text-[10px] mt-1 text-gray-700 font-medium">{u.name}</span></div>); })}</div></div></div><div className="p-4 border-t bg-gray-50 rounded-b-xl flex gap-3">{editGroupId && (<button onClick={handleDeleteGroup} disabled={isSubmitting} className={`flex-1 bg-red-100 text-red-700 py-3 rounded-lg font-bold hover:bg-red-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>刪除行程</button>)}<button onClick={handleModalSave} disabled={isSubmitting} className={`flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900'}`}>{isSubmitting ? <><RefreshCw className="animate-spin" size={18}/> 處理中...</> : <><CheckCircle size={18}/> {editGroupId ? '確認修改' : '儲存行程'}</>}</button></div></div></div>)}</div>);
+
+          return (
+            <div className="flex flex-col h-full gap-4">
+                <div className="flex-1 flex flex-col bg-white rounded-lg shadow-sm border h-full">
+                    <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl font-bold text-gray-700">{date.getFullYear()}年{date.getMonth()+1}月</span>
+                            <div className="flex bg-white rounded border shadow-sm">
+                                <button className="p-1.5 hover:bg-gray-100" onClick={()=>setDate(new Date(date.getFullYear(), date.getMonth()-1, 1))}><ChevronLeft size={16}/></button>
+                                <button className="p-1.5 hover:bg-gray-100" onClick={()=>setDate(new Date(date.getFullYear(), date.getMonth()+1, 1))}><ChevronRight size={16}/></button>
+                            </div>
+                            <div className="flex bg-white rounded border shadow-sm ml-2 text-xs">
+                                <button onClick={()=>setViewMode('month')} className={`px-3 py-1.5 ${viewMode==='month'?'bg-slate-800 text-white':'hover:bg-gray-50'}`}>月</button>
+                                <button onClick={()=>setViewMode('week')} className={`px-3 py-1.5 ${viewMode==='week'?'bg-slate-800 text-white':'hover:bg-gray-50'}`}>週</button>
+                            </div>
+                        </div>
+                        <button onClick={()=>setRotationModalOpen(true)} className="text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 hover:bg-blue-50 text-blue-600 font-bold"><RefreshCw size={14}/> 輪序表</button>
+                    </div>
+                    <div className="flex-1 overflow-auto">
+                        <div className="min-w-[600px] h-full flex flex-col">
+                            <div className="grid grid-cols-7 border-b bg-white text-center text-sm md:text-base font-bold text-gray-500 py-2 sticky top-0 z-10 shadow-sm">{['日','一','二','三','四','五','六'].map((d,i)=><div key={i} className={i===0||i===6?'text-red-500':''}>{d}</div>)}</div>
+                            <div className="flex-1 grid grid-cols-7 auto-rows-fr bg-white">{renderGrid()}</div>
+                        </div>
+                    </div>
+                </div>
+                <RotationModal open={rotationModalOpen} onClose={()=>setRotationModalOpen(false)} rules={rotationRules} onUpdateRules={onUpdateRotationRules} rotationData={rotationData} rotationStats={rotationStats}/>
+                {modalOpen && (
+                    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>setModalOpen(false)}>
+                        <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]" onClick={e=>e.stopPropagation()}>
+                            <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+                                <div>
+                                    <h3 className="font-bold text-lg text-gray-800">{editGroupId ? '修改排班' : '新增排班'}</h3>
+                                    <input type="date" className="mt-1 text-sm font-medium text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white hover:border-blue-400 focus:border-blue-500 outline-none transition-colors" value={modalData.date} onChange={e=>setModalData({...modalData, date:e.target.value})}/>
+                                </div>
+                                <button onClick={()=>setModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                            </div>
+                            <div className="p-4 overflow-y-auto space-y-5">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block flex items-center gap-1"><RefreshCw size={12}/> 快速輪值 (自動帶入)</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {rotationRules.map(rule => (
+                                            <button key={rule.id} onClick={() => handleRotationClick(rule)} className="text-xs py-2 px-3 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition text-left flex justify-between items-center group"><span>{rule.name}</span><span className="opacity-0 group-hover:opacity-100 text-[10px]">自動填入 →</span></button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <hr className="border-gray-100"/>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 mb-1">工作項目</label>
+                                        <select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>setModalData({...modalData, workItem:e.target.value})}>
+                                            <option value="">請選擇...</option>
+                                            {tags.workTags.map(t=><option key={t} value={t}>{t}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 mb-1">選擇時段</label>
+                                        <div className="flex bg-gray-100 rounded p-1">
+                                            {TIME_SLOTS.map(s => (<button key={s.id} onClick={()=>setSelSlot(s.id)} className={`flex-1 py-1.5 text-xs rounded transition ${selSlot===s.id ? 'bg-white shadow text-black font-bold' : 'text-gray-500'}`}>{s.label}</button>))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1">選擇轄區 (可點擊複選)</label>
+                                    <div className="flex flex-wrap gap-2 p-2 border rounded bg-gray-50">
+                                        {tags.areaTags.map(a => {
+                                            const active = selAreas.includes(a);
+                                            return (
+                                                <button key={a} type="button" onClick={() => setSelAreas(prev => active ? prev.filter(x=>x!==a) : [...prev, a])} 
+                                                        className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'bg-green-100 border-green-500 text-green-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}`}>
+                                                    {a}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1">時間/備註 (選填)</label>
+                                    <input className="w-full border p-2 rounded bg-white text-sm" placeholder="例如: 09:00 或 備註事項" value={modalData.note} onChange={e=>setModalData({...modalData, note:e.target.value})}/>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label>
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                        {users.map(u => { 
+                                            const active = selUsers.includes(u.uid || u.docId); 
+                                            return (
+                                                <div key={u.docId} onClick={()=>setSelUsers(p=>active?p.filter(x=>x!==(u.uid || u.docId)):[...p,(u.uid || u.docId)])} className={`flex flex-col items-center p-2 rounded-lg border cursor-pointer transition select-none ${active?'bg-blue-50 border-blue-500 ring-1 ring-blue-500':'bg-white hover:bg-gray-50 border-gray-200'}`}>
+                                                    <UserAvatar user={u} size="w-8 h-8" textSize="text-xs" />
+                                                    <span className="text-[10px] mt-1 text-gray-700 font-medium">{u.name}</span>
+                                                </div>
+                                            ); 
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-4 border-t bg-gray-50 rounded-b-xl flex gap-3">
+                                {editGroupId && (<button onClick={handleDeleteGroup} disabled={isSubmitting} className={`flex-1 bg-red-100 text-red-700 py-3 rounded-lg font-bold hover:bg-red-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>刪除行程</button>)}
+                                <button onClick={handleModalSave} disabled={isSubmitting} className={`flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900'}`}>
+                                    {isSubmitting ? <><RefreshCw className="animate-spin" size={18}/> 處理中...</> : <><CheckCircle size={18}/> {editGroupId ? '確認修改' : '儲存行程'}</>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+          );
         }
 
         function RotationModal({ open, onClose, rules, onUpdateRules, rotationData, rotationStats }) {
