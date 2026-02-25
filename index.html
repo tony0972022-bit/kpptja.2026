@@ -844,13 +844,13 @@
                               )}
                           </div>
                           {(note || g.people.length > 0) && (
-                              <div className="flex items-center gap-1 mt-0.5 flex-wrap leading-tight">
-                                 {g.people.length > 0 && (
-                                     <span className="text-[10px] md:text-xs text-blue-700 font-medium tracking-wide">
-                                         {g.people.map(p => p.userName).join(', ')}
-                                     </span>
-                                 )}
-                                 {note && <span className="text-[10px] text-gray-400 truncate">({note})</span>}
+                              <div className="flex items-center gap-1 mt-1 flex-wrap leading-tight">
+                                 {g.people.length > 0 && g.people.map(p => {
+                                     const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
+                                     const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
+                                     return <UserAvatar key={p.id} user={displayUser} size="w-6 h-6 md:w-7 md:h-7" textSize="text-xs md:text-sm" />;
+                                 })}
+                                 {note && <span className="text-[10px] text-gray-500 truncate">({note})</span>}
                               </div>
                           )}
                           <button onClick={(e)=>{e.stopPropagation(); if(confirm('刪除?')) crud.deleteEventsByGroup(groupId)}} 
@@ -861,7 +861,12 @@
                   );
               };
               const renderLeaves = () => {
-                  const leavesOnDay = leaves.filter(l => l.status !== 'rejected' && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
+                  const leavesOnDay = leaves.filter(l => 
+                      l.status !== 'rejected' && 
+                      dStr >= l.start.split('T')[0] && 
+                      dStr <= l.end.split('T')[0] &&
+                      !["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)"].includes(l.type)
+                  );
                   return leavesOnDay.map(l => (
                       <div key={l.id} className="text-[10px] md:text-[11px] border-l-[3px] border-pink-500 bg-pink-50 text-pink-700 pl-1.5 py-0.5 my-0.5 w-full truncate font-medium rounded-r-sm">
                           {l.requesterName} ({l.type})
