@@ -813,7 +813,7 @@
                   const groupEvents = [g.tag, ...g.people].filter(Boolean);
                   
                   // 抓取第一個轄區的顏色來當作左側色塊，如果沒有就用預設灰色
-                  const firstAreaColorClass = areas.length > 0 ? (settings.areaColors[areas[0]] || 'bg-blue-500') : 'bg-gray-400';
+                  const firstAreaColorClass = areas.length > 0 ? (settings.areaColors[areas[0]] || 'bg-blue-500') : 'bg-gray-300';
                   const getBorderColor = (cls) => {
                      if(cls.includes('red')) return 'border-red-500';
                      if(cls.includes('orange')) return 'border-orange-500';
@@ -823,39 +823,43 @@
                      if(cls.includes('indigo')) return 'border-indigo-500';
                      if(cls.includes('purple')) return 'border-purple-500';
                      if(cls.includes('pink')) return 'border-pink-500';
-                     return 'border-gray-400';
+                     return 'border-gray-300';
                   };
                   const borderClass = getBorderColor(firstAreaColorClass);
 
+                  // 嶄新的卡片式 UI 設計
                   return (
                       <div key={groupId} 
                            onClick={(e) => handleEventClick(e, groupEvents)} 
-                           className={`group/item relative flex flex-col mb-1.5 pl-1.5 border-l-[3px] ${borderClass} cursor-pointer hover:bg-gray-100 rounded-r-sm transition py-0.5`}
+                           className={`group/item relative flex flex-col mb-2 p-2 bg-white rounded-lg shadow-sm border border-gray-100 border-l-[4px] ${borderClass} cursor-pointer hover:shadow-md hover:-translate-y-px transition-all`}
                       >
-                          <div className="flex items-center gap-1 flex-wrap leading-tight">
-                              <span className="font-bold text-gray-800 text-[11px] md:text-[13px]">{tagName}</span>
+                          <div className="flex justify-between items-start gap-1 mb-1">
+                              <span className="font-bold text-gray-800 text-sm leading-tight">{tagName}</span>
                               {areas.length > 0 && (
-                                  <div className="flex gap-0.5 flex-wrap">
+                                  <div className="flex gap-1 flex-wrap justify-end">
                                       {areas.map(a => {
                                           const ac = settings.areaColors[a] || "bg-gray-100 text-gray-800";
-                                          return <span key={a} className={`px-1 py-0.5 rounded text-[9px] font-medium leading-none ${ac}`}>{a}</span>
+                                          return <span key={a} className={`px-1.5 py-0.5 rounded-full text-[10px] md:text-xs font-bold leading-none ${ac}`}>{a}</span>
                                       })}
                                   </div>
                               )}
                           </div>
+                          
                           {(note || g.people.length > 0) && (
-                              <div className="flex items-center gap-1 mt-1 flex-wrap leading-tight">
-                                 {g.people.length > 0 && g.people.map(p => {
-                                     const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
-                                     const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
-                                     return <UserAvatar key={p.id} user={displayUser} size="w-6 h-6 md:w-7 md:h-7" textSize="text-xs md:text-sm" />;
-                                 })}
-                                 {note && <span className="text-[10px] text-gray-500 truncate">({note})</span>}
+                              <div className="flex items-center justify-between mt-1">
+                                 <div className="flex flex-wrap gap-1">
+                                     {g.people.length > 0 && g.people.map(p => {
+                                         const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
+                                         const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
+                                         return <UserAvatar key={p.id} user={displayUser} size="w-7 h-7 md:w-8 md:h-8" textSize="text-xs md:text-sm" className="shadow-sm border-white border-[1.5px]" />;
+                                     })}
+                                 </div>
+                                 {note && <span className="text-[10px] md:text-xs text-gray-400 truncate max-w-[80px] ml-2" title={note}>{note}</span>}
                               </div>
                           )}
                           <button onClick={(e)=>{e.stopPropagation(); if(confirm('刪除?')) crud.deleteEventsByGroup(groupId)}} 
-                                  className="absolute top-0 right-0 p-1 opacity-0 group-hover/item:opacity-100 text-gray-300 hover:text-red-500 transition">
-                              <X size={12}/>
+                                  className="absolute -top-2 -right-2 p-1 bg-white rounded-full shadow-md opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-red-500 transition-opacity">
+                              <X size={14}/>
                           </button>
                       </div>
                   );
@@ -868,17 +872,18 @@
                       !["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)", "榮譽假(獲得)"].includes(l.type)
                   );
                   return leavesOnDay.map(l => (
-                      <div key={l.id} className="text-[10px] md:text-[11px] border-l-[3px] border-pink-500 bg-pink-50 text-pink-700 pl-1.5 py-0.5 my-0.5 w-full truncate font-medium rounded-r-sm">
-                          {l.requesterName} ({l.type})
+                      <div key={l.id} className="text-xs border border-pink-200 bg-pink-50 text-pink-700 px-2 py-1 my-1 w-full truncate font-bold rounded-md shadow-sm flex items-center justify-between">
+                          <span>{l.requesterName}</span>
+                          <span className="text-[10px] opacity-80 bg-pink-100 px-1 rounded-sm">{l.type}</span>
                       </div>
                   ));
               };
-              return (<div key={dStr} className={`border-b border-r border-gray-200 p-1 min-h-[140px] md:min-h-[18vh] relative transition-colors flex flex-col group hover:bg-gray-50`} onClick={() => handleDayClick(dObj)}><div className="w-full flex justify-between items-start mb-1"><div className="flex flex-col items-center w-full"><span className={`text-sm md:text-base font-bold px-3 py-0.5 w-full text-center ${isToday ? 'bg-yellow-300 text-black rounded-md shadow-sm' : (isWeekend || isHoliday ? 'text-red-500' : 'text-gray-700')}`}>{dObj.getDate()} {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1 rounded align-middle">{holidayName}</span>}</span></div><div className="absolute top-1 right-1"><Edit2 size={14} className="text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"/></div></div>
-              <div className="flex-1 flex flex-col gap-0.5 overflow-hidden" onClick={e=>e.stopPropagation()}>
-                  {slots.all_day.length > 0 && <div className="mb-1"><div className="text-[10px] md:text-[11px] font-bold text-sky-700 mb-1 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍整天</div>{slots.all_day.map(renderGroup)}</div>}
-                  {slots.morning.length > 0 && <div className="mb-1"><div className="text-[10px] md:text-[11px] font-bold text-sky-600 mb-1 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍上午</div>{slots.morning.map(renderGroup)}</div>}
-                  {slots.afternoon.length > 0 && <div className="mb-1"><div className="text-[10px] md:text-[11px] font-bold text-sky-800 mb-1 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍下午</div>{slots.afternoon.map(renderGroup)}</div>}
-                  <div className="mt-auto flex flex-col-reverse w-full pt-1">{renderLeaves()}</div>
+              return (<div key={dStr} className={`border-b border-r border-gray-200 p-1.5 md:p-2 min-h-[150px] md:min-h-[18vh] relative transition-colors flex flex-col group hover:bg-gray-50`} onClick={() => handleDayClick(dObj)}><div className="w-full flex justify-between items-start mb-2"><div className="flex flex-col items-center w-full"><span className={`text-sm md:text-base font-bold px-3 py-0.5 w-full text-center rounded-md ${isToday ? 'bg-yellow-300 text-black shadow-sm' : (isWeekend || isHoliday ? 'text-red-500' : 'text-gray-700')}`}>{dObj.getDate()} {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1.5 py-0.5 rounded align-middle">{holidayName}</span>}</span></div><div className="absolute top-2 right-2"><Edit2 size={16} className="text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"/></div></div>
+              <div className="flex-1 flex flex-col gap-1 overflow-hidden" onClick={e=>e.stopPropagation()}>
+                  {slots.all_day.length > 0 && <div className="mb-1"><div className="text-xs font-bold text-sky-700 mb-1.5 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍整天</div>{slots.all_day.map(renderGroup)}</div>}
+                  {slots.morning.length > 0 && <div className="mb-1"><div className="text-xs font-bold text-sky-600 mb-1.5 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍上午</div>{slots.morning.map(renderGroup)}</div>}
+                  {slots.afternoon.length > 0 && <div className="mb-1"><div className="text-xs font-bold text-sky-800 mb-1.5 sticky top-0 bg-gray-50/90 z-0 pl-1 border-b border-sky-100">▍下午</div>{slots.afternoon.map(renderGroup)}</div>}
+                  <div className="mt-auto flex flex-col-reverse w-full pt-2">{renderLeaves()}</div>
               </div></div>);
           };
 
@@ -1152,29 +1157,46 @@
                     </div>
 
                     {activeTab === 'mine' ? (
-                        <div className="bg-white rounded shadow overflow-hidden animate-in fade-in">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-gray-50 border-b font-bold text-gray-600">
-                                    <tr><th className="p-3 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-3 w-20 whitespace-nowrap">姓名</th><th className="p-3 w-28">日期</th><th className="p-3 w-14">時間</th><th className="p-3 w-20">假別</th><th className="p-3 w-14">時數</th><th className="p-3 w-20">職代</th><th className="p-3">排班內容</th><th className="p-3 w-28">事由</th><th className="p-3 w-28">備註</th><th className="p-3 w-28">狀態</th><th className="p-3 w-16 text-center">操作</th></tr>
+                        <div className="bg-white rounded-lg shadow-sm overflow-hidden animate-in fade-in border border-gray-200">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                                    <tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-4 font-semibold text-sm whitespace-nowrap">姓名</th><th className="p-4 font-semibold text-sm whitespace-nowrap">日期</th><th className="p-4 font-semibold text-sm whitespace-nowrap">時間</th><th className="p-4 font-semibold text-sm">假別</th><th className="p-4 font-semibold text-sm">時數</th><th className="p-4 font-semibold text-sm">職代</th><th className="p-4 font-semibold text-sm">排班內容</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm">備註</th><th className="p-4 font-semibold text-sm">狀態</th><th className="p-4 font-semibold text-sm text-center">操作</th></tr>
                                 </thead>
                                 <tbody>
                                     {filteredRows.map((r) => { 
                                         const canRecall = r.rawLeave && (r.rawLeave.status === 'pending' || r.rawLeave.status === 'rejected'); 
                                         const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId)?.name || '未知') : '-'; 
+                                        const isOfficial = r.leaveType === '出差' || r.leaveType === '公出' || r.leaveType === '公假';
+                                        
                                         return (
-                                            <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 transition ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
-                                                <td className="p-3 text-center"><input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></td>
-                                                <td className="p-3 font-medium whitespace-nowrap">{r.name}</td>
-                                                <td className="p-3 text-xs">{r.date}</td>
-                                                <td className="p-3 text-xs">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td>
-                                                <td className="p-3">{r.leaveType !== '-' ? <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">{r.leaveType}</span> : '-'}</td>
-                                                <td className="p-3 text-xs">{r.leaveHours}</td>
-                                                <td className="p-3 text-xs text-blue-700">{deputyName}</td>
-                                                <td className="p-3 text-xs">{r.content ? (<span className="font-bold text-gray-700">{r.content} {r.area && `(${r.area})`}</span>) : <span className="text-gray-400">-</span>}</td>
-                                                <td className="p-3 text-xs text-gray-500">{r.reason}</td>
-                                                <td className="p-3 text-xs text-gray-500">{r.note}</td>
-                                                <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold leading-tight inline-block ${r.status === '缺公務單' ? 'bg-red-100 text-red-600' : r.status === '異常公出' || ['假別不符', '已駁回'].includes(r.status) ? 'bg-orange-100 text-orange-600' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{r.status === '異常公出' ? '異常公出 (請確認排班日曆是否已換人員)' : r.status}</span></td>
-                                                <td className="p-3 text-center">{canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded text-xs font-bold transition flex items-center gap-1 mx-auto" title="撤回未核准的單據"><Undo size={12}/> 撤回</button>)}</td>
+                                            <tr key={r.id} className={`border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
+                                                <td className="p-4 text-center"><input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></td>
+                                                <td className="p-4 text-sm font-medium text-gray-800 whitespace-nowrap">{r.name}</td>
+                                                <td className="p-4 text-sm text-gray-600 whitespace-nowrap">{r.date}</td>
+                                                <td className="p-4 text-sm text-gray-600 whitespace-nowrap">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td>
+                                                <td className="p-4">
+                                                    {r.leaveType !== '-' ? 
+                                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${isOfficial ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                            {r.leaveType}
+                                                        </span> 
+                                                        : <span className="text-gray-400">-</span>
+                                                    }
+                                                </td>
+                                                <td className="p-4 text-sm font-medium text-gray-700">{r.leaveHours}</td>
+                                                <td className="p-4 text-sm text-blue-700 whitespace-nowrap">{deputyName}</td>
+                                                <td className="p-4 text-sm">
+                                                    {r.content ? (<span className="font-bold text-gray-700">{r.content} {r.area && <span className="text-gray-500 font-normal">({r.area})</span>}</span>) : <span className="text-gray-400">-</span>}
+                                                </td>
+                                                <td className="p-4 text-sm text-gray-600 max-w-[150px] truncate" title={r.reason}>{r.reason}</td>
+                                                <td className="p-4 text-sm text-gray-500 max-w-[150px] truncate" title={r.note}>{r.note}</td>
+                                                <td className="p-4">
+                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                        {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    {canRecall && (<button onClick={() => handleRecallLeave(r.rawLeave.id)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 mx-auto shadow-sm" title="撤回未核准的單據"><Undo size={14}/> 撤回</button>)}
+                                                </td>
                                             </tr>
                                         ) 
                                     })}
@@ -1183,21 +1205,23 @@
                             </table>
                         </div>
                     ) : (
-                        <div className="bg-white rounded shadow overflow-hidden animate-in fade-in">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-gray-50 border-b font-bold text-gray-600">
-                                    <tr><th className="p-3 w-20">申請人</th><th className="p-3 w-32">日期/時間</th><th className="p-3 w-24">假別</th><th className="p-3 w-16">時數</th><th className="p-3">事由</th><th className="p-3 w-28">單據狀態</th></tr>
+                        <div className="bg-white rounded-lg shadow-sm overflow-hidden animate-in fade-in border border-gray-200">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                                    <tr><th className="p-4 font-semibold text-sm w-24">申請人</th><th className="p-4 font-semibold text-sm w-48">日期/時間</th><th className="p-4 font-semibold text-sm w-32">假別</th><th className="p-4 font-semibold text-sm w-20">時數</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm w-32">單據狀態</th></tr>
                                 </thead>
                                 <tbody>
                                     {deputyLeaves.length > 0 ? deputyLeaves.map(l => (
-                                        <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
-                                            <td className="p-3 font-bold text-gray-800">{l.requesterName}</td>
-                                            <td className="p-3 text-xs text-gray-500">{l.start.replace('T', ' ')} <br/>~ {l.end.replace('T', ' ')}</td>
-                                            <td className="p-3 font-bold text-blue-600">{l.type}</td>
-                                            <td className="p-3 text-xs">{l.hours} 小時</td>
-                                            <td className="p-3 text-xs text-gray-600">{l.reason}</td>
-                                            <td className="p-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'pending' ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-500'}`}>
+                                        <tr key={l.id} className="border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors">
+                                            <td className="p-4 text-sm font-bold text-gray-800">{l.requesterName}</td>
+                                            <td className="p-4 text-sm text-gray-600 whitespace-nowrap">{l.start.replace('T', ' ')} <br/><span className="text-gray-400">至</span> {l.end.replace('T', ' ')}</td>
+                                            <td className="p-4">
+                                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-700">{l.type}</span>
+                                            </td>
+                                            <td className="p-4 text-sm font-medium text-gray-700">{l.hours} 小時</td>
+                                            <td className="p-4 text-sm text-gray-600">{l.reason}</td>
+                                            <td className="p-4">
+                                                <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${l.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
                                                     {l.status === 'pending' ? '等待您同意' : '已簽核'}
                                                 </span>
                                             </td>
@@ -1491,42 +1515,66 @@
                         )}
                     </div>
 
-                    <div className="bg-white rounded shadow overflow-hidden border border-gray-100"><div className="p-4 border-b bg-gray-50"><h3 className="font-bold text-gray-700 flex items-center gap-2"><List size={18}/> 請假使用紀錄 ({selectedMonth === 'all' ? '全年' : `${selectedMonth} 月`})</h3></div><table className="w-full text-sm text-left"><thead className="bg-white border-b text-gray-500"><tr><th className="p-3 w-28">日期</th><th className="p-3 w-28">時間</th><th className="p-3 w-32">假別</th><th className="p-3 w-24">天/時數</th><th className="p-3">事由</th>{isAdminOrLeader && <th className="p-3 w-20 text-center">操作</th>}</tr></thead><tbody>{filteredLeaves.map(l => {
-                        // 分解日期與時間
-                        const d1 = l.start.split('T')[0];
-                        const t1 = l.start.split('T')[1] || '';
-                        const d2 = l.end.split('T')[0];
-                        const t2 = l.end.split('T')[1] || '';
-                        const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
-                        const timeStr = `${t1} ~ ${t2}`;
+                    <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
+                        <div className="p-4 border-b bg-gray-50">
+                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><List size={18}/> 請假使用紀錄 ({selectedMonth === 'all' ? '全年' : `${selectedMonth} 月`})</h3>
+                        </div>
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                                <tr>
+                                    <th className="p-4 text-sm font-semibold tracking-wide w-28">日期</th>
+                                    <th className="p-4 text-sm font-semibold tracking-wide w-28">時間</th>
+                                    <th className="p-4 text-sm font-semibold tracking-wide w-32">假別</th>
+                                    <th className="p-4 text-sm font-semibold tracking-wide w-24">天/時數</th>
+                                    <th className="p-4 text-sm font-semibold tracking-wide">事由</th>
+                                    {isAdminOrLeader && <th className="p-4 text-sm font-semibold tracking-wide w-20 text-center">操作</th>}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredLeaves.map(l => {
+                                    // 分解日期與時間
+                                    const d1 = l.start.split('T')[0];
+                                    const t1 = l.start.split('T')[1] || '';
+                                    const d2 = l.end.split('T')[0];
+                                    const t2 = l.end.split('T')[1] || '';
+                                    const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
+                                    const timeStr = `${t1} ~ ${t2}`;
 
-                        // 判斷是否為公務或正向發放
-                        const isOfficialOrGain = ['出差', '公出', '公假', '榮譽假(獲得)'].includes(l.type);
+                                    // 判斷是否為公務或正向發放
+                                    const isOfficialOrGain = ['出差', '公出', '公假', '榮譽假(獲得)'].includes(l.type);
 
-                        return (
-                            <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50 transition">
-                                <td className="p-3 text-xs text-gray-600">{dateStr}</td>
-                                <td className="p-3 text-xs text-gray-500">{timeStr}</td>
-                                <td className="p-3 font-bold text-blue-700">{l.type}</td>
-                                <td className="p-3">
-                                    <span className={`px-2 py-0.5 rounded font-bold text-xs border ${isOfficialOrGain ? 'bg-sky-50 text-sky-700 border-sky-100' : 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-                                        {l.type.includes('加班') || l.type.includes('補休') || l.type.includes('榮譽假') ? `${l.hours} 時` : `${l.hours/8} 天`}
-                                    </span>
-                                </td>
-                                <td className="p-3 text-gray-600">{l.reason}</td>
-                                {isAdminOrLeader && (
-                                    <td className="p-3 text-center">
-                                        {l.type === '榮譽假(獲得)' && (
-                                            <div className="flex justify-center gap-1">
-                                                <button onClick={() => handleEditHonor(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded transition" title="修改時數"><Edit2 size={14}/></button>
-                                                <button onClick={() => handleDeleteHonor(l.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition" title="刪除紀錄"><Trash2 size={14}/></button>
-                                            </div>
-                                        )}
-                                    </td>
-                                )}
-                            </tr>
-                        )
-                    })}{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div>
+                                    return (
+                                        <tr key={l.id} className="border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors">
+                                            <td className="p-4 text-sm text-gray-800 font-medium">{dateStr}</td>
+                                            <td className="p-4 text-sm text-gray-500">{timeStr}</td>
+                                            <td className="p-4">
+                                                <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${isOfficialOrGain ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                    {l.type}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded-md font-bold text-sm ${isOfficialOrGain ? 'text-sky-700' : 'text-gray-700'}`}>
+                                                    {l.type.includes('加班') || l.type.includes('補休') || l.type.includes('榮譽假') ? `${l.hours} 時` : `${l.hours/8} 天`}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-sm text-gray-600 max-w-[250px] truncate" title={l.reason}>{l.reason}</td>
+                                            {isAdminOrLeader && (
+                                                <td className="p-4 text-center">
+                                                    {l.type === '榮譽假(獲得)' && (
+                                                        <div className="flex justify-center gap-1">
+                                                            <button onClick={() => handleEditHonor(l)} className="text-blue-600 hover:bg-blue-100 p-1.5 rounded-md transition" title="修改時數"><Edit2 size={14}/></button>
+                                                            <button onClick={() => handleDeleteHonor(l.id)} className="text-red-600 hover:bg-red-100 p-1.5 rounded-md transition" title="刪除紀錄"><Trash2 size={14}/></button>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            )}
+                                        </tr>
+                                    )
+                                })}
+                                {filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             );
         }
