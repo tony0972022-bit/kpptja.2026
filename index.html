@@ -115,15 +115,14 @@
             "分署": "bg-gray-100 text-gray-800"
         };
 
-        // 🌟 新增：預設名單與權限 (加上 Tony 測試帳號)
+        // 🌟 新增：預設名單與權限 (免等登入直接綁定)
         const PREDEFINED_USERS = [
             { email: 'kaiyu097@gmail.com', name: '凱宇', role: 'admin', initials: '宇', color: 'bg-purple-200', borderColor: '#a855f7' },
             { email: 'n85551@gmail.com', name: '國裕', role: 'leader', initials: '裕', color: 'bg-blue-200', borderColor: '#3b82f6' },
             { email: 'hkkwork@gmail.com', name: '湘怡', role: 'staff', initials: '湘', color: 'bg-red-200', borderColor: '#ef4444' },
             { email: 'judyfang1226@gmail.com', name: '姿云', role: 'staff', initials: '姿', color: 'bg-green-200', borderColor: '#22c55e' },
             { email: 'kppt1110601@gmail.com', name: '秋媚', role: 'staff', initials: '媚', color: 'bg-yellow-200', borderColor: '#eab308' },
-            { email: 'yilun1208@gmail.com', name: '怡倫', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899' },
-            { email: 'tony0972022@gmail.com', name: 'Tony測試', role: 'staff', initials: '測', color: 'bg-gray-200', borderColor: '#9ca3af' }
+            { email: 'yilun1208@gmail.com', name: '怡倫', role: 'staff', initials: '倫', color: 'bg-pink-200', borderColor: '#ec4899' }
         ];
 
         // --- Helper: Send Mail ---
@@ -226,32 +225,15 @@
                         if (u) {
                             setUser(u);
                             try {
-                                // 🌟 核心修改：改用 email 當作唯一的資料庫文件 ID (預防建立重複帳號)
-                                const docId = u.email ? u.email.toLowerCase() : u.uid;
-                                const userRef = doc(dbInstance, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', docId);
+                                // Corrected path to exactly 6 segments for a document reference
+                                const userRef = doc(dbInstance, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', u.uid);
                                 const snap = await getDoc(userRef);
-                                
-                                const matchedUser = PREDEFINED_USERS.find(p => p.email.toLowerCase() === (u.email || '').toLowerCase());
-
                                 if (snap.exists()) {
-                                    let currentData = snap.data();
-                                    let needsUpdate = false;
-
-                                    // 確保 uid 是最新的真實 Google UID (避免一鍵匯入時殘留舊設定)
-                                    if (currentData.uid !== u.uid) {
-                                        currentData.uid = u.uid;
-                                        needsUpdate = true;
-                                    }
-
-                                    // 若在預設名單且與目前權限/名字不符，進行自動修復
-                                    if (matchedUser && (currentData.role !== matchedUser.role || currentData.name !== matchedUser.name)) {
-                                        currentData = { ...currentData, role: matchedUser.role, name: matchedUser.name, initials: matchedUser.initials, color: matchedUser.color, borderColor: matchedUser.borderColor };
-                                        needsUpdate = true;
-                                    }
-
-                                    if (needsUpdate) await updateDoc(userRef, currentData);
-                                    setUserData({ ...currentData, docId });
+                                    setUserData(snap.data());
                                 } else {
+                                    // 🌟 尋找是否在預設名單中
+                                    const matchedUser = PREDEFINED_USERS.find(p => p.email.toLowerCase() === (u.email || '').toLowerCase());
+                                    
                                     const newP = { 
                                         uid: u.uid, 
                                         email: u.email || '', 
@@ -264,7 +246,7 @@
                                         borderColor: matchedUser ? matchedUser.borderColor : '#3b82f6'
                                     };
                                     await setDoc(userRef, newP);
-                                    setUserData({ ...newP, docId });
+                                    setUserData(newP);
                                 }
                             } catch(e) { 
                                 console.error("Profile fetch error", e); 
@@ -289,19 +271,21 @@
           useEffect(() => {
             if (!db || !user) return;
 
+            // Leaves Sync
             const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), 
               (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))),
               (e) => console.error("Leaves sync error", e)
             );
               
+            // Events Sync
             const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), 
               (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))),
               (e) => console.error("Events sync error", e)
             );
 
-            // 確保有加上 docId 供前端對應
+            // Users List Sync (Cloud-based, no more localStorage fallback)
             const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')),
-              (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))),
+              (s) => setUsersList(s.docs.map(d => ({uid: d.id, ...d.data()}))),
               (e) => console.error("Users sync error", e)
             );
 
@@ -319,8 +303,7 @@
           
           const handleUpdateProfile = async (newProfile) => {
               try {
-                  const docId = userData.email ? userData.email.toLowerCase() : user.uid;
-                  await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', docId), newProfile);
+                  await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', user.uid), newProfile);
                   setUserData(prev => ({...prev, ...newProfile}));
                   alert("個人設定已更新");
               } catch(e) {
@@ -407,7 +390,7 @@
           const pendingApprovalCount = (userData.role === 'leader' || userData.role === 'admin') 
             ? leaves.filter(l => l.status === 'deputy_signed').length
             : 0;
-          const myPendingDeputy = leaves.filter(l => l.deputyId === userData.uid || l.deputyId === (userData.email || '').toLowerCase()).filter(l => l.status === 'pending').length;
+          const myPendingDeputy = leaves.filter(l => l.deputyId === userData.uid && l.status === 'pending').length;
           const totalAlert = pendingApprovalCount + myPendingDeputy;
 
           const isLight = sidebarTheme === 'light';
@@ -753,7 +736,7 @@
           const handleRotationClick = (rule) => {
               setModalData(prev => ({...prev, workItem: rule.matchTag}));
               const info = getNextRotationPerson(rule.matchTag);
-              if (info?.user) setSelUsers([info.user.uid || info.user.docId]);
+              if (info?.user) setSelUsers([info.user.uid]);
               else setSelUsers([]);
           };
 
@@ -776,7 +759,7 @@
                   const hasMorning = userEvents.find(e => e.slot === 'morning');
                   const hasAfternoon = userEvents.find(e => e.slot === 'afternoon');
                   
-                  const uName = users.find(u=>u.uid === uid || u.docId === uid)?.name;
+                  const uName = users.find(u=>u.uid===uid)?.name;
 
                   if (selSlot === 'all_day' && (hasMorning || hasAfternoon || hasAllDay)) {
                       conflictMsg = `衝突警示：\n${uName} 在該日已有「${hasMorning?'上午':(hasAfternoon?'下午':'整天')}」行程，無法再排整天。`;
@@ -807,9 +790,9 @@
                   });
                   
                   for(const uid of selUsers) {
-                      const u = users.find(x=>x.uid === uid || x.docId === uid);
+                      const u = users.find(x=>x.uid===uid);
                       if(u) await crud.createEvent({ 
-                          groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, 
+                          groupId, date: modalData.date, type: 'person', userId: u.uid, userName: u.name, 
                           userAvatar: u.initials, userColor: u.color, slot: selSlot, timestamp: new Date() 
                       });
                   }
@@ -887,7 +870,7 @@
                         <span className="text-xs md:text-sm text-blue-700 font-bold truncate">{tagName}</span>
                         {note && <span className="text-[10px] md:text-xs text-gray-500">({note})</span>}
                         {g.people.map(p => {
-                            const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
+                            const userProfile = users.find(u => u.uid === p.userId || u.name === p.userName);
                             const displayUser = userProfile || { 
                                 initials: p.userAvatar, 
                                 color: p.userColor || 'bg-gray-200', 
@@ -1075,9 +1058,9 @@
                                    <label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label>
                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                                        {users.map(u => {
-                                           const active = selUsers.includes(u.uid || u.docId);
+                                           const active = selUsers.includes(u.uid);
                                            return (
-                                               <div key={u.docId} onClick={()=>setSelUsers(p=>active?p.filter(x=>x!==(u.uid || u.docId)):[...p,(u.uid || u.docId)])} 
+                                               <div key={u.uid} onClick={()=>setSelUsers(p=>active?p.filter(x=>x!==u.uid):[...p,u.uid])} 
                                                     className={`flex flex-col items-center p-2 rounded-lg border cursor-pointer transition select-none ${active?'bg-blue-50 border-blue-500 ring-1 ring-blue-500':'bg-white hover:bg-gray-50 border-gray-200'}`}>
                                                    <UserAvatar user={u} size="w-8 h-8" textSize="text-xs" />
                                                    <span className="text-[10px] mt-1 text-gray-700 font-medium">{u.name}</span>
@@ -1266,11 +1249,13 @@
                 link.click();
             };
 
+            // 🌟 新增：加入 Google 行事曆的功能
             const addToGoogleCalendar = (dateStr, slot, title, area, note) => {
                 const d = dateStr.replace(/-/g, '');
                 let start = '';
                 let end = '';
                 
+                // 簡易時間對應 (可根據貴單位實際上下班時間微調)
                 if (slot === 'morning') {
                     start = `${d}T090000`;
                     end = `${d}T120000`;
@@ -1278,6 +1263,7 @@
                     start = `${d}T133000`;
                     end = `${d}T173000`;
                 } else {
+                    // 整天行程的格式規則：跨越到隔天
                     start = d;
                     const nextDay = new Date(dateStr);
                     nextDay.setDate(nextDay.getDate() + 1);
@@ -1292,12 +1278,13 @@
                      url.searchParams.append('dates', `${start}/${end}`);
                 } else {
                      url.searchParams.append('dates', `${start}/${end}`);
-                     url.searchParams.append('ctz', 'Asia/Taipei'); 
+                     url.searchParams.append('ctz', 'Asia/Taipei'); // 指定台灣時區
                 }
                 
                 if (note) url.searchParams.append('details', note);
                 if (area) url.searchParams.append('location', area);
 
+                // 開啟新分頁前往 Google 行事曆
                 window.open(url.toString(), '_blank');
             };
 
@@ -1351,6 +1338,7 @@
                                                      <span className={`px-2 py-1 rounded text-xs font-bold ${d.status==='缺公務單'?'bg-red-100 text-red-600':(d.status==='假別不符' || d.status==='異常公出' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600')}`}>
                                                          {(d.status === '正常' || d.status === '內勤' || (d.leave && !['缺公務單','假別不符','異常公出'].includes(d.status))) ? '同意' : d.status}
                                                      </span>
+                                                     {/* 🌟 新增：加入行事曆按鈕 (僅限有外勤/排班項目時顯示) */}
                                                      {!w.isLeaveOnly && w.tag && (
                                                          <button 
                                                             onClick={() => addToGoogleCalendar(d.date, w.slot, w.tag.item, w.tag.area, w.tag.note)}
@@ -1380,63 +1368,6 @@
           const [preciseTime, setPreciseTime] = useState(false); 
           const [isSubmitting, setIsSubmitting] = useState(false);
 
-          // 🌟 核心新增：智慧尋找尚未填寫差單的排班任務
-          const pendingExternalTasks = useMemo(() => {
-              const todayStr = new Date().toISOString().split('T')[0];
-              const groups = {};
-              
-              // 將所有事件依據群組(groupId)打包
-              events.forEach(e => {
-                  if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
-                  if (e.type === 'tag') groups[e.groupId].tag = e;
-                  if (e.type === 'person') groups[e.groupId].people.push(e);
-              });
-
-              const pending = [];
-              Object.values(groups).forEach(g => {
-                  if (!g.tag) return;
-                  if (g.tag.date < todayStr) return; // 忽略過去的排班
-                  
-                  // 檢查是否為外勤 (使用全域變數 EXTERNAL_WORK_TAGS)
-                  const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
-                  if (!isExternal) return;
-
-                  // 檢查這筆排班有沒有包含「目前的登入者」
-                  const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
-                  if (!isMe) return;
-
-                  const d = g.tag.date; 
-                  // 根據上下午設定建議的時間區間 (可根據實際上下班時間微調)
-                  let startTime = `${d}T08:30`;
-                  let endTime = `${d}T17:30`;
-                  if (g.tag.slot === 'morning') { endTime = `${d}T12:30`; }
-                  else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:30`; }
-
-                  // 檢查此人這一天是否已經有送出任何假單了 (排除被退回的)
-                  const hasLeave = leaves.some(l => 
-                      (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) && 
-                      l.start.startsWith(d) && 
-                      l.status !== 'rejected'
-                  );
-
-                  // 如果排了班卻沒有假單，就加入待辦清單
-                  if (!hasLeave) {
-                      pending.push({
-                          id: g.tag.groupId,
-                          date: d,
-                          slot: g.tag.slot,
-                          item: g.tag.item,
-                          area: g.tag.area,
-                          suggestedStart: startTime,
-                          suggestedEnd: endTime,
-                          reason: `[${g.tag.item}] ${g.tag.area ? g.tag.area : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim()
-                      });
-                  }
-              });
-              // 依日期排序，最近的排在最上面
-              return pending.sort((a,b) => a.date.localeCompare(b.date));
-          }, [events, leaves, user]);
-
           useEffect(() => {
               if(form.start && form.end) {
                   const diff = (new Date(form.end)-new Date(form.start))/36e5;
@@ -1449,9 +1380,9 @@
                   });
                   const newAlerts = [];
                   if (needsLeave && !EXTERNAL_WORK_TAGS.some(t => form.type.includes(t)) && form.type !== '公假' && form.type !== '出差') {
-                      newAlerts.push("⚠️ 注意：排班表顯示您當日有外勤行程，請確認假別是否正確。");
+                      newAlerts.push("⚠️ 注意：排班表顯示您當日有「訪視/出差」行程，請確認假別是否正確。");
                   }
-                  if (!needsLeave && (form.type === '出差' || form.type === '公假' || form.type === '公出')) {
+                  if (!needsLeave && (form.type === '出差' || form.type === '公假')) {
                       newAlerts.push("⚠️ 提醒：排班表中當日似乎沒有您的外勤行程，請確認是否遺漏排班。");
                   }
                   setAlerts(newAlerts);
@@ -1464,7 +1395,7 @@
               try {
                   await crud.createLeave({ ...form, requesterId: user.uid, requesterName: user.name, hours, status: 'pending', timestamp: new Date() });
                   
-                  const deputy = users.find(u => (u.uid === form.deputyId || u.docId === form.deputyId));
+                  const deputy = users.find(u => u.uid === form.deputyId);
                   if (deputy && deputy.email) {
                       openMailClient(
                           deputy.email, 
@@ -1487,74 +1418,33 @@
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
 
           return (
-            <div className="max-w-2xl mx-auto space-y-6">
-               {/* 🌟 待辦外勤提示區塊 */}
-               {pendingExternalTasks.length > 0 && (
-                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5 shadow-sm">
-                       <h3 className="font-bold text-indigo-800 mb-3 flex items-center gap-2">
-                           <Briefcase size={18}/> 系統建議：您有未填寫的外勤排班
-                       </h3>
-                       <div className="space-y-3">
-                           {pendingExternalTasks.map(task => (
-                               <div key={task.id} className="bg-white p-3 rounded-lg border border-indigo-100 flex justify-between items-center shadow-sm">
-                                   <div>
-                                       <div className="font-bold text-gray-800 text-sm">
-                                           {task.date} - <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}
-                                       </div>
-                                       <div className="text-xs text-gray-500 mt-1">
-                                           時間：{task.slot === 'morning' ? '上午 (預設 08:30-12:30)' : task.slot === 'afternoon' ? '下午 (預設 13:30-17:30)' : '整天 (預設 08:30-17:30)'}
-                                       </div>
-                                   </div>
-                                   <button 
-                                       onClick={(e) => {
-                                           e.preventDefault();
-                                           setForm(prev => ({
-                                               ...prev, 
-                                               type: '公出', 
-                                               start: task.suggestedStart, 
-                                               end: task.suggestedEnd, 
-                                               reason: task.reason
-                                           }));
-                                           window.scrollTo({ top: 0, behavior: 'smooth' });
-                                       }}
-                                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold transition shadow-sm flex items-center gap-1 shrink-0"
-                                   >
-                                       <ArrowRight size={14}/> 一鍵帶入
-                                   </button>
-                               </div>
-                           ))}
-                       </div>
+            <div className="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-sm">
+               <div className="flex justify-between items-center mb-6">
+                   <h2 className="text-xl font-bold flex items-center gap-2"><ClipboardList/> 差勤填寫</h2>
+                   <div className="flex gap-2">
+                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded flex items-center gap-1"><Mail size={12}/> 自動開信</span>
+                        <button onClick={()=>setPreciseTime(!preciseTime)} className="text-xs text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-50">
+                            {preciseTime ? "切換為 30分 級距" : "切換為精確時間"}
+                        </button>
                    </div>
-               )}
-
-               <div className="bg-white p-6 rounded-lg shadow-sm">
-                   <div className="flex justify-between items-center mb-6">
-                       <h2 className="text-xl font-bold flex items-center gap-2"><ClipboardList/> 差勤填寫</h2>
-                       <div className="flex gap-2">
-                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded flex items-center gap-1"><Mail size={12}/> 自動開信</span>
-                            <button onClick={()=>setPreciseTime(!preciseTime)} className="text-xs text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-50">
-                                {preciseTime ? "切換為 30分 級距" : "切換為精確時間"}
-                            </button>
-                       </div>
-                   </div>
-                   {alerts.length > 0 && <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded mb-4 text-sm font-bold">{alerts.map((a,i) => <div key={i} className="flex items-center gap-2"><AlertTriangle size={16}/> {a}</div>)}</div>}
-                   <form onSubmit={handleSubmit} className="space-y-4">
-                       <div>
-                           <label className="text-xs font-bold text-gray-500 block mb-1">假別</label>
-                           <select className="w-full border p-2 rounded" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
-                       </div>
-                       <div className="grid grid-cols-2 gap-4">
-                           <div><label className="text-xs font-bold text-gray-500 block mb-1">開始</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded bg-gray-50 focus:bg-white" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
-                           <div><label className="text-xs font-bold text-gray-500 block mb-1">結束</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded bg-gray-50 focus:bg-white" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
-                       </div>
-                       <div className="text-right text-sm text-blue-600 font-bold">時數: {hours} hr</div>
-                       <div><label className="text-xs font-bold text-gray-500 block mb-1">職務代理人</label><select className="w-full border p-2 rounded" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
-                       <div><label className="text-xs font-bold text-gray-500 block mb-1">事由 (將自動帶入地點與備註)</label><textarea className="w-full border p-2 rounded h-20 bg-gray-50 focus:bg-white" required value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
-                       <button disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-3 rounded font-bold transition shadow flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
-                            {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 資料傳送中...</> : '送出申請 (自動通知)'}
-                       </button>
-                   </form>
                </div>
+               {alerts.length > 0 && <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded mb-4 text-sm font-bold">{alerts.map((a,i) => <div key={i} className="flex items-center gap-2"><AlertTriangle size={16}/> {a}</div>)}</div>}
+               <form onSubmit={handleSubmit} className="space-y-4">
+                   <div>
+                       <label className="text-xs font-bold text-gray-500 block mb-1">假別</label>
+                       <select className="w-full border p-2 rounded" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}>{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                       <div><label className="text-xs font-bold text-gray-500 block mb-1">開始</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
+                       <div><label className="text-xs font-bold text-gray-500 block mb-1">結束</label><input type="datetime-local" step={preciseTime ? "60" : "1800"} required className="w-full border p-2 rounded" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
+                   </div>
+                   <div className="text-right text-sm text-blue-600 font-bold">時數: {hours} hr</div>
+                   <div><label className="text-xs font-bold text-gray-500 block mb-1">職務代理人</label><select className="w-full border p-2 rounded" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.uid} value={u.uid}>{u.name}</option>)}</select></div>
+                   <div><label className="text-xs font-bold text-gray-500 block mb-1">事由</label><textarea className="w-full border p-2 rounded h-20" required value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div>
+                   <button disabled={isSubmitting} className={`w-full bg-blue-600 text-white py-3 rounded font-bold transition shadow flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
+                        {isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 資料傳送中...</> : '送出申請 (自動通知)'}
+                   </button>
+               </form>
             </div>
           );
         }
@@ -1570,8 +1460,7 @@
               link.download = "leave_report.csv";
               link.click();
           };
-          
-          const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === (currentUser.email || '').toLowerCase()) && l.status === 'pending');
+          const pendingMyDeputy = leaves.filter(l => l.deputyId === currentUser.uid && l.status === 'pending');
           const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
 
           const handleDeputyAgree = async (leave) => {
@@ -1603,7 +1492,7 @@
               try {
                   await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid });
                   
-                  const requester = users.find(u => u.uid === leave.requesterId || u.docId === leave.requesterId || u.name === leave.requesterName); 
+                  const requester = users.find(u => u.uid === leave.requesterId || u.name === leave.requesterName); 
                   if (requester && requester.email) {
                       openMailClient(
                           requester.email, 
@@ -1714,39 +1603,11 @@
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editUser, setEditUser] = useState(null);
             
-            // 🌟 新增：一鍵匯入預設名單功能
-            const handleImportPredefined = async () => {
-                if(!confirm("要將系統內建的預設名單(國裕, 湘怡等...)直接匯入資料庫嗎？\n這樣您馬上就能幫他們排班，不用等他們登入！")) return;
-                try {
-                    for(const p of PREDEFINED_USERS) {
-                        const docId = p.email.toLowerCase();
-                        const exists = users.find(u => u.docId === docId);
-                        if (!exists) {
-                            await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', docId), {
-                                uid: docId, 
-                                email: p.email,
-                                name: p.name,
-                                role: p.role,
-                                initials: p.initials,
-                                color: p.color,
-                                borderColor: p.borderColor,
-                                usePhoto: false,
-                                avatarUrl: ''
-                            });
-                        }
-                    }
-                    alert("預設名單匯入完成！您可以去排班日曆了。");
-                } catch (e) {
-                    alert("匯入失敗: " + e.message);
-                }
-            };
-
             const handleSave = async (userData) => {
                 try {
-                    const targetDocId = userData.docId || (userData.email ? userData.email.toLowerCase() : userData.name); 
-                    const dataToSave = { ...userData };
-                    delete dataToSave.docId; // 移除內部屬性
-                    await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', targetDocId), dataToSave, { merge: true });
+                    // 同步寫入雲端資料庫
+                    const uid = userData.uid || userData.name; // 新增用戶時如果沒有 uid，預設用名稱
+                    await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', uid), { ...userData, uid });
                     setIsModalOpen(false);
                     setEditUser(null);
                 } catch (e) {
@@ -1754,10 +1615,10 @@
                 }
             };
 
-            const handleDelete = async (docId) => {
+            const handleDelete = async (uid) => {
                 if(confirm("確定要刪除此成員嗎？")) {
                     try {
-                        await deleteDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', docId));
+                        await deleteDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', uid));
                     } catch (e) {
                         alert("刪除失敗: " + e.message);
                     }
@@ -1776,23 +1637,18 @@
 
             return (
                 <div className="max-w-5xl mx-auto space-y-6">
-                    <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow-sm gap-4">
+                    <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm">
                         <h2 className="text-xl font-bold flex items-center gap-2"><Users/> 成員管理</h2>
                         {isAdmin && (
-                            <div className="flex gap-2">
-                                <button onClick={handleImportPredefined} className="bg-purple-100 text-purple-700 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-purple-200 transition">
-                                    <Users size={16}/> 一鍵匯入預設名單
-                                </button>
-                                <button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition">
-                                    <Plus size={16}/> 新增成員
-                                </button>
-                            </div>
+                            <button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700">
+                                <Plus size={16}/> 新增成員
+                            </button>
                         )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         {users.map(u => (
-                            <div key={u.docId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group">
+                            <div key={u.uid} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group">
                                 <UserAvatar user={u} size="w-12 h-12" textSize="text-base" />
                                 <div className="flex-1 overflow-hidden">
                                     <div className="font-bold text-gray-800 text-lg truncate">{u.name}</div>
@@ -1806,7 +1662,7 @@
                                 {isAdmin && (
                                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
                                         <button onClick={()=>openEdit(u)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-blue-100 hover:text-blue-600"><Edit size={14}/></button>
-                                        <button onClick={()=>handleDelete(u.docId)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-red-100 hover:text-red-600"><Trash2 size={14}/></button>
+                                        <button onClick={()=>handleDelete(u.uid)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-red-100 hover:text-red-600"><Trash2 size={14}/></button>
                                     </div>
                                 )}
                             </div>
@@ -2075,7 +1931,7 @@
             );
         }
 
-        // 極簡版登入畫面
+        // 極簡版登入畫面：移除所有離線/測試選擇，只保留單一 Google 登入入口
         function LoginScreen({ auth }) {
             const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -2088,6 +1944,7 @@
                 const provider = new GoogleAuthProvider();
                 try {
                     await signInWithPopup(auth, provider);
+                    // 登入成功後，元件會因為外層 App state 改變而被直接卸載，不需手動設回 false
                 } catch (error) {
                     console.error("Google Sign-In Error", error);
                     alert("登入被中斷或發生錯誤，請重試。\n詳細訊息: " + error.message);
