@@ -141,6 +141,12 @@
             { email: 'tony0972022@gmail.com', name: 'Tony測試', role: 'staff', initials: '測', color: 'bg-gray-200', borderColor: '#9ca3af' }
         ];
 
+        // --- Helper Function: Get Local Date String without UTC shifting issues ---
+        const getLocalDateString = (d = new Date()) => {
+            const tzOffset = d.getTimezoneOffset() * 60000;
+            return new Date(d.getTime() - tzOffset).toISOString().split('T')[0];
+        };
+
         // --- Helper Component: User Avatar ---
         const UserAvatar = ({ user, size = "w-8 h-8", textSize = "text-xs", className = "" }) => {
             if (!user) return <div className={`${size} rounded-full bg-gray-200 ${className}`}></div>;
@@ -367,6 +373,29 @@
               }
           };
 
+          const handleUpdateTag = (type, oldVal, newVal) => {
+              if(!newVal || oldVal === newVal) return;
+              if(type === 'area') {
+                  if (areaTags.includes(newVal)) { alert("此轄區已存在"); return; }
+                  const t = areaTags.map(item => item === oldVal ? newVal : item);
+                  setAreaTags(t);
+                  localStorage.setItem('areaTags', JSON.stringify(t));
+                  
+                  if (settings.areaColors && settings.areaColors[oldVal]) {
+                      const newColors = { ...settings.areaColors };
+                      newColors[newVal] = newColors[oldVal];
+                      delete newColors[oldVal];
+                      setSettings(prev => ({...prev, areaColors: newColors}));
+                      localStorage.setItem('areaColors', JSON.stringify(newColors));
+                  }
+              } else if(type === 'work') {
+                  if (workTags.includes(newVal)) { alert("此項目已存在"); return; }
+                  const t = workTags.map(item => item === oldVal ? newVal : item);
+                  setWorkTags(t);
+                  localStorage.setItem('workTags', JSON.stringify(t));
+              }
+          };
+
           const handleManageLeaveTypes = (action, val) => {
               if(action === 'add' && val) {
                   const newTypes = [...leaveTypes, { id: `l_${Date.now()}`, ...val }];
@@ -507,7 +536,7 @@
                    <UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" />
                 </div>
                 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
-                  {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} />}
+                  {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} />}
                   {view === 'calendar' && <CalendarView user={userData} users={usersList} events={calendarEvents} leaves={leaves} crud={crud} tags={{workTags, areaTags}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
@@ -516,7 +545,7 @@
                   {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
-                  {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
+                  {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
               </div>
@@ -526,14 +555,16 @@
 
         // --- Sub-Components ---
         
-        function Dashboard({ user, leaves, calendarEvents, setView }) {
+        function Dashboard({ user, leaves, calendarEvents, setView, leaveTypes }) {
             const [weeksToShow, setWeeksToShow] = useState(1);
             const today = new Date();
             const weekDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getLocalDateString(today);
             const pendingCount = leaves.filter(l => l.status === 'pending' || l.status === 'deputy_signed').length;
             const myPendingCount = leaves.filter(l => (l.requesterId === user.uid || l.requesterId === user.docId) && (l.status === 'pending' || l.status === 'deputy_signed')).length;
-            const todayLeavesDetails = leaves.filter(l => l.start.startsWith(todayStr) && l.status === 'approved').map(l => {
+            
+            const personalLeaveTypeNames = leaveTypes.filter(t => t.category === 'personal').map(t => t.name);
+            const todayLeavesDetails = leaves.filter(l => l.start.startsWith(todayStr) && l.status === 'approved' && personalLeaveTypeNames.includes(l.type)).map(l => {
                 const timeStr = l.hours >= 8 ? '整天' : (l.start.includes('T08') || l.start.includes('T09') ? '上午' : '下午');
                 return `${l.requesterName}(${timeStr})`;
             });
@@ -555,7 +586,7 @@
                   const d = new Date(start);
                   d.setDate(start.getDate() + i);
                   if (d.getDay() === 0 || d.getDay() === 6) continue;
-                  const dStr = d.toISOString().split('T')[0];
+                  const dStr = getLocalDateString(d);
                   const externalPeople = { morning: [], afternoon: [], all_day: [] };
                   calendarEvents.filter(e => e.date === dStr && e.type === 'person').forEach(p => {
                       const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
@@ -671,7 +702,7 @@
               return { ...rule, nextPerson: info?.user?.name || rule.order[0], lastDate: info?.lastDate };
           });
           const handleDayClick = (dObj) => {
-              const dStr = dObj.toISOString().split('T')[0];
+              const dStr = getLocalDateString(dObj);
               setModalData({ date: dStr, workItem: '', note: '' });
               setSelSlot('morning');
               setSelArea('');
@@ -755,9 +786,9 @@
               return cells;
           };
           const renderDayCell = (dObj) => {
-              const dStr = dObj.toISOString().split('T')[0];
+              const dStr = getLocalDateString(dObj);
               const dayEvs = events.filter(e => e.date === dStr);
-              const isToday = dStr === new Date().toISOString().split('T')[0];
+              const isToday = dStr === getLocalDateString(new Date());
               const dayOfWeek = dObj.getDay();
               const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
               const holidayName = TAIWAN_HOLIDAYS_2026[dStr];
@@ -801,7 +832,7 @@
         }
 
         function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users }) {
-            const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
+            const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7)); 
             const [leaveFilter, setLeaveFilter] = useState('all');
             const [selectedIds, setSelectedIds] = useState([]);
             const scheduleData = useMemo(() => {
@@ -932,9 +963,6 @@
           const personalTypes = leaveTypes.filter(t => t.category === 'personal');
           const currentTypeDesc = leaveTypes.find(t => t.name === form.type)?.desc || '';
           const pendingExternalTasks = useMemo(() => {
-              const today = new Date();
-              const tzOffset = today.getTimezoneOffset() * 60000;
-              const todayStr = (new Date(today - tzOffset)).toISOString().slice(0, 10);
               const groups = {};
               events.forEach(e => {
                   if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
@@ -944,8 +972,6 @@
               const pending = [];
               Object.values(groups).forEach(g => {
                   if (!g.tag) return;
-                  const isExternal = EXTERNAL_WORK_TAGS.includes(g.tag.item); 
-                  if (!isExternal) return;
                   const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
                   if (!isMe) return;
                   const d = g.tag.date; 
@@ -982,7 +1008,7 @@
           };
           const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
-          return (<div className="max-w-3xl mx-auto space-y-8">{pendingExternalTasks.length > 0 && (<div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-6 shadow-md"><h3 className="font-black text-indigo-800 mb-4 flex items-center gap-2 text-lg"><AlertCircle size={22}/> 第一區塊：請送差勤 (您有排定的外勤任務)</h3><div className="space-y-4">{pendingExternalTasks.map(task => (<PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>))}</div></div>)}<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200"><div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2></div><form onSubmit={handleManualSubmit} className="space-y-5"><div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}><optgroup label="區段二：私假 (依法令給假)">{personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="區段一：公務與加班">{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>{currentTypeDesc && (<div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>)}</div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div><div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div></div><div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div><div className="clear-both"></div><div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div><div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div><button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button></form></div></div>);
+          return (<div className="max-w-3xl mx-auto space-y-8">{pendingExternalTasks.length > 0 && (<div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-6 shadow-md"><h3 className="font-black text-indigo-800 mb-4 flex items-center gap-2 text-lg"><AlertCircle size={22}/> 第一區塊：差勤申請 (您有排定的日曆行程)</h3><div className="space-y-4">{pendingExternalTasks.map(task => (<PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>))}</div></div>)}<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200"><div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2></div><form onSubmit={handleManualSubmit} className="space-y-5"><div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}><optgroup label="區段二：私假 (依法令給假)">{personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="區段一：公務與加班">{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>{currentTypeDesc && (<div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>)}</div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div><div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div></div><div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div><div className="clear-both"></div><div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div><div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div><button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button></form></div></div>);
         }
 
         function ApprovalView({ leaves, currentUser, crud, users }) {
@@ -1083,7 +1109,7 @@
         }
 
         function AttendanceView({ user, db, attendanceRecords }) {
-            const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [selectedMonth, setSelectedMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
             const [localRecords, setLocalRecords] = useState({});
             const daysInMonth = new Date(selectedMonth.split('-')[0], selectedMonth.split('-')[1], 0).getDate();
             useEffect(() => {
@@ -1177,12 +1203,33 @@
             const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
             const [newLeave, setNewLeave] = useState({ name: '', category: 'personal', desc: '' });
             const [editLeaveId, setEditLeaveId] = useState(null);
+            
+            const [editAreaId, setEditAreaId] = useState(null);
             const [newArea, setNewArea] = useState(''); 
+            
             const [localRoleNames, setLocalRoleNames] = useState(roleNames);
             const [isSettingsSaved, setIsSettingsSaved] = useState(false); 
             const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
+            
             const handleColorChange = (area, colorClass) => { const existingArea = Object.keys(areaC).find(key => areaC[key] === colorClass && key !== area); if (existingArea) { alert(`此顏色已被 [${existingArea}] 使用，請選擇其他顏色以免混淆。`); return; } setAreaC({...areaC, [area]: colorClass}); };
-            const handleAddAreaWithColor = (area) => { tags.handleAddTag('area', area); setNewArea(''); }
+            
+            const handleAddAreaWithColor = () => { 
+                if(!newArea) return; 
+                if(editAreaId) {
+                    tags.handleUpdateTag('area', editAreaId, newArea);
+                    setEditAreaId(null);
+                } else {
+                    tags.handleAddTag('area', newArea); 
+                }
+                setNewArea(''); 
+            };
+            
+            const startEditArea = (area) => {
+                setEditAreaId(area);
+                setNewArea(area);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
             const handleAddLeave = () => { if(!newLeave.name) return alert("請輸入假別名稱"); if(editLeaveId) { handleManageLeaveTypes('update', { ...newLeave, id: editLeaveId }); setEditLeaveId(null); } else { handleManageLeaveTypes('add', newLeave); } setNewLeave({ name: '', category: 'personal', desc: '' }); }
             const startEditLeave = (type) => { setEditLeaveId(type.id); setNewLeave({ name: type.name, category: type.category, desc: type.desc || '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
             const handleSaveSettings = () => { onUpdateRoleNames(localRoleNames); onSave({...settings, areaColors: areaC}); setIsSettingsSaved(true); setTimeout(() => setIsSettingsSaved(false), 2000); };
@@ -1190,7 +1237,42 @@
             return (
                 <div className="max-w-3xl mx-auto space-y-8">
                     <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({...localRoleNames, staff: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({...localRoleNames, leader: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({...localRoleNames, admin: e.target.value})} /></div></div><p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p></div>
-                    <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色)</h2><div className="flex gap-2 mb-6"><input className="border rounded px-3 py-2 text-sm flex-1" placeholder="輸入新轄區..." value={newArea} onChange={e=>setNewArea(e.target.value)} /><button onClick={()=>handleAddAreaWithColor(newArea)} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold">新增轄區</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-4">{tags.areaTags.map(area => (<div key={area} className="relative group"><button className={`w-full text-left px-3 py-2 rounded border flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}><span className="font-bold">{area}</span><div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50"></div></button><div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover:flex gap-1 flex-wrap w-48">{colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}</div></div>))}</div></div>
+                    
+                    <div className="bg-white p-6 rounded shadow-sm">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色/編輯)</h2>
+                        <div className={`border rounded-lg p-4 mb-6 transition-colors ${editAreaId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
+                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between">
+                                <span>{editAreaId ? '修改轄區名稱' : '新增轄區'}</span>
+                                {editAreaId && <button onClick={()=>{setEditAreaId(null); setNewArea('');}} className="text-xs text-gray-500 hover:text-gray-800 underline">取消編輯</button>}
+                            </h3>
+                            <div className="flex gap-2">
+                                <input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="輸入轄區名稱..." value={newArea} onChange={e=>setNewArea(e.target.value)} />
+                                <button onClick={handleAddAreaWithColor} className={`${editAreaId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>
+                                    {editAreaId ? '儲存修改' : '新增轄區'}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {tags.areaTags.map(area => (
+                                <div key={area} className={`relative group flex items-center bg-white border rounded shadow-sm hover:border-green-300 transition ${editAreaId === area ? 'ring-2 ring-yellow-400' : ''}`}>
+                                    <div className="relative group/btn w-full">
+                                        <button className={`w-full text-left px-3 py-2 rounded-l flex justify-between items-center ${areaC[area] || "bg-gray-100 text-gray-800"}`}>
+                                            <span className="font-bold">{area}</span>
+                                            <div className="w-4 h-4 rounded-full border border-black/20 bg-current opacity-50" title="點擊變更顏色"></div>
+                                        </button>
+                                        <div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover/btn:flex gap-1 flex-wrap w-48 mt-1">
+                                            {colors.map(co => (<div key={co.c} onClick={()=>handleColorChange(area, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>))}
+                                        </div>
+                                    </div>
+                                    <div className="flex px-1 gap-1 border-l opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-gray-50 rounded-r h-full items-center">
+                                        <button onClick={()=>startEditArea(area)} className="text-gray-400 hover:text-blue-600 p-1.5"><Edit size={14}/></button>
+                                        <button onClick={()=>tags.handleDeleteTag('area', area)} className="text-gray-400 hover:text-red-600 p-1.5"><Trash2 size={14}/></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 說明 (區段分類)</h2><div className={`border rounded-lg p-4 mb-6 transition-colors ${editLeaveId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between"><span>{editLeaveId ? '修改假別' : '新增假別'}</span>{editLeaveId && <button onClick={()=>{setEditLeaveId(null); setNewLeave({name:'', category:'personal', desc:''});}} className="text-xs text-gray-500 hover:text-gray-800 underline">取消編輯</button>}</h3><div className="grid grid-cols-1 md:grid-cols-4 gap-3"><div className="md:col-span-1"><select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newLeave.category} onChange={e=>setNewLeave({...newLeave, category: e.target.value})}><option value="official">區段一: 公務/加班</option><option value="personal">區段二: 私假</option></select></div><div className="md:col-span-1"><input className="border rounded px-3 py-2 text-sm w-full bg-white" placeholder="假別名稱 (例: 特休)" value={newLeave.name} onChange={e=>setNewLeave({...newLeave, name: e.target.value})} /></div><div className="md:col-span-2 flex gap-2"><input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="勞基法說明 (例: 有薪，依年資給予)" value={newLeave.desc} onChange={e=>setNewLeave({...newLeave, desc: e.target.value})} /><button onClick={handleAddLeave} className={`${editLeaveId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>{editLeaveId ? '儲存修改' : '新增'}</button></div></div></div><div className="space-y-4"><div><h3 className="text-sm font-bold text-indigo-700 mb-2 border-b pb-1">區段一：公務與加班</h3><div className="flex flex-col gap-2">{leaveTypes.filter(t=>t.category==='official').map(t => (<div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-indigo-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}><div><span className="font-bold text-gray-800 inline-block w-24">{t.name}</span><span className="text-gray-500 text-xs">{t.desc}</span></div><div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"><button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button><button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button></div></div>))}</div></div><div><h3 className="text-sm font-bold text-orange-700 mb-2 border-b pb-1 mt-4">區段二：私假 (依法令給假)</h3><div className="flex flex-col gap-2">{leaveTypes.filter(t=>t.category==='personal').map(t => (<div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-orange-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}><div><span className="font-bold text-gray-800 inline-block w-24">{t.name}</span><span className="text-gray-500 text-xs">{t.desc}</span></div><div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"><button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button><button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button></div></div>))}</div></div></div></div>
                     <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}</button>
                 </div>
