@@ -1266,6 +1266,12 @@
           const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
           const [form, setForm] = useState({ type: defaultPersonalType, start:'', end:'', reason:'', deputyId:'' });
           const [hours, setHours] = useState(0);
+          
+          // 新增：模式切換狀態
+          const [inputMode, setInputMode] = useState('slot'); // 'slot' (快速時段) 或 'manual' (自訂時間)
+          const [slotDate, setSlotDate] = useState(getLocalDateString());
+          const [slotType, setSlotType] = useState('all_day');
+
           const [isSubmitting, setIsSubmitting] = useState(false);
           const [submittingTaskId, setSubmittingTaskId] = useState(null);
           const officialTypes = leaveTypes.filter(t => t.category === 'official');
@@ -1304,22 +1310,94 @@
               if(form.start && form.end) { const diff = (new Date(form.end)-new Date(form.start))/36e5; setHours(Math.max(0, Math.round(diff*2)/2)); }
           }, [form.start, form.end]);
           const handleTaskSubmit = async (taskData, taskId) => { setSubmittingTaskId(taskId); try { await crud.createLeave({ ...taskData, requesterId: user.docId || user.uid, requesterName: user.name, status: 'pending', timestamp: new Date() }); alert("差單已送出，已顯示在日曆上！"); } catch (e) { alert("送出失敗"); } finally { setSubmittingTaskId(null); } }
+          
           const handleManualSubmit = async (e) => {
               e.preventDefault();
+              
+              let finalStart = form.start;
+              let finalEnd = form.end;
+              let finalHours = hours;
+
+              // 依據輸入模式準備資料
+              if (inputMode === 'slot') {
+                  if (!slotDate) { alert("請選擇日期"); return; }
+                  if (slotType === 'morning') {
+                      finalStart = `${slotDate}T08:00`;
+                      finalEnd = `${slotDate}T12:00`;
+                      finalHours = 4;
+                  } else if (slotType === 'afternoon') {
+                      finalStart = `${slotDate}T13:00`;
+                      finalEnd = `${slotDate}T17:00`;
+                      finalHours = 4;
+                  } else { // all_day
+                      finalStart = `${slotDate}T08:00`;
+                      finalEnd = `${slotDate}T17:00`;
+                      finalHours = 8;
+                  }
+              } else {
+                  if (!form.start || !form.end) { alert("請選擇開始與結束時間"); return; }
+                  if (finalHours <= 0) { alert("總計時數必須大於 0"); return; }
+              }
+
               if (form.type === '補休') {
                   let totalOvertime = 0;
                   leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '加班申請(列計)') { totalOvertime += Number(l.hours); } });
                   let usedCompensatory = 0;
                   leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '補休') { usedCompensatory += Number(l.hours); } });
                   const balance = totalOvertime - usedCompensatory;
-                  if (hours > balance) { alert(`補休時數不足！\n目前可用餘額: ${balance} 小時\n您申請時數: ${hours} 小時`); return; }
+                  if (finalHours > balance) { alert(`補休時數不足！\n目前可用餘額: ${balance} 小時\n您申請時數: ${finalHours} 小時`); return; }
               }
               setIsSubmitting(true);
-              try { await crud.createLeave({ ...form, requesterId: user.docId || user.uid, requesterName: user.name, hours, status: 'pending', timestamp: new Date() }); alert("請假單已送出，已同步顯示在日曆上！"); setForm({ type: defaultPersonalType, start:'', end:'', reason:'', deputyId:'' }); } catch (e) { alert("送出失敗，請稍後再試。"); } finally { setIsSubmitting(false); }
+              try { 
+                  await crud.createLeave({ ...form, requesterId: user.docId || user.uid, requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: 'pending', timestamp: new Date() }); 
+                  alert("請假單已送出，已同步顯示在日曆上！"); 
+                  setForm({ type: defaultPersonalType, start:'', end:'', reason:'', deputyId:'' }); 
+                  setSlotDate(getLocalDateString());
+                  setSlotType('all_day');
+              } catch (e) { alert("送出失敗，請稍後再試。"); } finally { setIsSubmitting(false); }
           };
-          const busyIds = leaves.filter(l=>l.status!=='rejected' && l.start.startsWith(form.start?.split('T')[0])).map(l=>l.requesterName);
+          
+          const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
+          const busyIds = leaves.filter(l=>l.status!=='rejected' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
           const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
-          return (<div className="max-w-3xl mx-auto space-y-8">{pendingExternalTasks.length > 0 && (<div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-6 shadow-md"><h3 className="font-black text-indigo-800 mb-4 flex items-center gap-2 text-lg"><AlertCircle size={22}/> 第一區塊：差勤申請 (您有排定的日曆行程)</h3><div className="space-y-4">{pendingExternalTasks.map(task => (<PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>))}</div></div>)}<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200"><div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2></div><form onSubmit={handleManualSubmit} className="space-y-5"><div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}><optgroup label="區段二：私假 (依法令給假)">{personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="區段一：公務與加班">{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>{currentTypeDesc && (<div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>)}</div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div><div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div></div><div className="text-right text-sm text-blue-600 font-bold bg-blue-50 p-2 rounded inline-block float-right">總計時數: {hours} 小時</div><div className="clear-both"></div><div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div><div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div><button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button></form></div></div>);
+          
+          return (<div className="max-w-3xl mx-auto space-y-8">{pendingExternalTasks.length > 0 && (<div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-6 shadow-md"><h3 className="font-black text-indigo-800 mb-4 flex items-center gap-2 text-lg"><AlertCircle size={22}/> 第一區塊：差勤申請 (您有排定的日曆行程)</h3><div className="space-y-4">{pendingExternalTasks.map(task => (<PendingLeaveCard key={task.id} task={task} leaveTypes={leaveTypes} deputies={users.filter(u=>u.name!==user.name)} onSubmit={(data) => handleTaskSubmit(data, task.id)} isSubmitting={submittingTaskId === task.id}/>))}</div></div>)}<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200"><div className="flex justify-between items-center mb-6 border-b pb-4"><h2 className="text-xl font-bold flex items-center gap-2 text-gray-800"><CalendarPlus/> 第二區塊：私假申請 / 其他假別</h2></div><form onSubmit={handleManualSubmit} className="space-y-5"><div><label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" value={form.type} onChange={e=>setForm({...form, type:e.target.value})}><optgroup label="區段二：私假 (依法令給假)">{personalTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="區段一：公務與加班">{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>{currentTypeDesc && (<div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>)}</div>
+          
+          <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl space-y-4">
+              <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
+                  <button type="button" onClick={() => setInputMode('slot')} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow-sm text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}>快速時段 (單日)</button>
+                  <button type="button" onClick={() => setInputMode('manual')} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow-sm text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}>自訂時間 (精確/跨日)</button>
+              </div>
+
+              {inputMode === 'slot' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in zoom-in-95 duration-200">
+                      <div>
+                          <label className="text-sm font-bold text-gray-700 block mb-1">請假日期</label>
+                          <input type="date" required={inputMode === 'slot'} className="w-full border p-2.5 rounded-lg bg-white focus:ring-2 outline-none transition shadow-sm border-gray-200" value={slotDate} onChange={e=>setSlotDate(e.target.value)} />
+                      </div>
+                      <div>
+                          <label className="text-sm font-bold text-gray-700 block mb-1">時段選擇</label>
+                          <div className="flex bg-white border border-gray-200 shadow-sm rounded-lg p-1 h-[46px]">
+                              {TIME_SLOTS.map(s => (<button type="button" key={s.id} onClick={()=>setSlotType(s.id)} className={`flex-1 text-sm rounded-md transition ${slotType===s.id ? 'bg-blue-50 text-blue-700 font-bold border border-blue-200' : 'text-gray-500 hover:bg-gray-50'}`}>{s.label}</button>))}
+                          </div>
+                      </div>
+                  </div>
+              ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in zoom-in-95 duration-200">
+                      <div><label className="text-sm font-bold text-gray-700 block mb-1">開始時間</label><input type="datetime-local" required={inputMode === 'manual'} className="w-full border p-2.5 rounded-lg bg-white focus:ring-2 outline-none transition shadow-sm border-gray-200" value={form.start} onChange={e=>setForm({...form, start:e.target.value})}/></div>
+                      <div><label className="text-sm font-bold text-gray-700 block mb-1">結束時間</label><input type="datetime-local" required={inputMode === 'manual'} className="w-full border p-2.5 rounded-lg bg-white focus:ring-2 outline-none transition shadow-sm border-gray-200" value={form.end} onChange={e=>setForm({...form, end:e.target.value})}/></div>
+                  </div>
+              )}
+          </div>
+          
+          <div className="text-right">
+              <div className="text-sm text-blue-700 font-bold bg-blue-50 p-2.5 rounded-lg inline-block border border-blue-100 shadow-sm">
+                  總計時數: {inputMode === 'slot' ? (slotType === 'all_day' ? 8 : 4) : hours} 小時
+              </div>
+          </div>
+          <div className="clear-both"></div>
+          
+          <div><label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label><select className="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 outline-none transition" required value={form.deputyId} onChange={e=>setForm({...form, deputyId:e.target.value})}><option value="">請選擇</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div><div><label className="text-sm font-bold text-gray-700 block mb-1">事由</label><textarea className="w-full border p-2.5 rounded-lg h-24 bg-gray-50 focus:bg-white focus:ring-2 outline-none transition resize-none" required placeholder="請簡述請假原因..." value={form.reason} onChange={e=>setForm({...form, reason:e.target.value})}/></div><button disabled={isSubmitting} className={`w-full bg-slate-800 text-white py-3.5 rounded-lg font-bold transition shadow-md flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900 hover:shadow-lg'}`}>{isSubmitting ? <><Loader2 className="animate-spin" size={20}/> 假單傳送中...</> : '確認送出假單'}</button></form></div></div>);
         }
 
         function ApprovalView({ leaves, currentUser, crud, users }) {
