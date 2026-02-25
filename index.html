@@ -549,6 +549,7 @@
                   {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} settings={settings} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
+                  {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
                 </main>
