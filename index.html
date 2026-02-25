@@ -516,7 +516,7 @@
                   {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} />}
                   {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
                   {view === 'management' && <ManagementView tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} />}
-                  {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} />}
+                  {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} />}
                   {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
                   {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
                   {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}
@@ -895,15 +895,12 @@
               };
 
               const renderLeaves = () => {
-                  // 🌟 修改：只要不是 rejected 就顯示，並利用樣式區分是否已核准
+                  // 🌟 修改：日曆上不顯示審查狀況，統一正常外觀
                   const leavesOnDay = leaves.filter(l => l.status !== 'rejected' && dStr >= l.start.split('T')[0] && dStr <= l.end.split('T')[0]);
                   return leavesOnDay.map(l => {
-                      const isApproved = l.status === 'approved';
-                      const statusText = isApproved ? '' : ' (待審)';
-                      const bgClass = isApproved ? 'bg-pink-100 border-pink-200 text-pink-700 shadow-sm' : 'bg-gray-100 border-gray-300 text-gray-500 border-dashed';
                       return (
-                          <div key={l.id} className={`text-[10px] md:text-xs border rounded px-1 py-0.5 my-0.5 w-full select-none truncate font-bold text-center ${bgClass}`}>
-                              {l.requesterName} ({l.type}){statusText}
+                          <div key={l.id} className="text-[10px] md:text-xs border border-pink-200 bg-pink-100 text-pink-700 shadow-sm rounded px-1 py-0.5 my-0.5 w-full select-none truncate font-bold text-center">
+                              {l.requesterName} ({l.type})
                           </div>
                       );
                   });
@@ -1187,8 +1184,10 @@
             );
         }
 
-        function PersonalScheduleView({ user, events, leaves, settings }) {
+        function PersonalScheduleView({ user, events, leaves, settings, leaveTypes }) {
             const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
+            const [leaveFilter, setLeaveFilter] = useState('all');
+            const [selectedIds, setSelectedIds] = useState([]);
 
             const scheduleData = useMemo(() => {
                 const daysInMonth = new Date(month.split('-')[0], month.split('-')[1], 0).getDate();
@@ -1202,7 +1201,7 @@
                         return { ...p, tag };
                     });
 
-                    const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status === 'approved');
+                    const myLeave = leaves.find(l => l.start.startsWith(dateStr) && l.status !== 'rejected'); 
 
                     let status = '正常';
                     const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
@@ -1214,7 +1213,12 @@
                     if (isExternal && !myLeave) status = '缺公務單';
                     else if (isExternal && isPersonalLeave) status = '假別不符';
                     else if (!myWork.length && isOfficialLeave) status = '異常公出';
-                    else if (myLeave) status = myLeave.type;
+                    else if (myLeave) {
+                        if (myLeave.status === 'pending') status = '待職代審查中';
+                        else if (myLeave.status === 'deputy_signed') status = '組長審查中';
+                        else if (myLeave.status === 'approved') status = '已核准';
+                        else if (myLeave.status === 'rejected') status = '已駁回';
+                    }
                     else if (myWork.length > 0) status = '內勤';
                     else status = '無行程';
 
@@ -1225,30 +1229,101 @@
                 return data;
             }, [events, leaves, month, user.name]);
 
+            // 扁平化資料，方便進行篩選與核取方塊操作
+            const flatRows = useMemo(() => {
+                let rows = [];
+                scheduleData.forEach((d, idx) => {
+                    const renders = d.work.length > 0 ? d.work : [{ isLeaveOnly: true }];
+                    renders.forEach((w, subIdx) => {
+                        rows.push({
+                            id: `${d.date}-${subIdx}`,
+                            name: d.name,
+                            date: d.date,
+                            slot: w.isLeaveOnly ? 'all_day' : w.slot,
+                            leaveType: d.leave?.type || '-',
+                            leaveHours: d.leave?.hours || '-',
+                            content: w.isLeaveOnly ? '' : (w.tag?.item || ''),
+                            area: w.isLeaveOnly ? '' : (w.tag?.area || ''),
+                            reason: d.leave?.reason || '-',
+                            note: w.isLeaveOnly ? '-' : (w.tag?.note || '-'),
+                            status: d.status,
+                            rawTag: w.tag
+                        });
+                    });
+                });
+                return rows;
+            }, [scheduleData]);
+
+            const filteredRows = useMemo(() => {
+                if (leaveFilter === 'all') return flatRows;
+                return flatRows.filter(r => r.leaveType === leaveFilter);
+            }, [flatRows, leaveFilter]);
+
+            // 批次勾選邏輯
+            const isAllSelected = filteredRows.length > 0 && selectedIds.length === filteredRows.length;
+            const toggleAll = () => {
+                if (isAllSelected) setSelectedIds([]);
+                else setSelectedIds(filteredRows.map(r => r.id));
+            };
+            const toggleOne = (id) => {
+                setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+            };
+
+            // 批次匯出為 .ics 行事曆檔案
+            const downloadBatchICS = () => {
+                const selectedRowsData = filteredRows.filter(r => selectedIds.includes(r.id) && (r.content || r.leaveType !== '-'));
+                if (selectedRowsData.length === 0) {
+                    alert("請先勾選要加入行事曆的有效排班或請假項目！");
+                    return;
+                }
+
+                let icsContent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Attendance System//TW\r\nCALSCALE:GREGORIAN\r\n";
+                icsContent += "BEGIN:VTIMEZONE\r\nTZID:Asia/Taipei\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\nTZNAME:CST\r\nDTSTART:19700101T000000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n";
+
+                selectedRowsData.forEach((item, index) => {
+                    const dStr = item.date.replace(/-/g, '');
+                    let start = '', end = '';
+
+                    // 時間對應
+                    if (item.slot === 'morning') {
+                        start = `${dStr}T080000`; end = `${dStr}T120000`;
+                    } else if (item.slot === 'afternoon') {
+                        start = `${dStr}T130000`; end = `${dStr}T170000`;
+                    } else {
+                        start = `${dStr}T080000`; end = `${dStr}T170000`;
+                    }
+
+                    const title = item.content || item.leaveType || '排班';
+                    let desc = item.note !== '-' ? item.note : '';
+                    if (item.leaveType !== '-') desc += `\\n假別: ${item.leaveType} (${item.leaveHours}hr)`;
+                    if (item.reason !== '-') desc += `\\n事由: ${item.reason}`;
+
+                    icsContent += "BEGIN:VEVENT\r\n";
+                    icsContent += `UID:event-${dStr}-${index}@attendancesystem.local\r\n`;
+                    icsContent += `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z\r\n`;
+                    icsContent += `DTSTART;TZID=Asia/Taipei:${start}\r\n`;
+                    icsContent += `DTEND;TZID=Asia/Taipei:${end}\r\n`;
+                    icsContent += `SUMMARY:[出勤] ${title}\r\n`;
+                    if (item.area) icsContent += `LOCATION:${item.area}\r\n`;
+                    if (desc) icsContent += `DESCRIPTION:${desc}\r\n`;
+                    icsContent += "END:VEVENT\r\n";
+                });
+
+                icsContent += "END:VCALENDAR";
+
+                const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `出勤行事曆_${month}.ics`;
+                link.click();
+            };
+
             const exportCSV = () => {
                 let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),排班內容,事由,備註,狀態(同意)\n";
-                scheduleData.forEach(d => {
-                    if(d.work.length > 0) {
-                        d.work.forEach(w => {
-                             const time = TIME_SLOTS.find(s=>s.id===w.slot)?.label||'整天';
-                             const leaveType = d.leave?.type || '';
-                             const hours = d.leave?.hours || '';
-                             const content = `${w.tag?.item||''}${w.tag?.area ? `(${w.tag.area})` : ''}`;
-                             const reason = d.leave?.reason || '';
-                             const note = w.tag?.note || '';
-                             const status = (d.status === '正常' || d.status === '內勤' || d.leave) ? '同意' : d.status;
-
-                             csv += `${d.name},${d.date},${time},${leaveType},${hours},${content},${reason},${note},${status}\n`;
-                        });
-                    } else {
-                        const time = '整天'; 
-                        const leaveType = d.leave?.type || '';
-                        const hours = d.leave?.hours || '';
-                        const reason = d.leave?.reason || '';
-                        const status = d.status === '正常' || d.status === '內勤' || d.leave ? '同意' : d.status;
-                        
-                        csv += `${d.name},${d.date},${time},${leaveType},${hours},,,${reason},,${status}\n`;
-                    }
+                filteredRows.forEach(r => {
+                     const time = TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天';
+                     const content = `${r.content}${r.area ? `(${r.area})` : ''}`;
+                     csv += `${r.name},${r.date},${time},${r.leaveType},${r.leaveHours},${content},${r.reason},${r.note},${r.status}\n`;
                 });
                 const link = document.createElement("a");
                 link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
@@ -1256,48 +1331,24 @@
                 link.click();
             };
 
-            const addToGoogleCalendar = (dateStr, slot, title, area, note) => {
-                const d = dateStr.replace(/-/g, '');
-                let start = '';
-                let end = '';
-                
-                if (slot === 'morning') {
-                    start = `${d}T080000`;
-                    end = `${d}T120000`;
-                } else if (slot === 'afternoon') {
-                    start = `${d}T130000`;
-                    end = `${d}T170000`;
-                } else {
-                    start = d;
-                    const nextDay = new Date(dateStr);
-                    nextDay.setDate(nextDay.getDate() + 1);
-                    end = nextDay.toISOString().split('T')[0].replace(/-/g, '');
-                }
-
-                const url = new URL('https://calendar.google.com/calendar/render');
-                url.searchParams.append('action', 'TEMPLATE');
-                url.searchParams.append('text', `[外勤] ${title}`);
-                
-                if (slot === 'all_day') {
-                     url.searchParams.append('dates', `${start}/${end}`);
-                } else {
-                     url.searchParams.append('dates', `${start}/${end}`);
-                     url.searchParams.append('ctz', 'Asia/Taipei'); 
-                }
-                
-                if (note) url.searchParams.append('details', note);
-                if (area) url.searchParams.append('location', area);
-
-                window.open(url.toString(), '_blank');
-            };
-
             return (
                 <div className="max-w-6xl mx-auto space-y-6">
-                    <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm">
-                        <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 個人月報表 (勾稽)</h2>
-                        <div className="flex gap-4">
-                            <input type="month" className="border p-2 rounded" value={month} onChange={e=>setMonth(e.target.value)} />
-                            <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm"><FileSpreadsheet size={16}/> 匯出 Excel</button>
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded shadow-sm gap-4">
+                        <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 個人出勤狀況一覽</h2>
+                        <div className="flex flex-wrap gap-4 w-full md:w-auto">
+                            <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
+                            <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none">
+                                <option value="all">所有假別/出勤</option>
+                                {leaveTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <div className="flex gap-2 w-full md:w-auto">
+                                <button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-indigo-700 transition">
+                                    <CalendarPlus size={16}/> 批次加行事曆 (.ics)
+                                </button>
+                                <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 text-sm flex-1 justify-center hover:bg-green-700 transition">
+                                    <FileSpreadsheet size={16}/> 匯出 Excel
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1305,6 +1356,9 @@
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-50 border-b font-bold text-gray-600">
                                 <tr>
+                                    <th className="p-3 w-10 text-center">
+                                        <input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                                    </th>
                                     <th className="p-3 w-20">姓名</th>
                                     <th className="p-3 w-28">日期</th>
                                     <th className="p-3 w-16">時間</th>
@@ -1313,49 +1367,44 @@
                                     <th className="p-3">排班內容</th>
                                     <th className="p-3 w-32">事由</th>
                                     <th className="p-3 w-32">備註</th>
-                                    <th className="p-3 w-24">狀態</th>
+                                    <th className="p-3 w-28">狀態</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {scheduleData.map((d, idx) => {
-                                     const rowsToRender = d.work.length > 0 ? d.work : [{ isLeaveOnly: true }];
-                                     
-                                     return rowsToRender.map((w, subIdx) => (
-                                         <tr key={`${idx}-${subIdx}`} className="border-b last:border-0 hover:bg-gray-50">
-                                             <td className="p-3 font-medium">{d.name}</td>
-                                             <td className="p-3">{d.date}</td>
-                                             <td className="p-3">{w.isLeaveOnly ? '整天' : (TIME_SLOTS.find(s=>s.id===w.slot)?.label)}</td>
-                                             <td className="p-3">{d.leave?.type || '-'}</td>
-                                             <td className="p-3">{d.leave?.hours || '-'}</td>
-                                             <td className="p-3">
-                                                 {!w.isLeaveOnly && (
-                                                     <span className="font-bold text-blue-700">
-                                                         {w.tag?.item} {w.tag?.area && `(${w.tag.area})`}
-                                                     </span>
-                                                 )}
-                                             </td>
-                                             <td className="p-3 text-xs text-gray-500">{d.leave?.reason || '-'}</td>
-                                             <td className="p-3 text-xs text-gray-500">{!w.isLeaveOnly ? (w.tag?.note || '-') : '-'}</td>
-                                             <td className="p-3">
-                                                 <div className="flex items-center gap-2">
-                                                     <span className={`px-2 py-1 rounded text-xs font-bold ${d.status==='缺公務單'?'bg-red-100 text-red-600':(d.status==='假別不符' || d.status==='異常公出' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600')}`}>
-                                                         {(d.status === '正常' || d.status === '內勤' || (d.leave && !['缺公務單','假別不符','異常公出'].includes(d.status))) ? '同意' : d.status}
-                                                     </span>
-                                                     {!w.isLeaveOnly && w.tag && (
-                                                         <button 
-                                                            onClick={() => addToGoogleCalendar(d.date, w.slot, w.tag.item, w.tag.area, w.tag.note)}
-                                                            className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded shadow-sm flex items-center gap-1 transition-colors"
-                                                            title="將此行程加到我的 Google 行事曆"
-                                                         >
-                                                             <CalendarPlus size={12}/> 加行事曆
-                                                         </button>
-                                                     )}
-                                                 </div>
-                                             </td>
-                                         </tr>
-                                     ));
-                                })}
-                                {scheduleData.length === 0 && <tr><td colSpan="9" className="p-8 text-center text-gray-400">本月無資料</td></tr>}
+                                {filteredRows.map((r) => (
+                                    <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 transition ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
+                                        <td className="p-3 text-center">
+                                            <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                                        </td>
+                                        <td className="p-3 font-medium">{r.name}</td>
+                                        <td className="p-3">{r.date}</td>
+                                        <td className="p-3">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td>
+                                        <td className="p-3">
+                                            {r.leaveType !== '-' ? <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">{r.leaveType}</span> : '-'}
+                                        </td>
+                                        <td className="p-3">{r.leaveHours}</td>
+                                        <td className="p-3">
+                                            {r.content ? (
+                                                <span className="font-bold text-blue-700">
+                                                    {r.content} {r.area && `(${r.area})`}
+                                                </span>
+                                            ) : <span className="text-gray-400">-</span>}
+                                        </td>
+                                        <td className="p-3 text-xs text-gray-500">{r.reason}</td>
+                                        <td className="p-3 text-xs text-gray-500">{r.note}</td>
+                                        <td className="p-3">
+                                            <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                r.status === '缺公務單' ? 'bg-red-100 text-red-600' :
+                                                ['假別不符', '異常公出', '已駁回'].includes(r.status) ? 'bg-orange-100 text-orange-600' :
+                                                ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-600' :
+                                                'bg-green-100 text-green-600'
+                                            }`}>
+                                                {r.status}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {filteredRows.length === 0 && <tr><td colSpan="10" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -1855,7 +1904,7 @@
 
         function MemberEditModal({ user, onClose, onSave, roleNames }) {
             const [form, setForm] = useState(user || {
-                name: '', email: '', role: 'staff', initials: '', color: 'bg-gray-200', borderColor: '#e5e7eb', usePhoto: false, avatarUrl: ''
+                lastName: '', name: '', email: '', role: 'staff', initials: '', color: 'bg-gray-200', borderColor: '#e5e7eb', usePhoto: false, avatarUrl: ''
             });
 
             return (
@@ -1863,14 +1912,25 @@
                     <div className="bg-white rounded-xl w-full max-w-md shadow-2xl p-6" onClick={e=>e.stopPropagation()}>
                         <h3 className="font-bold text-lg mb-4 text-gray-800">{user ? '編輯成員' : '新增成員'}</h3>
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">姓名</label>
-                                <input 
-                                    className="w-full border p-2 rounded" 
-                                    value={form.name} 
-                                    onChange={e=>setForm({...form, name:e.target.value, initials: e.target.value.slice(0,1)})} 
-                                    placeholder="輸入姓名"
-                                />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1">姓氏 (留存)</label>
+                                    <input 
+                                        className="w-full border p-2 rounded" 
+                                        value={form.lastName || ''} 
+                                        onChange={e=>setForm({...form, lastName:e.target.value})} 
+                                        placeholder="例如: 蔡"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1">名字 (顯示)</label>
+                                    <input 
+                                        className="w-full border p-2 rounded" 
+                                        value={form.name} 
+                                        onChange={e=>setForm({...form, name:e.target.value, initials: e.target.value.slice(0,1)})} 
+                                        placeholder="例如: 凱宇"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 mb-1">Email (登入綁定用)</label>
@@ -1929,6 +1989,8 @@
 
         function ProfileView({ user, onSave, roleNames }) {
             const [p, setP] = useState({ 
+                lastName: user.lastName || '',
+                name: user.name || '',
                 initials: user.initials || '', 
                 color: user.color || 'bg-gray-200', 
                 email: user.email || '',
@@ -1979,6 +2041,17 @@
                                     />
                                     <span className="text-sm font-medium text-gray-700">使用照片</span>
                                 </label>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-600 mb-1">姓氏 (個人資料留存用)</label>
+                                <input className="border p-2 rounded w-full h-9 bg-gray-50 focus:bg-white transition" value={p.lastName} onChange={e=>setP({...p, lastName:e.target.value})} placeholder="例如：蔡" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-600 mb-1">名字 (系統顯示用)</label>
+                                <input className="border p-2 rounded w-full h-9 bg-gray-50 focus:bg-white transition" value={p.name} onChange={e=>setP({...p, name:e.target.value})} placeholder="例如：凱宇" />
                             </div>
                         </div>
 
