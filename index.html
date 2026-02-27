@@ -1910,7 +1910,7 @@ return (
 </tr>
 );
 }) : <tr><td colSpan="12" className="p-8 text-center text-gray-400">目前沒有需要您擔任職代的假單。</td></tr>}
-</tbody>></table></div>
+</tbody></table></div>
 )}</div>);}
 const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
 const officialTypes = leaveTypes.filter(t => t.category === 'official');
@@ -1928,91 +1928,81 @@ const [hours, setHours] = useState(0);
 const [inputMode, setInputMode] = useState('slot'); // 'slot' (簡易時段) 或 'manual' (自訂時間)
 const [slotDate, setSlotDate] = useState(getLocalDateString());
 const [slotType, setSlotType] = useState('all_day');
-// 新增：自訂時間（以「起始日期 + 天數」為主，1天=8小時）
-const [manualDate, setManualDate] = useState(getLocalDateString());
-const [manualDays, setManualDays] = useState(1);
-const [manualAdvanced, setManualAdvanced] = useState(false);
-// 上班時段設定（預設 08:00-17:00；可提早一小時 07:00-16:00）
-const [workShift, setWorkShift] = useState(() => {
-  try { return localStorage.getItem('workShift') || 'standard'; } catch { return 'standard'; }
-});
-useEffect(() => { try { localStorage.setItem('workShift', workShift); } catch {} }, [workShift]);
+// 新增：自訂時間（分為「少於一天」與「大於一天」）
+const [customKind, setCustomKind] = useState('lt1'); // 'lt1' | 'gt1'
 
-const [isSubmitting, setIsSubmitting] = useState(false);
-const [submittingTaskId, setSubmittingTaskId] = useState(null);
-const [openBlock1, setOpenBlock1] = useState(true);
-const [openBlock2, setOpenBlock2] = useState(false);
-const block2Ref = useRef(null);
-const officialTypes = leaveTypes.filter(t => t.category === 'official');
-const personalTypes = leaveTypes.filter(t => t.category === 'personal');
-const overtimeTypeName = officialTypes.find(t => (t.name||'').includes('加班'))?.name || '加班';
-const currentTypeDesc = leaveTypes.find(t => t.name === form.type)?.desc || '';
-const pendingExternalTasks = useMemo(() => {
-const groups = {};
-events.forEach(e => {
-if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
-if (e.type === 'tag') groups[e.groupId].tag = e;
-if (e.type === 'person') groups[e.groupId].people.push(e);
-});
-const pending = [];
-Object.values(groups).forEach(g => {
-if (!g.tag) return;
-const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
-if (!isMe) return;
-const d = g.tag.date;
-let startTime = `${d}T08:00`;
-let endTime = `${d}T17:00`;
-if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
-else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
-// 過濾掉已被退回與已撤銷的假單，允許重送
-const hasLeave = leaves.some(l =>
-(l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) &&
-l.start.startsWith(d) && l.status !== 'rejected' && l.status !== 'withdrawn');
-if (!hasLeave) {
-// 將陣列轄區轉成字串帶入事由
-const areaStr = Array.isArray(g.tag.area) ? g.tag.area.join(', ') : (g.tag.area || '');
-pending.push({ id: g.tag.groupId, date: d, slot: g.tag.slot, item: g.tag.item, area: areaStr, suggestedStart: startTime, suggestedEnd: endTime, reason: `[${g.tag.item}] ${areaStr ? areaStr : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim() });}
-});
-return pending.sort((a,b) => a.date.localeCompare(b.date));
-}, [events, leaves, user]);
-useEffect(() => {
-  // 進階自訂：依起訖時間計算（同日扣午休 12:00-13:00；跨日以天數*8）
-  if (!manualAdvanced) return;
-  if(form.start && form.end) {
-    const s = new Date(form.start);
-    const e = new Date(form.end);
-    if(!isNaN(s.getTime()) && !isNaN(e.getTime()) && e > s) {
-      const sd = form.start.split('T')[0];
-      const ed = form.end.split('T')[0];
-      let h = 0;
-      if (sd === ed) {
-        h = (e - s) / 36e5;
-        // 扣除午休重疊
-        const lunchS = new Date(sd + 'T12:00');
-        const lunchE = new Date(sd + 'T13:00');
-        const ov = Math.max(0, Math.min(e.getTime(), lunchE.getTime()) - Math.max(s.getTime(), lunchS.getTime()));
-        h = h - (ov / 36e5);
-        h = Math.max(0, Math.min(8, h));
-      } else {
-        const sd0 = new Date(sd + 'T00:00');
-        const ed0 = new Date(ed + 'T00:00');
-        const days = Math.floor((ed0 - sd0) / 86400000) + 1;
-        h = Math.max(0, days) * 8;
-      }
-      setHours(Math.max(0, Math.round(h*2)/2));
-    }
+// < 1 天：日期 + 起訖時間（下拉選單）
+const [ltDate, setLtDate] = useState(getLocalDateString());
+const [ltStartH, setLtStartH] = useState('08');
+const [ltStartM, setLtStartM] = useState('00');
+const [ltEndH, setLtEndH] = useState('17');
+const [ltEndM, setLtEndM] = useState('00');
+
+// > 1 天：起始日期 + 天數（以工作日計算；一天=8小時），並產生日期清單供使用者確認
+const [gtStartDate, setGtStartDate] = useState(getLocalDateString());
+const [gtDays, setGtDays] = useState(2);
+const [gtSelectedDates, setGtSelectedDates] = useState([]);
+
+// 使用者確認（自訂時間才需要勾選）
+const [customConfirmed, setCustomConfirmed] = useState(false);
+
+// 讀取自訂例假日（localStorage）並合併預設
+const mergedCustomHolidays = useMemo(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('customHolidays') || '{}');
+    return { ...DEFAULT_SPECIAL_HOLIDAYS, ...(saved || {}) };
+  } catch {
+    return { ...DEFAULT_SPECIAL_HOLIDAYS };
   }
-}, [form.start, form.end]);
+}, []);
 
+const isWeekend = (dStr) => {
+  try { const d = new Date(dStr + 'T00:00'); const w = d.getDay(); return w === 0 || w === 6; } catch { return false; }
+};
+const isHoliday = (dStr) => !!(TAIWAN_HOLIDAYS_2026[dStr] || mergedCustomHolidays[dStr]);
+
+const buildWorkDates = (startDateStr, needDays) => {
+  const out = [];
+  if (!startDateStr) return out;
+  let d = new Date(startDateStr + 'T00:00');
+  let guard = 0;
+  while (out.length < needDays && guard < 400) {
+    const ds = getLocalDateString(d);
+    if (!isWeekend(ds) && !isHoliday(ds)) out.push(ds);
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  return out;
+};
+
+// gt1：依「起始日期 + 天數」自動產生工作日清單（避開週末/例假日）
 useEffect(() => {
-  // 基礎自訂：起始日期 + 天數（固定 1 天 = 8 小時）
-  if (inputMode !== 'manual') return;
-  if (manualAdvanced) return;
-  const d = String(manualDate || '');
-  const n = Math.max(1, Number(manualDays || 1));
-  if (!d) return;
-  setHours(n * 8);
-}, [inputMode, manualDate, manualDays, manualAdvanced]);
+  // 時數顯示：依模式即時計算（自訂時間：1天上限 8 小時；多天：一天=8小時）
+  try {
+    if (inputMode === 'slot') {
+      const h = (slotType === 'all_day') ? 8 : 4;
+      setHours(h);
+      return;
+    }
+
+    if (customKind === 'lt1') {
+      const sh = Number(String(ltStartH).padStart(2,'0'));
+      const sm = Number(String(ltStartM).padStart(2,'0'));
+      const eh = Number(String(ltEndH).padStart(2,'0'));
+      const em = Number(String(ltEndM).padStart(2,'0'));
+      const sMin = sh*60 + sm;
+      const eMin = eh*60 + em;
+      const diffMin = Math.max(0, Math.min(480, eMin - sMin));
+      setHours(diffMin / 60);
+      return;
+    }
+
+    const list = (gtSelectedDates || []).filter(Boolean);
+    setHours(list.length * 8);
+  } catch {
+    // ignore
+  }
+}, [inputMode, slotType, customKind, ltStartH, ltStartM, ltEndH, ltEndM, gtSelectedDates]);
 
 
   // 職代防呆：職代於同時段已安排出差/請假則禁止選擇
@@ -2054,38 +2044,63 @@ e.preventDefault();
 let finalStart = form.start;
 let finalEnd = form.end;
 let finalHours = hours;
+
 // 依據輸入模式準備資料
 if (inputMode === 'slot') {
-if (!slotDate) { alert("請選擇日期"); return; }
-if (slotType === 'morning') {
-finalStart = `${slotDate}T08:00`;
-finalEnd = `${slotDate}T12:00`;
-finalHours = 4;
-} else if (slotType === 'afternoon') {
-finalStart = `${slotDate}T13:00`;
-finalEnd = `${slotDate}T17:00`;
-finalHours = 4;
-} else { // all_day
-finalStart = `${slotDate}T08:00`;
-finalEnd = `${slotDate}T17:00`;
-finalHours = 8;}
+  if (!slotDate) { alert("請選擇日期"); return; }
+  if (slotType === 'morning') {
+    finalStart = `${slotDate}T08:00`;
+    finalEnd = `${slotDate}T12:00`;
+    finalHours = 4;
+  } else if (slotType === 'afternoon') {
+    finalStart = `${slotDate}T13:00`;
+    finalEnd = `${slotDate}T17:00`;
+    finalHours = 4;
+  } else { // all_day
+    finalStart = `${slotDate}T08:00`;
+    finalEnd = `${slotDate}T17:00`;
+    finalHours = 8;
+  }
 } else {
-  // 自訂時間：預設用「起始日期 + 天數」；若啟用進階則採用自訂起訖時間(可填到小時)
-  if (!manualAdvanced) {
-    if (!manualDate) { alert("請選擇起始日期"); return; }
-    const n = Math.max(1, Number(manualDays || 1));
-    const sd = String(manualDate);
-    const ed = (() => { try { const x = new Date(sd+'T00:00'); x.setDate(x.getDate() + (n-1)); return getLocalDateString(x); } catch { return sd; } })();
-    const shift = getShiftById(workShift);
-    finalStart = `${sd}T${shift.start}`;
-    finalEnd = `${ed}T${shift.end}`;
-    finalHours = n * 8;
+  // 自訂時間：分為「少於一天」與「大於一天」
+  if (!customConfirmed) { alert("請先勾選「我已確認日期/時間」再送出"); return; }
+
+  if (customKind === 'lt1') {
+    const d = String(ltDate || '');
+    if (!d) { alert("請選擇日期"); return; }
+
+    const sh = String(ltStartH).padStart(2,'0');
+    const sm = String(ltStartM).padStart(2,'0');
+    const eh = String(ltEndH).padStart(2,'0');
+    const em = String(ltEndM).padStart(2,'0');
+
+    const sMin = Number(sh)*60 + Number(sm);
+    const eMin = Number(eh)*60 + Number(em);
+
+    // 允許 07:00~17:00（彈性 1 小時）
+    if (Number.isNaN(sMin) || Number.isNaN(eMin)) { alert("時間格式錯誤"); return; }
+    if (sMin < 7*60 || sMin > 17*60 || eMin < 7*60 || eMin > 17*60) { alert("自訂時間請落在 07:00～17:00 範圍內"); return; }
+    if (eMin <= sMin) { alert("迄時間需大於起時間"); return; }
+
+    const diffMin = Math.min(480, eMin - sMin); // 1 天上限 8 小時
+    if (diffMin <= 0) { alert("總計時數必須大於 0"); return; }
+
+    finalStart = `${d}T${sh}:${sm}`;
+    finalEnd = `${d}T${eh}:${em}`;
+    finalHours = diffMin / 60;
   } else {
-    if (!form.start || !form.end) { alert("請選擇開始與結束時間"); return; }
-    if (finalHours <= 0) { alert("總計時數必須大於 0"); return; }
+    // > 1 天：以使用者確認後的日期清單為準（避開週末/例假日）
+    const list = (gtSelectedDates || []).filter(Boolean);
+    if (list.length <= 0) { alert("請確認日期清單（至少需 1 天）"); return; }
+    const first = list[0];
+    const last = list[list.length - 1];
+    finalStart = `${first}T08:00`;
+    finalEnd = `${last}T17:00`;
+    finalHours = list.length * 8;
   }
 }
-if (form.type === '補休') {
+
+if (form.type === '補休') {if (form.type === '補休') {
 let totalOvertime = 0;
 leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '加班申請(列計)') { totalOvertime += Number(l.hours); } });
 let usedCompensatory = 0;
@@ -2241,43 +2256,124 @@ return (
                   </div>
                 </div>
               ) : (
+                
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1">起始日期</label>
-                      <input type="date" className="w-full border p-2 rounded-lg bg-white" value={manualDate} onChange={e=>setManualDate(e.target.value)} />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1">天數（1天=8小時）</label>
-                      <input type="number" min="1" className="w-full border p-2 rounded-lg bg-white" value={manualDays} onChange={e=>setManualDays(e.target.value)} />
-                    </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id:'lt1', label:'少於一天（自訂起訖時間）' },
+                      { id:'gt1', label:'大於一天（起始日期＋天數）' },
+                    ].map(k => (
+                      <button
+                        key={k.id}
+                        type="button"
+                        onClick={()=>setCustomKind(k.id)}
+                        className={`px-3 py-2 rounded-lg border text-sm font-bold transition ${
+                          customKind===k.id ? 'bg-blue-600 text-white border-blue-700 shadow' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {k.label}
+                      </button>
+                    ))}
                   </div>
 
-                  <div className="text-sm bg-gray-50 border rounded-lg p-3 text-gray-700">
-                    <div className="font-bold mb-1">起訖時間（預設）</div>
-                    <div className="text-xs text-gray-600">
-                      {(() => {
-                        const d = String(manualDate || '');
-                        const n = Math.max(1, Number(manualDays || 1));
-                        if (!d) return '—';
-                        const sd = d;
-                        const ed = (() => { try { const x = new Date(d+'T00:00'); x.setDate(x.getDate() + (n-1)); return getLocalDateString(x); } catch { return d; } })();
-                        const sh = getShiftById(workShift);
-                        return `${sd} ${sh.start} ～ ${ed} ${sh.end}（共 ${n*8} 小時）`;
-                      })()}
-                    </div>
-                    <div className="text-[11px] text-gray-500 mt-1">註：跨日以「天數×8小時」計算。</div>
-                  </div>
+                  {customKind === 'lt1' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-gray-600 block mb-1">日期</label>
+                        <input type="date" className="w-full border p-2 rounded-lg bg-white" value={ltDate} onChange={e=>setLtDate(e.target.value)} />
+                      </div>
 
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1">班別</label>
-                      <select className="w-full border p-2 rounded-lg bg-white" value={workShift} onChange={e=>setWorkShift(e.target.value)}>
-                        {WORK_SHIFT_PRESETS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                      </select>
-                      <div className="text-[11px] text-gray-500 mt-1">註：以 1 天上限 8 小時計算（不含午休 1 小時）。</div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-600 block mb-1">起（時/分）</label>
+                        <div className="flex gap-2">
+                          <select className="flex-1 border p-2 rounded-lg bg-white" value={ltStartH} onChange={e=>setLtStartH(e.target.value)}>
+                            {Array.from({length: 11}, (_,i)=>String(i+7).padStart(2,'0')).map(h => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                          <select className="flex-1 border p-2 rounded-lg bg-white" value={ltStartM} onChange={e=>setLtStartM(e.target.value)}>
+                            {['00','15','30','45'].map(mm => <option key={mm} value={mm}>{mm}</option>)}
+                          </select>
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-1">範圍：07:00～17:00（1天上限 8 小時）</div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-gray-600 block mb-1">迄（時/分）</label>
+                        <div className="flex gap-2">
+                          <select className="flex-1 border p-2 rounded-lg bg-white" value={ltEndH} onChange={e=>setLtEndH(e.target.value)}>
+                            {Array.from({length: 11}, (_,i)=>String(i+7).padStart(2,'0')).map(h => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                          <select className="flex-1 border p-2 rounded-lg bg-white" value={ltEndM} onChange={e=>setLtEndM(e.target.value)}>
+                            {['00','15','30','45'].map(mm => <option key={mm} value={mm}>{mm}</option>)}
+                          </select>
+                        </div>
+                      </div>
                     </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-xs font-bold text-gray-600 block mb-1">起始日期</label>
+                          <input type="date" className="w-full border p-2 rounded-lg bg-white" value={gtStartDate} onChange={e=>setGtStartDate(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-gray-600 block mb-1">天數（一天=8小時）</label>
+                          <input type="number" min="1" max="60" className="w-full border p-2 rounded-lg bg-white" value={gtDays} onChange={e=>setGtDays(e.target.value)} />
+                          <div className="text-[11px] text-gray-500 mt-1">系統會自動避開週末與例假日（依系統設定/自訂例假日）。</div>
+                        </div>
+                      </div>
+
+                      <div className="bg-gray-50 border rounded-lg p-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="font-bold text-sm text-gray-700">日期清單（請確認）</div>
+                          <div className="text-xs text-gray-500">{(gtSelectedDates||[]).length} 天</div>
+                        </div>
+
+                        {(gtSelectedDates||[]).length === 0 ? (
+                          <div className="text-xs text-gray-500">—</div>
+                        ) : (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-40 overflow-auto pr-1">
+                            {(gtSelectedDates||[]).map(ds => (
+                              <label key={ds} className="flex items-center gap-2 text-xs bg-white border rounded-lg px-2 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={(gtSelectedDates||[]).includes(ds)}
+                                  onChange={() => {
+                                    setGtSelectedDates(prev => {
+                                      const arr = Array.isArray(prev) ? [...prev] : [];
+                                      if (arr.includes(ds)) return arr.filter(x => x !== ds);
+                                      arr.push(ds);
+                                      arr.sort((a,b)=>String(a).localeCompare(String(b)));
+                                      return arr;
+                                    });
+                                  }}
+                                />
+                                <span className="truncate">{ds}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="text-[11px] text-gray-500 mt-2">若需調整個別日期，可取消勾選（時數會同步調整）。</div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-900">
+                    <div className="font-bold mb-1">預覽</div>
+                    <div className="text-[11px] text-blue-900/80">
+                      {customKind === 'lt1'
+                        ? `${ltDate || '—'} ${String(ltStartH).padStart(2,'0')}:${String(ltStartM).padStart(2,'0')} ～ ${String(ltEndH).padStart(2,'0')}:${String(ltEndM).padStart(2,'0')}（約 ${hours} 小時，最多 8 小時）`
+                        : (() => {
+                            const list = (gtSelectedDates||[]).filter(Boolean);
+                            if (list.length === 0) return '—';
+                            return `${list[0]} ～ ${list[list.length-1]}（共 ${list.length} 天 / ${list.length*8} 小時）`;
+                          })()
+                      }
+                    </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs text-blue-900 font-bold">
+                      <input type="checkbox" checked={customConfirmed} onChange={e=>setCustomConfirmed(e.target.checked)} />
+                      我已確認日期/時間
+                    </label>
                   </div>
                 </div>
               )}
@@ -2318,16 +2414,16 @@ return (
                       const hrs   = (t === "all_day") ? 8 : 4;
                       return `預覽：${start} ～ ${end}（${hrs} 小時）`;
                     }
-                    const d = String(manualDate || "");
-                    const n = Math.max(1, Number(manualDays || 1));
-                    if (!d) return "請填寫起始日期";
-                    const sd = d;
-                    const ed = (() => { try { const x = new Date(d+"T00:00"); x.setDate(x.getDate() + (n-1)); return getLocalDateString(x); } catch { return d; } })();
-                    if (manualAdvanced && form.start && form.end) {
-                      return `預覽：${fmtISO(form.start)} ～ ${fmtISO(form.end)}（以自訂起訖為準）`;
+                    if (customKind === "lt1") {
+                      const d2 = String(ltDate || "");
+                      if (!d2) return "請選擇日期";
+                      const sh = `${String(ltStartH).padStart(2,'0')}:${String(ltStartM).padStart(2,'0')}`;
+                      const eh = `${String(ltEndH).padStart(2,'0')}:${String(ltEndM).padStart(2,'0')}`;
+                      return `預覽：${d2} ${sh} ～ ${d2} ${eh}（約 ${hours} 小時，最多 8 小時）`;
                     }
-                    const sh2 = getShiftById(workShift);
-                    return `預覽：${sd} ${sh2.start} ～ ${ed} ${sh2.end}（${n*8} 小時）`;
+                    const list = (gtSelectedDates||[]).filter(Boolean);
+                    if (list.length === 0) return "請確認日期清單";
+                    return `預覽：${list[0]} 08:00 ～ ${list[list.length-1]} 17:00（${list.length*8} 小時）`;
                   } catch {
                     return "";
                   }
@@ -3295,4 +3391,4 @@ const [isLoggingIn, setIsLoggingIn] = useState(false);
 const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連線完成，請稍後再試。"); return; } setIsLoggingIn(true); const provider = new GoogleAuthProvider(); try { await signInWithPopup(auth, provider); } catch (error) { console.error("Google Sign-In Error", error); alert("登入被中斷或發生錯誤，請重試。\n詳細訊息: " + error.message); setIsLoggingIn(false); } };
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
-root.render(<App />);</script></body></html>
+root.render(React.createElement(App));</script></body></html>
