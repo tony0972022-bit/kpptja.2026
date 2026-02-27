@@ -148,13 +148,25 @@ async function fetchWeatherForLocations() {
   const results = [];
   for (const loc of WEATHER_LOCATIONS) {
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,wind_speed_10m&daily=precipitation_probability_max,uv_index_max&timezone=Asia%2FTaipei`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&forecast_days=7&timezone=Asia%2FTaipei`;
       const r = await fetch(url);
       const j = await r.json();
       const temp = j?.current?.temperature_2m;
       const wind = j?.current?.wind_speed_10m;
+      const curCode = j?.current?.weather_code;
       const rain = j?.daily?.precipitation_probability_max?.[0];
       const uv = j?.daily?.uv_index_max?.[0];
+
+      const daily = j?.daily || {};
+      const times = Array.isArray(daily.time) ? daily.time : [];
+      const week = times.slice(0, 7).map((t, idx) => ({
+        date: t,
+        tmax: daily.temperature_2m_max?.[idx],
+        tmin: daily.temperature_2m_min?.[idx],
+        rain: daily.precipitation_probability_max?.[idx],
+        uv: daily.uv_index_max?.[idx],
+        code: daily.weather_code?.[idx],
+      }));
 
       results.push({
         location: loc.location,
@@ -162,7 +174,8 @@ async function fetchWeatherForLocations() {
         wind: (typeof wind === 'number') ? `${Math.round(wind)} km/h` : '—',
         rain: (typeof rain === 'number') ? `${Math.round(rain)}%` : '—',
         uv: (typeof uv === 'number') ? `${Math.round(uv)}` : '—',
-        _raw: { temp, wind, rain, uv }
+        week,
+        _raw: { temp, wind, rain, uv, curCode }
       });
     } catch (e) {
       results.push({ location: loc.location, temp:'—', wind:'—', rain:'—', uv:'—', _raw:{} });
@@ -253,6 +266,12 @@ const TIME_SLOTS = [
 { id: 'morning', label: '上午', color: 'bg-sky-100 text-sky-900 border-sky-200' },
 { id: 'afternoon', label: '下午', color: 'bg-sky-200 text-sky-950 border-sky-300' },
 { id: 'all_day', label: '整天', color: 'bg-sky-600 text-white border-sky-700' },];
+const WORK_SHIFT_PRESETS = [
+  { id: 'standard', label: '08:00-17:00', start: '08:00', end: '17:00' },
+  { id: 'early', label: '07:00-16:00', start: '07:00', end: '16:00' },
+];
+const getShiftById = (id) => WORK_SHIFT_PRESETS.find(s => s.id === id) || WORK_SHIFT_PRESETS[0];
+
 const DEFAULT_AREA_COLORS = {
 "高雄-身障": "bg-red-100 text-red-800",
 "屏東-身障": "bg-yellow-100 text-yellow-800",
@@ -794,6 +813,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 function Dashboard({ user, leaves, calendarEvents, setView, leaveTypes }) {
 const [weeksToShow, setWeeksToShow] = useState(1);
 const [weatherData, setWeatherData] = useState([]);
+const [expandedWeatherIdx, setExpandedWeatherIdx] = useState(null);
 useEffect(() => {
   let alive = true;
   fetchWeatherForLocations().then(d => { if (alive) setWeatherData(d || []); });
@@ -896,16 +916,43 @@ return (
 <p className="text-sm text-gray-500 font-medium">{today.getFullYear()}/{today.getMonth()+1}/{today.getDate()} ({weekDays[today.getDay()]})</p></div>
 <div className="flex gap-3 overflow-x-auto w-full md:w-auto pb-2">
 {weatherList.map((w,i)=>(
-<div key={i} className="min-w-[110px] bg-gray-50 p-3 rounded-xl flex flex-col items-center border border-gray-100 shadow-sm">
+<div key={i} onClick={() => setExpandedWeatherIdx(expandedWeatherIdx===i ? null : i)} className="min-w-[110px] bg-gray-50 p-3 rounded-xl flex flex-col items-center border border-gray-100 shadow-sm cursor-pointer hover:bg-gray-100 transition">
 <div className="flex items-center gap-2 mb-1">
 <span className="text-sm font-bold text-gray-700">{w.location}</span>
-{getWeatherIcon(w?._raw?.rain ?? parseFloat(String(w?.rain||'').replace('%','')))}</div>
+{getWeatherIcon(w?._raw?.rain ?? parseFloat(String(w?.rain||'').replace('%','')))}
+<ChevronDown size={14} className={`text-gray-400 transition ${expandedWeatherIdx===i ? 'rotate-180' : ''}`} />
+</div>
 <span className="text-xl font-black text-gray-800 mb-1">{w.temp}</span>
 <div className="flex flex-wrap justify-center gap-1 text-[10px] font-medium text-gray-600">
 <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded" title="降雨機率">☔ {w.rain}</span>
 <span className="bg-gray-200 px-1.5 py-0.5 rounded" title={`風速：${(w?._raw?.wind ?? "—")} km/h`}>🌬️ {windLevelText(w?._raw?.wind)} {typeof (w?._raw?.wind) === "number" ? `(${Math.round(w._raw.wind)}km/h)` : ""}</span>
 <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded" title={`紫外線指數：${(w?._raw?.uv ?? "—")}`}>UV {uvLevelText(w?._raw?.uv)} {typeof (w?._raw?.uv) === "number" ? `(${Math.round(w._raw.uv)})` : ""}</span></div></div>
-))}</div></div>
+))}{expandedWeatherIdx !== null && weatherList[expandedWeatherIdx] && (
+  <div className="mt-3 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+    <div className="flex items-center justify-between mb-3">
+      <div className="font-bold text-gray-800">
+        {weatherList[expandedWeatherIdx].location}：未來一週預報
+      </div>
+      <button type="button" className="text-sm text-gray-500 hover:text-gray-700" onClick={() => setExpandedWeatherIdx(null)}>
+        收合
+      </button>
+    </div>
+    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+      {(weatherList[expandedWeatherIdx].week || []).map((d, idx) => (
+        <div key={idx} className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+          <div className="text-xs font-bold text-gray-700">{String(d.date||'').slice(5)}</div>
+          <div className="text-[11px] text-gray-600 mt-1">🌡️ {typeof d.tmin==='number' ? Math.round(d.tmin) : '—'}~{typeof d.tmax==='number' ? Math.round(d.tmax) : '—'}°C</div>
+          <div className="text-[11px] text-gray-600">☔ {typeof d.rain==='number' ? Math.round(d.rain) : '—'}%</div>
+          <div className="text-[11px] text-gray-600">UV {typeof d.uv==='number' ? Math.round(d.uv) : '—'}</div>
+        </div>
+      ))}
+    </div>
+    <div className="text-[11px] text-gray-500 mt-3">
+      資料來源：Open‑Meteo（以座標抓取，與中央氣象署可能因模型/測站不同而有差異）。
+    </div>
+  </div>
+)}
+</div></div>
 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500 h-full flex flex-col"><h3 className="text-gray-500 text-sm font-medium">今日外勤</h3><span className="text-2xl font-bold text-blue-700 block mt-1 mb-2">{uniqueExternalDetails.length} 人</span><div className="text-xs text-gray-500 mt-auto flex flex-wrap gap-1">{uniqueExternalDetails.length > 0 ? uniqueExternalDetails.map((detail, i) => <span key={i} className="bg-blue-50 px-1.5 py-0.5 rounded border">{detail}</span>) : '無排定外勤'}</div></div>
 <div className="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500 h-full flex flex-col"><h3 className="text-gray-500 text-sm font-medium">今日請假</h3><span className="text-2xl font-bold text-green-700 block mt-1 mb-2">{todayLeavesDetails.length} 人</span><div className="text-xs text-gray-500 mt-auto flex flex-wrap gap-1">{todayLeavesDetails.length > 0 ? todayLeavesDetails.map((detail, i) => <span key={i} className="bg-green-50 px-1.5 py-0.5 rounded border">{detail}</span>) : '全體出勤'}</div></div>
@@ -1885,11 +1932,16 @@ const [slotType, setSlotType] = useState('all_day');
 const [manualDate, setManualDate] = useState(getLocalDateString());
 const [manualDays, setManualDays] = useState(1);
 const [manualAdvanced, setManualAdvanced] = useState(false);
+// 上班時段設定（預設 08:00-17:00；可提早一小時 07:00-16:00）
+const [workShift, setWorkShift] = useState(() => {
+  try { return localStorage.getItem('workShift') || 'standard'; } catch { return 'standard'; }
+});
+useEffect(() => { try { localStorage.setItem('workShift', workShift); } catch {} }, [workShift]);
 
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [submittingTaskId, setSubmittingTaskId] = useState(null);
 const [openBlock1, setOpenBlock1] = useState(true);
-const [openBlock2, setOpenBlock2] = useState(true);
+const [openBlock2, setOpenBlock2] = useState(false);
 const block2Ref = useRef(null);
 const officialTypes = leaveTypes.filter(t => t.category === 'official');
 const personalTypes = leaveTypes.filter(t => t.category === 'personal');
@@ -1925,6 +1977,7 @@ return pending.sort((a,b) => a.date.localeCompare(b.date));
 }, [events, leaves, user]);
 useEffect(() => {
   // 進階自訂：依起訖時間計算（同日扣午休 12:00-13:00；跨日以天數*8）
+  if (!manualAdvanced) return;
   if(form.start && form.end) {
     const s = new Date(form.start);
     const e = new Date(form.end);
@@ -2023,8 +2076,9 @@ finalHours = 8;}
     const n = Math.max(1, Number(manualDays || 1));
     const sd = String(manualDate);
     const ed = (() => { try { const x = new Date(sd+'T00:00'); x.setDate(x.getDate() + (n-1)); return getLocalDateString(x); } catch { return sd; } })();
-    finalStart = `${sd}T08:00`;
-    finalEnd = `${ed}T17:00`;
+    const shift = getShiftById(workShift);
+    finalStart = `${sd}T${shift.start}`;
+    finalEnd = `${ed}T${shift.end}`;
     finalHours = n * 8;
   } else {
     if (!form.start || !form.end) { alert("請選擇開始與結束時間"); return; }
@@ -2208,29 +2262,23 @@ return (
                         if (!d) return '—';
                         const sd = d;
                         const ed = (() => { try { const x = new Date(d+'T00:00'); x.setDate(x.getDate() + (n-1)); return getLocalDateString(x); } catch { return d; } })();
-                        return `${sd} 08:00 ～ ${ed} 17:00（共 ${n*8} 小時）`;
+                        const sh = getShiftById(workShift);
+                        return `${sd} ${sh.start} ～ ${ed} ${sh.end}（共 ${n*8} 小時）`;
                       })()}
                     </div>
-                    <div className="text-[11px] text-gray-500 mt-1">註：跨日以「天數×8小時」計算；若需要填到小時，請開啟進階。</div>
+                    <div className="text-[11px] text-gray-500 mt-1">註：跨日以「天數×8小時」計算。</div>
                   </div>
 
-                  <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-                    <input type="checkbox" checked={manualAdvanced} onChange={e=>setManualAdvanced(e.target.checked)} />
-                    需要填到小時（進階：自訂起訖時間）
-                  </label>
-
-                  {manualAdvanced && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-gray-600 block mb-1">開始時間</label>
-                        <input type="datetime-local" className="w-full border p-2 rounded-lg bg-white" value={form.start} onChange={e=>setForm(prev=>({...prev, start:e.target.value}))} />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-gray-600 block mb-1">結束時間</label>
-                        <input type="datetime-local" className="w-full border p-2 rounded-lg bg-white" value={form.end} onChange={e=>setForm(prev=>({...prev, end:e.target.value}))} />
-                      </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 block mb-1">班別</label>
+                      <select className="w-full border p-2 rounded-lg bg-white" value={workShift} onChange={e=>setWorkShift(e.target.value)}>
+                        {WORK_SHIFT_PRESETS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                      </select>
+                      <div className="text-[11px] text-gray-500 mt-1">註：以 1 天上限 8 小時計算（不含午休 1 小時）。</div>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2278,7 +2326,8 @@ return (
                     if (manualAdvanced && form.start && form.end) {
                       return `預覽：${fmtISO(form.start)} ～ ${fmtISO(form.end)}（以自訂起訖為準）`;
                     }
-                    return `預覽：${sd} 08:00 ～ ${ed} 17:00（${n*8} 小時）`;
+                    const sh2 = getShiftById(workShift);
+                    return `預覽：${sd} ${sh2.start} ～ ${ed} ${sh2.end}（${n*8} 小時）`;
                   } catch {
                     return "";
                   }
