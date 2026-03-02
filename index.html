@@ -1543,19 +1543,21 @@ return (<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justi
 function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView }) {
 const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
 const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
+const [monthMode, setMonthMode] = useState('month'); // 'month' or 'year'
 const [leaveFilter, setLeaveFilter] = useState('all');
 const [selectedIds, setSelectedIds] = useState([]);
 const scheduleData = useMemo(() => {
-const daysInMonth = new Date(month.split('-')[0], month.split('-')[1], 0).getDate();
 const data = [];
-for(let i=1; i<=daysInMonth; i++) {
-const dateStr = `${month}-${String(i).padStart(2,'0')}`;
+const yearStr = month.split('-')[0];
+const buildForMonth = (ym) => {
+  const daysInMonth = new Date(ym.split('-')[0], ym.split('-')[1], 0).getDate();
+  for(let i=1; i<=daysInMonth; i++) {
+    const dateStr = `${ym}-${String(i).padStart(2,'0')}`;
 const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && e.userName === user.name).map(p => { const tag = events.find(t => t.groupId === p.groupId && t.type === 'tag'); return { ...p, tag }; });
-// 修正：嚴格限制為「我自己的假單」，過濾已撤銷與已退回的，使空出日曆
+// 修正：嚴格限制為「我自己的假單」，顯示包含退回/撤回等狀態
 const myLeave = leaves.find(l =>
 (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) &&
-l.start.startsWith(dateStr) &&
-l.status !== 'rejected' && l.status !== 'withdrawn');
+l.start.startsWith(dateStr));
 let status = '正常';
 const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
 const officialLeaves = ["公出", "公假", "出差", "加班申請(列計)", "加班申請(不列計)"];
@@ -1569,12 +1571,22 @@ if (myLeave.status === 'pending') status = '待職代審查中';
 else if (myLeave.status === 'deputy_signed') status = '組長審查中';
 else if (myLeave.status === 'approved') status = '已核准';
 else if (myLeave.status === 'rejected') status = '退回/未通過';
-else if (myLeave.status === 'recalled') status = '已撤回';}
+else if (myLeave.status === 'recalled' || myLeave.status === 'withdrawn') status = '已撤回';}
 else if (myWork.length > 0) status = '內勤';
 else status = '無行程';
-if (myWork.length > 0 || myLeave) { data.push({ name: user.name, date: dateStr, work: myWork, leave: myLeave, status }); }}
+if (myWork.length > 0 || myLeave) { data.push({ name: user.name, date: dateStr, work: myWork, leave: myLeave, status }); }
+  }
+};
+if (monthMode === 'year') {
+  for (let mi = 1; mi <= 12; mi++) {
+    const mm = String(mi).padStart(2,'0');
+    buildForMonth(`${yearStr}-${mm}`);
+  }
+} else {
+  buildForMonth(month);
+}
 return data;
-}, [events, leaves, month, user.name, user.uid, user.docId]);
+}, [events, leaves, month, monthMode, user.name, user.uid, user.docId]);
 const flatRows = useMemo(() => {
 let rows = [];
 scheduleData.forEach((d, idx) => {
@@ -1600,7 +1612,7 @@ return flatRows.filter(r => r.leaveType === leaveFilter);
 const deputyLeaves = useMemo(() => {
 return leaves.filter(l =>
 (l.deputyId === user.uid || l.deputyId === user.docId) &&
-l.start.startsWith(month)
+l.start.startsWith(monthMode === 'year' ? month.slice(0,4) : month)
 ).sort((a, b) => new Date(a.start) - new Date(b.start));
 }, [leaves, user.uid, user.docId, month]);
 const isAllSelected = filteredRows.length > 0 && selectedIds.length === filteredRows.length;
@@ -1641,7 +1653,7 @@ let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),職代,排班內容,
 filteredRows.forEach(r => {
 const time = TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天';
 const content = `${r.content}${r.area ? `(${r.area})` : ''}`;
-const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId)?.name || '未知') : '-';
+const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId || ((u.email||'').toLowerCase() === (r.rawLeave.deputyId||'')))?.name || '未知') : '-';
 csv += `${r.name},${r.date},${time},${r.leaveType},${r.leaveHours},${deputyName},${content},${r.reason},${r.note},${r.status}\n`;
 });
 const link = document.createElement("a");
@@ -1833,6 +1845,7 @@ return (
 <button onClick={() => setActiveTab('mine')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'mine' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第一區：個人請假狀況</button>
 <button onClick={() => setActiveTab('deputy')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'deputy' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第二區：我是職代</button></div></div>
 <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={monthMode} onChange={e=>setMonthMode(e.target.value)}><option value="month">月份</option><option value="year">全年</option></select>
 <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
 {activeTab === 'mine' && (
 <>
@@ -1848,7 +1861,7 @@ return (
 <tbody>
 {filteredRows.map((r) => {
 const canRecall = r.rawLeave && ['pending','deputy_signed','approved'].includes(r.rawLeave.status);
-const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId)?.name || '未知') : '-';
+const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId || ((u.email||'').toLowerCase() === (r.rawLeave.deputyId||'')))?.name || '未知') : '-';
 const isOfficial = r.leaveType === '出差' || r.leaveType === '公出' || r.leaveType === '公假';
 return (
 <tr key={r.id} className={`border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
@@ -1939,7 +1952,7 @@ const [type, setType] = useState(officialTypes.length > 0 ? officialTypes[0].nam
 const [deputyId, setDeputyId] = useState('');
 const selectedTypeDesc = officialTypes.find(t => t.name === type)?.desc || '';
 const handleSend = () => { if(!deputyId) { alert("請選擇職務代理人"); return; } onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, hours: task.slot === 'all_day' ? 8 : 4 }); }
-return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
+return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId||u.uid} value={(u.uid||u.docId||u.email||'').toLowerCase()}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
 function LeaveForm({ user, users, leaves, events, crud, leaveTypes, setView }) {
 const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
 const [form, setForm] = useState({ type: '', start:'', end:'', reason:'', deputyId:'' });
@@ -2136,7 +2149,7 @@ useEffect(() => {
   };
 
 const handleTaskSubmit = async (taskData, taskId) => { setSubmittingTaskId(taskId); try { const now = new Date(); if(hasDeputyConflict(taskData.deputyId, taskData.start, taskData.end)){ alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。'); return; }
-await crud.createLeave({ ...taskData, requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, status: 'pending', timestamp: now, submittedAt: now, sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '' });
+await crud.createLeave({ ...taskData, deputyId: taskData.skipDeputy ? '' : (taskData.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, status: taskData.skipDeputy ? 'deputy_signed' : 'pending', deputySignedAt: taskData.skipDeputy ? now : null, deputySignedBy: taskData.skipDeputy ? 'SYSTEM' : null, timestamp: now, submittedAt: now, sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '' });
 // (送出申請不發mail)
 alert("差單已送出，已顯示在日曆上！"); } catch (e) { alert("送出失敗"); } finally { setSubmittingTaskId(null); } }
 const handleManualSubmit = async (e) => {
@@ -2192,7 +2205,10 @@ if (finalHours > balance) { alert(`補休時數不足！\n目前可用餘額: ${
 if(hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。'); return; }
 setIsSubmitting(true);
 try {
-await crud.createLeave({ ...form, requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: 'pending', timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() });
+const isOvertime = (form.type||'').includes('加班');
+if(!form.type){ alert('請先選擇假別'); setTypeError(true); return; }
+if(!isOvertime && !form.deputyId){ alert('請先選擇職務代理人'); return; }
+await crud.createLeave({ ...form, deputyId: isOvertime ? '' : (form.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: isOvertime ? 'deputy_signed' : 'pending', deputySignedAt: isOvertime ? new Date() : null, deputySignedBy: isOvertime ? 'SYSTEM' : null, timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() });
 // (送出申請不發mail)
 alert("請假單已送出，已同步顯示在日曆上！");
 setForm({ type: '', start:'', end:'', reason:'', deputyId:'' });
@@ -2204,7 +2220,7 @@ setSlotType('all_day');
 };
 const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
 const busyIds = leaves.filter(l=>l.status!=='rejected' && l.status!=='withdrawn' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
-const deputies = users.filter(u=>u.name!==user.name && !busyIds.includes(u.name));
+const deputies = users.filter(u=>u.name!==user.name);
 
 return (
   <div className="max-w-3xl mx-auto space-y-6">
@@ -2512,7 +2528,7 @@ return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label>
-                <select className="w-full border p-2.5 rounded-lg bg-white" value={form.deputyId} onChange={e=>setForm({ ...form, deputyId: e.target.value })} required>
+                <select className="w-full border p-2.5 rounded-lg bg-white" value={form.deputyId} onChange={e=>setForm({ ...form, deputyId: e.target.value })} required={!(form.type||'').includes('加班')}>
                   <option value="">請選擇</option>
                   {deputies.map(d => (
                     <option key={d.docId || d.uid} value={(d.uid || d.docId || d.email || "").toLowerCase()}>{d.name}</option>
@@ -2594,7 +2610,7 @@ const d1 = l.start.split('T')[0];
 const t1 = l.start.split('T')[1] || '';
 const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
-const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId)?.name || '未知') : '-';
+const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId || ((u.email||'').toLowerCase() === (l.deputyId||'')))?.name || '未知') : '-';
 csv += `${l.requesterName},${l.type},${deputyName},${d1},${t1},${d2},${t2},${l.hours},${l.status},${l.recallReason || ''}\n`
 });
 const link = document.createElement("a");
@@ -2849,7 +2865,7 @@ const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
 const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
 const timeStr = `${t1} ~ ${t2}`;
-const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId)?.name || '未知') : '-';
+const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId || ((u.email||'').toLowerCase() === (l.deputyId||'')))?.name || '未知') : '-';
 const isOwner = l.requesterId === currentUser.uid || l.requesterId === currentUser.docId;
 const isAdmin = currentUser.role === 'admin';
 return (
@@ -2977,21 +2993,21 @@ let usedOfficial = 0; // 新增：公務出差
 filteredLeaves.forEach(l => {
 const hours = getEffectiveLeaveHours(l);
 const days = hours / 8;
-if (l.type.includes('特休')) usedAnnual += days;
-if (l.type.includes('病假') || l.type.includes('生理假')) usedSick += days;
-if (l.type.includes('事假') && !l.type.includes('公假')) usedPersonal += days;
+if (l.type.includes('特休')) usedAnnual += hours;
+if (l.type.includes('病假') || l.type.includes('生理假')) usedSick += hours;
+if (l.type.includes('事假') && !l.type.includes('公假')) usedPersonal += hours;
 if (l.type === '加班申請(列計)') totalCompensatoryEarned += hours;
 if (l.type === '補休') totalCompensatoryUsed += hours;
 // 其他假別
-if (l.type.includes('婚假')) usedMarriage += days;
-if (l.type.includes('喪假')) usedBereavement += days;
-if (l.type.includes('產假') || l.type.includes('陪產假')) usedMaternity += days;
+if (l.type.includes('婚假')) usedMarriage += hours;
+if (l.type.includes('喪假')) usedBereavement += hours;
+if (l.type.includes('產假') || l.type.includes('陪產假')) usedMaternity += hours;
 if (l.type.includes('家庭照顧假')) {
-usedFamilyCare += days;
+usedFamilyCare += hours;
 // 若未於上方計入事假，則在此併入事假額度計算 (家庭照顧假依法併入事假)
-if (!l.type.includes('事假')) usedPersonal += days;}
+if (!l.type.includes('事假')) usedPersonal += hours;}
 // 公務出差
-if (l.type === '出差' || l.type === '公出' || l.type === '公假') usedOfficial += days;
+if (l.type === '出差' || l.type === '公出' || l.type === '公假') usedOfficial += hours;
 });
 let allTimeCompensatoryEarned = 0;
 let allTimeCompensatoryUsed = 0;
@@ -3007,7 +3023,7 @@ if (l.type === '榮譽假') totalHonorUsed += Number(l.hours);}
 });
 const compensatoryBalance = allTimeCompensatoryEarned - allTimeCompensatoryUsed;
 const honorBalance = totalHonorEarned - totalHonorUsed;
-const totalAnnualEntitled = seniority.days + extraLeaveDays;
+const totalAnnualEntitled = (seniority.days + extraLeaveDays) * 8;
 const handleEditExtraLeave = () => {
 if (!isAdminOrLeader) return;
 const newDays = prompt(`請輸入 ${targetUser.name} 的「單位額外特休」天數 (目前為 ${extraLeaveDays} 天)：\n*若要取消/刪除配額，請直接輸入 0。`, extraLeaveDays);
@@ -3063,14 +3079,14 @@ return (
 <div className="max-w-5xl mx-auto space-y-6">
 <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h2 className="text-xl font-bold flex items-center gap-2"><PieChart/> 假別統計與明細</h2><div className="flex gap-3 flex-wrap">{(<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedUserId} onChange={e=>setSelectedUserId(e.target.value)}>{viewableUsers.map(u => <option key={u.docId} value={u.docId}>{u.name}</option>)}</select>)}<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedYear} onChange={e=>setSelectedYear(Number(e.target.value))}>{[...Array(11)].map((_, i) => { const y = new Date().getFullYear() - 5 + i; return <option key={y} value={y}>{y} 年度</option> })}</select><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}><option value="all">全年總計</option>{[...Array(12)].map((_, i) => { const m = String(i + 1).padStart(2, '0'); return <option key={m} value={m}>{i + 1} 月</option> })}</select></div></div>
 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-indigo-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">特休假</h3><p className="text-xs text-gray-500 mt-1">{seniority.text}</p></div><div className="text-right"><span className="text-2xl font-black text-indigo-600">{totalAnnualEntitled - usedAnnual}</span><span className="text-xs text-gray-500 ml-1">天餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>法定:</span><span className="font-bold">{seniority.days}</span></div><div className="flex justify-between"><span className="flex items-center gap-1">額外: {isAdminOrLeader && <button onClick={handleEditExtraLeave}><Edit2 size={10}/></button>}</span><span className="font-bold">{extraLeaveDays}</span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedAnnual}</span></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-indigo-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">特休假</h3><p className="text-xs text-gray-500 mt-1">{seniority.text}</p></div><div className="text-right"><span className="text-2xl font-black text-indigo-600">{totalAnnualEntitled - usedAnnual}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>法定:</span><span className="font-bold">{seniority.days*8}<span className="text-[10px] text-gray-400 ml-1">({seniority.days}天)</span></span></div><div className="flex justify-between"><span className="flex items-center gap-1">額外: {isAdminOrLeader && <button onClick={handleEditExtraLeave}><Edit2 size={10}/></button>}</span><span className="font-bold">{extraLeaveDays*8}<span className="text-[10px] text-gray-400 ml-1">({extraLeaveDays}天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedAnnual}<span className="text-[10px] text-gray-400 ml-1">({(usedAnnual/8).toFixed(2)}天)</span></span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-purple-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">補休時數</h3><p className="text-xs text-gray-500 mt-1">加班累積</p></div><div className="text-right"><span className="text-2xl font-black text-purple-600">{compensatoryBalance}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>總累積:</span><span className="font-bold">{allTimeCompensatoryEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{allTimeCompensatoryUsed}</span></div></div></div>
 {/* 新增：榮譽假統計卡片 */}
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-yellow-400 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">榮譽假</h3><p className="text-xs text-gray-500 mt-1">單位獎勵</p></div><div className="text-right"><span className="text-2xl font-black text-yellow-600">{honorBalance}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span className="flex items-center gap-1">總獲得: {isAdminOrLeader && <button onClick={handleAddHonorLeave} title="發放榮譽假" className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 p-0.5 rounded flex items-center justify-center"><Plus size={12}/></button>}</span><span className="font-bold">{totalHonorEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{totalHonorUsed}</span></div></div></div>
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">病假</h3><p className="text-xs text-gray-500 mt-1">含生理假</p></div><div className="text-right"><span className="text-2xl font-black text-emerald-600">{30 - usedSick}</span><span className="text-xs text-gray-500 ml-1">天餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">30</span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}</span></div></div></div>
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">事假</h3><p className="text-xs text-gray-500 mt-1">無薪</p></div><div className="text-right"><span className="text-2xl font-black text-amber-600">{14 - usedPersonal}</span><span className="text-xs text-gray-500 ml-1">天餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">14</span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedPersonal}</span></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">病假</h3><p className="text-xs text-gray-500 mt-1">含生理假</p></div><div className="text-right"><span className="text-2xl font-black text-emerald-600">{30*8 - usedSick}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{30*8}<span className="text-[10px] text-gray-400 ml-1">(30天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}<span className="text-[10px] text-gray-400 ml-1">({(usedSick/8).toFixed(2)}天)</span></span></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">事假</h3><p className="text-xs text-gray-500 mt-1">無薪</p></div><div className="text-right"><span className="text-2xl font-black text-amber-600">{14*8 - usedPersonal}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{14*8}<span className="text-[10px] text-gray-400 ml-1">(14天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedPersonal}<span className="text-[10px] text-gray-400 ml-1">({(usedPersonal/8).toFixed(2)}天)</span></span></div></div></div>
 {/* 新增：公務出差卡片 */}
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">公務出差</h3><p className="text-[10px] text-gray-500 mt-1">出差/公出/公假</p></div><div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">天</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between text-gray-600"><span>本期累計:</span><span className="font-bold">{usedOfficial} 天</span></div></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">公務出差</h3><p className="text-[10px] text-gray-500 mt-1">出差/公出/公假</p></div><div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between text-gray-600"><span>本期累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div></div></div></div>
 {/* 新增：其他假別統計摺疊區塊 */}
 <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
 <button onClick={() => setShowOtherLeaves(!showOtherLeaves)} className="w-full px-4 py-3 flex justify-between items-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition">
@@ -3080,16 +3096,16 @@ return (
 <div className="p-4 border-t border-gray-200 grid grid-cols-2 md:grid-cols-4 gap-4 bg-white">
 <div className="border p-3 rounded-lg text-center bg-gray-50">
 <div className="text-xs text-gray-500 mb-1">婚假</div>
-<div className="font-bold text-lg text-gray-800">{usedMarriage} <span className="text-xs font-normal">天</span></div></div>
+<div className="font-bold text-lg text-gray-800">{usedMarriage} <span className="text-xs font-normal">小時</span><div className="text-[10px] text-gray-400">({(usedMarriage/8).toFixed(2)}天)</div></div></div>
 <div className="border p-3 rounded-lg text-center bg-gray-50">
 <div className="text-xs text-gray-500 mb-1">喪假</div>
-<div className="font-bold text-lg text-gray-800">{usedBereavement} <span className="text-xs font-normal">天</span></div></div>
+<div className="font-bold text-lg text-gray-800">{usedBereavement} <span className="text-xs font-normal">小時</span><div className="text-[10px] text-gray-400">({(usedBereavement/8).toFixed(2)}天)</div></div></div>
 <div className="border p-3 rounded-lg text-center bg-gray-50">
 <div className="text-xs text-gray-500 mb-1">產假/陪產假</div>
-<div className="font-bold text-lg text-gray-800">{usedMaternity} <span className="text-xs font-normal">天</span></div></div>
+<div className="font-bold text-lg text-gray-800">{usedMaternity} <span className="text-xs font-normal">小時</span><div className="text-[10px] text-gray-400">({(usedMaternity/8).toFixed(2)}天)</div></div></div>
 <div className="border p-3 rounded-lg text-center bg-gray-50">
 <div className="text-xs text-gray-500 mb-1">家庭照顧假</div>
-<div className="font-bold text-lg text-gray-800">{usedFamilyCare} <span className="text-xs font-normal">天</span></div></div></div>
+<div className="font-bold text-lg text-gray-800">{usedFamilyCare} <span className="text-xs font-normal">小時</span><div className="text-[10px] text-gray-400">({(usedFamilyCare/8).toFixed(2)}天)</div></div></div></div>
 )}</div>
 <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
 <div className="p-4 border-b bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
