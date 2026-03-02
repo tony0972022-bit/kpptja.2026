@@ -405,20 +405,37 @@ const getWeekdayLabel = (dateStr) => {
   } catch { return ''; }
 };
 
-// --- Helper: Effective leave hours for stats (跨天以 8 小時/天計) ---
-// 用於假別統計等跨日計算：若跨天，直接以「天數 * 8 小時」計算，避免時段格式差異造成誤差
+// --- Helper: Effective leave hours for stats ---
+// 用於假別統計：優先信任資料庫已計算好的 hours；若舊資料缺 hours，才用日期區間推算（排除週末與國定/補假）
 const getEffectiveLeaveHours = (l) => {
   try {
-    const s = (l.start || '').split('T')[0];
-    const e = (l.end || '').split('T')[0];
-    if (!s || !e) return Number(l.hours || 0);
-    if (s === e) return Number(l.hours || 0);
+    const h = Number(l?.hours);
+    if (Number.isFinite(h) && h > 0) return h;
+
+    const s = String(l?.start || '').split('T')[0];
+    const e = String(l?.end || '').split('T')[0];
+    if (!s || !e) return 0;
+    if (s === e) return 0;
+
     const sd = new Date(s + 'T00:00');
     const ed = new Date(e + 'T00:00');
-    const days = Math.floor((ed - sd) / 86400000) + 1;
-    return Math.max(0, days) * 8;
+    if (isNaN(sd.getTime()) || isNaN(ed.getTime()) || ed < sd) return 0;
+
+    let cur = new Date(sd);
+    let workDays = 0;
+    let guard = 0;
+    while (cur <= ed && guard < 800) {
+      const ds = getLocalDateString(cur);
+      const day = cur.getDay(); // 0 Sun, 6 Sat
+      const isWeekend = (day === 0 || day === 6);
+      const isHoliday = !!HOLIDAYS?.[ds];
+      if (!isWeekend && !isHoliday) workDays += 1;
+      cur.setDate(cur.getDate() + 1);
+      guard++;
+    }
+    return workDays * 8;
   } catch {
-    return Number(l.hours || 0);
+    return Number(l?.hours || 0) || 0;
   }
 };
 // --- Helper Component: User Avatar ---
@@ -1818,6 +1835,91 @@ const filteredRows = useMemo(() => {
 if (leaveFilter === 'all') return flatRows;
 return flatRows.filter(r => r.leaveType === leaveFilter);
 }, [flatRows, leaveFilter]);
+
+// === 顯示用：將同一批次/同類型的「請假明細」預設合併為一列（可展開每日明細） ===
+const [expandedGroups, setExpandedGroups] = useState([]);
+const fmtMD = (dateStr) => {
+  const d = String(dateStr||'');
+  if (!d || d.length < 10) return d;
+  return `${d.slice(5,7)}/${d.slice(8,10)}`;
+};
+const fmtRangeNoYear = (sISO, eISO) => {
+  const s = String(sISO||'').split('T')[0];
+  const e = String(eISO||'').split('T')[0];
+  if (!s || !e) return s || e || '-';
+  if (s === e) return fmtMD(s);
+  const sy = s.slice(0,4), ey = e.slice(0,4);
+  if (sy === ey) return `${fmtMD(s)}~${fmtMD(e)}`;
+  return `${s.replaceAll('-','/')}~${e.replaceAll('-','/')}`;
+};
+
+const displayRows = useMemo(() => {
+  const rows = [];
+  const groups = new Map();
+
+  const buildKey = (lv) => {
+    const gid = lv?.batchId || lv?.groupId || lv?.sourceGroupId || '';
+    const base = [
+      `U:${lv?.requesterId||lv?.requesterDocId||''}`,
+      `T:${lv?.type||''}`,
+      `D:${lv?.deputyId||''}`,
+      `R:${lv?.reason||''}`,
+      `S:${lv?.status||''}`
+    ].join('|');
+    if (gid) return `G:${gid}|${base}`;
+    const ts = lv?.submittedAt?.seconds ? (lv.submittedAt.seconds*1000) :
+              (lv?.submittedAt ? new Date(lv.submittedAt).getTime() :
+               (lv?.timestamp?.seconds ? lv.timestamp.seconds*1000 : 0));
+    const bucket = ts ? Math.floor(ts / 60000) : 0; // 同分鐘視為同批次
+    return `B:${bucket}|${base}`;
+  };
+
+  (filteredRows||[]).forEach(r => {
+    if (r?.rawLeave && !r?.rawTag && r.leaveType !== '-') {
+      const k = buildKey(r.rawLeave);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    } else {
+      rows.push({ ...r, displayDate: fmtMD(r.date) });
+    }
+  });
+
+  groups.forEach((arr, k) => {
+    const sorted = (arr||[]).slice().sort((a,b)=>String(a.rawLeave?.start||'').localeCompare(String(b.rawLeave?.start||'')));
+    if (sorted.length <= 1) {
+      const r = sorted[0];
+      rows.push({ ...r, displayDate: fmtRangeNoYear(r.rawLeave?.start, r.rawLeave?.end || r.rawLeave?.start), _groupKey: null, _children: null });
+      return;
+    }
+    let minS = sorted[0].rawLeave?.start;
+    let maxE = sorted[0].rawLeave?.end || sorted[0].rawLeave?.start;
+    let totalHours = 0;
+    sorted.forEach(x=>{
+      const s1 = x.rawLeave?.start;
+      const e1 = x.rawLeave?.end || x.rawLeave?.start;
+      if (String(s1||'') < String(minS||'')) minS = s1;
+      if (String(e1||'') > String(maxE||'')) maxE = e1;
+      totalHours += Number(x.rawLeave?.hours || 0) || 0;
+    });
+    const base = sorted[0];
+    rows.push({
+      ...base,
+      id: `grp-${k}`,
+      displayDate: fmtRangeNoYear(minS, maxE),
+      leaveHours: totalHours || base.leaveHours,
+      _groupKey: k,
+      _children: sorted
+    });
+  });
+
+  return rows.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')) || String(a.name||'').localeCompare(String(b.name||'')));
+}, [filteredRows]);
+
+const isAllSelected = displayRows.length > 0 && selectedIds.length === displayRows.length;
+const toggleAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(displayRows.map(r => r.id)); };
+const toggleOne = (id) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
+const toggleGroupExpand = (k) => { if (!k) return; setExpandedGroups(prev => prev.includes(k) ? prev.filter(x=>x!==k) : [...prev, k]); };
+
 // 第二區：職代情況
 const deputyLeaves = useMemo(() => {
 return leaves.filter(l =>
@@ -1825,15 +1927,18 @@ return leaves.filter(l =>
 l.start.startsWith(monthMode === 'year' ? month.slice(0,4) : month)
 ).sort((a, b) => new Date(a.start) - new Date(b.start));
 }, [leaves, user.uid, user.docId, month]);
-const isAllSelected = filteredRows.length > 0 && selectedIds.length === filteredRows.length;
-const toggleAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(filteredRows.map(r => r.id)); };
-const toggleOne = (id) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
+
 const downloadBatchICS = () => {
-const selectedRowsData = filteredRows.filter(r => selectedIds.includes(r.id) && (r.content || r.leaveType !== '-'));
+const selectedRowsData = displayRows.filter(r => selectedIds.includes(r.id) && (r.content || r.leaveType !== '-'));
+const expandedRows = [];
+selectedRowsData.forEach(it=>{
+  if (it._children && Array.isArray(it._children)) expandedRows.push(...it._children);
+  else expandedRows.push(it);
+});
 if (selectedRowsData.length === 0) { alert("請先勾選要加入行事曆的有效排班或請假項目！"); return; }
 let icsContent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Attendance System//TW\r\nCALSCALE:GREGORIAN\r\n";
 icsContent += "BEGIN:VTIMEZONE\r\nTZID:Asia/Taipei\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\nTZNAME:CST\r\nDTSTART:19700101T000000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n";
-selectedRowsData.forEach((item, index) => {
+expandedRows.forEach((item, index) => {
 const dStr = item.date.replace(/-/g, '');
 let start = '', end = '';
 if (item.slot === 'morning') { start = `${dStr}T080000`; end = `${dStr}T120000`; } else if (item.slot === 'afternoon') { start = `${dStr}T130000`; end = `${dStr}T170000`; } else { start = `${dStr}T080000`; end = `${dStr}T170000`; }
@@ -1858,19 +1963,24 @@ link.href = URL.createObjectURL(blob);
 link.download = `出勤行事曆_${month}.ics`;
 link.click();
 };
+
 const exportCSV = () => {
-let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),職代,排班內容,事由,備註,狀態(同意)\n";
-filteredRows.forEach(r => {
-const time = TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天';
-const content = `${r.content}${r.area ? `(${r.area})` : ''}`;
-const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
-csv += `${r.name},${r.date},${time},${r.leaveType},${r.leaveHours},${deputyName},${content},${r.reason},${r.note},${r.status}\n`;
-});
-const link = document.createElement("a");
-link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
-link.download = `${user.name}_${month}_排班表.csv`;
-link.click();
+  let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),職代,排班內容,事由,備註,狀態(同意)\n";
+  (displayRows||[]).forEach(row => {
+    const children = (row._children && Array.isArray(row._children)) ? row._children : [row];
+    children.forEach(r => {
+      const time = TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天';
+      const content = `${r.content}${r.area ? `(${r.area})` : ''}`;
+      const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
+      csv += `${r.name},${r.date},${time},${r.leaveType},${r.leaveHours},${deputyName},${content},${r.reason},${r.note},${r.status}\n`;
+    });
+  });
+  const link = document.createElement("a");
+  link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
+  link.download = `${user.name}_${month}_排班表.csv`;
+  link.click();
 };
+
 // --- 重新送審：由「撤回」改為「先修改內容，再重新送出」 ---
 const [editOpen, setEditOpen] = useState(false);
 const [editTarget, setEditTarget] = useState(null);
@@ -2098,15 +2208,15 @@ return (
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
 <tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-4 font-semibold text-sm whitespace-nowrap">姓名</th><th className="p-4 font-semibold text-sm whitespace-nowrap">日期</th><th className="p-4 font-semibold text-sm whitespace-nowrap">時間</th><th className="p-4 font-semibold text-sm">假別</th><th className="p-4 font-semibold text-sm">時數</th><th className="p-4 font-semibold text-sm">職代</th><th className="p-4 font-semibold text-sm">排班內容</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm">備註</th><th className="p-4 font-semibold text-sm">狀態</th><th className="p-4 font-semibold text-sm text-center">操作</th></tr></thead>
 <tbody>
-{filteredRows.map((r) => {
+{displayRows.map((r) => {
 const canRecall = r.rawLeave && ['pending','deputy_signed','approved'].includes(r.rawLeave.status);
 const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
 const isOfficial = r.leaveType === '出差' || r.leaveType === '公出' || r.leaveType === '公假';
-return (
+return (<>
 <tr key={r.id} className={`border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
 <td className="p-4 text-center"><input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleOne(r.id)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></td>
 <td className="p-4 text-sm font-medium text-gray-800 whitespace-nowrap">{r.name}</td>
-<td className="p-4 text-sm text-gray-600 whitespace-nowrap">{r.date}</td>
+<td className="p-4 text-sm text-gray-600 whitespace-nowrap">{r.displayDate || r.date}</td>
 <td className="p-4 text-sm text-gray-600 whitespace-nowrap">{TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天'}</td>
 <td className="p-4">
 {r.leaveType !== '-' ?
@@ -2123,6 +2233,12 @@ return (
 <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
 {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}</span></td>
 <td className="p-4 text-center">
+{r._groupKey && (
+  <button onClick={()=>toggleGroupExpand(r._groupKey)} className="text-gray-700 hover:text-white border border-gray-200 bg-gray-50 hover:bg-gray-700 px-3 py-1.5 rounded-md text-xs font-bold transition inline-flex items-center gap-1 shadow-sm mb-2" title="展開/收合每日明細">
+    <ChevronRight size={14} className={expandedGroups.includes(r._groupKey) ? 'rotate-90 transition-transform' : 'transition-transform'} />
+    {expandedGroups.includes(r._groupKey) ? '收合明細' : '展開明細'}
+  </button>
+)}
 {canRecall && (
   <div className="flex items-center justify-center gap-2">
     <button onClick={() => openEditResubmit(r.rawLeave)} className="text-blue-700 hover:text-white border border-blue-200 bg-blue-50 hover:bg-blue-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm" title="修改請假內容並重新送出">
@@ -2132,7 +2248,25 @@ return (
       <Trash2 size={14}/> 刪除
     </button>
   </div>
-)}</td></tr>)
+)}</td></tr>
+{r._groupKey && expandedGroups.includes(r._groupKey) && Array.isArray(r._children) && r._children.map((c, idx) => (
+  <tr key={`${r.id}-c-${idx}`} className="border-b border-gray-100 last:border-0 bg-slate-50/40">
+    <td className="p-4"></td>
+    <td className="p-4 text-sm text-gray-500 whitespace-nowrap">↳ {c.name}</td>
+    <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{fmtMD(c.date)}</td>
+    <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{TIME_SLOTS.find(s=>s.id===c.slot)?.label||'整天'}</td>
+    <td className="p-4"><span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-gray-100 text-gray-700">{c.leaveType}</span></td>
+    <td className="p-4 text-sm font-medium text-gray-600">{c.leaveHours}</td>
+    <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{c.rawLeave?.deputyId ? (getUserNameByKey(users, c.rawLeave.deputyId, '未知')) : '-'}</td>
+    <td className="p-4 text-sm text-gray-400">-</td>
+    <td className="p-4 text-sm text-gray-500 max-w-[150px] truncate" title={c.reason}>{c.reason}</td>
+    <td className="p-4 text-sm text-gray-400 max-w-[150px] truncate" title={c.note}>{c.note}</td>
+    <td className="p-4"><span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-gray-100 text-gray-600">{c.status}</span></td>
+    <td className="p-4 text-center text-xs text-gray-300">-</td>
+  </tr>
+))}
+</>
+)
 })}
 {filteredRows.length === 0 && <tr><td colSpan="12" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}</tbody></table></div>
 ) : (
@@ -2318,7 +2452,8 @@ useEffect(() => {
     const ds = getLocalDateString(cur);
     const day = cur.getDay(); // 0=Sun,6=Sat
     const isWeekend = (day === 0 || day === 6);
-    if (!isWeekend) picked.push({ date: ds, isWeekend: false });
+    const isHoliday = !!HOLIDAYS?.[ds];
+    if (!isWeekend && !isHoliday) picked.push({ date: ds, isWeekend: false });
     cur.setDate(cur.getDate() + 1);
     guard++;
   }
@@ -2414,6 +2549,63 @@ useEffect(() => {
     return calHit;
   };
 
+
+// === 特休額度檢核（事假除外） ===
+const getLegalAnnualDaysByYearEnd = (joinDateStr, year) => {
+  try {
+    if (!joinDateStr) return 0;
+    const joinDate = new Date(joinDateStr);
+    const checkDate = new Date(Number(year), 11, 31);
+    let years = checkDate.getFullYear() - joinDate.getFullYear();
+    let monthsDiff = checkDate.getMonth() - joinDate.getMonth();
+    if (checkDate.getDate() < joinDate.getDate()) { monthsDiff -= 1; }
+    if (monthsDiff < 0) { years -= 1; monthsDiff += 12; }
+    let totalMonths = years * 12 + monthsDiff;
+    if (totalMonths < 0) totalMonths = 0;
+
+    let days = 0;
+    if (totalMonths >= 6 && totalMonths < 12) days = 3;
+    else if (totalMonths >= 12 && totalMonths < 24) days = 7;
+    else if (totalMonths >= 24 && totalMonths < 36) days = 10;
+    else if (totalMonths >= 36 && totalMonths < 60) days = 14;
+    else if (totalMonths >= 60 && totalMonths < 120) days = 15;
+    else if (totalMonths >= 120) days = Math.min(30, 15 + (Math.floor(totalMonths/12) - 9));
+    return days;
+  } catch { return 0; }
+};
+
+const getAnnualLeaveBalanceHours = (year) => {
+  try {
+    const legalDays = getLegalAnnualDaysByYearEnd(user?.joinDate, year);
+    const extraDays = Number(user?.extraLeaveDays || 0) || 0;
+    const entitled = (legalDays + extraDays) * 8;
+
+    let used = 0;
+    (leaves || []).forEach(l => {
+      if (!l) return;
+      const isMe = (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterDocId === user.docId);
+      if (!isMe) return;
+      if (l.status !== 'approved') return;
+      const y = String(l.start || '').slice(0,4);
+      if (String(year) !== y) return;
+      if (String(l.type||'').includes('特休')) used += Number(l.hours || 0) || 0;
+    });
+    return { entitled, used, balance: entitled - used };
+  } catch { return { entitled: 0, used: 0, balance: 0 }; }
+};
+
+const checkAnnualLeaveEnough = (typeName, startISO, hoursToUse) => {
+  try {
+    const t = String(typeName || '');
+    if (!t.includes('特休')) return true;
+    const y = Number(String(startISO || '').slice(0,4)) || new Date().getFullYear();
+    const { entitled, used, balance } = getAnnualLeaveBalanceHours(y);
+    const need = Number(hoursToUse || 0) || 0;
+    if (need <= balance) return true;
+    alert(`特休額度不足！\n本年度額度：${entitled} 小時\n已使用：${used} 小時\n可用餘額：${balance} 小時\n您申請：${need} 小時\n\n（提示：事假不受此限制）`);
+    return false;
+  } catch { return true; }
+};
 const handleTaskSubmit = async (taskData, taskId) => {
   // 第一區塊（排班日曆）送出：改為先跳確認視窗
   setSubmittingTaskId(taskId);
@@ -2431,6 +2623,7 @@ const handleTaskSubmit = async (taskData, taskId) => {
       setSubmittingTaskId(null);
       return;
     }
+    if (!checkAnnualLeaveEnough(taskData.type, taskData.start, taskData.hours)) { setSubmittingTaskId(null); return; }
     const deputyName = skipDeputy ? '-' : (users.find(u => (u.docId||u.uid||u.email||'').toLowerCase() === (taskData.deputyId||'').toLowerCase())?.name || '');
     const payload = {
       ...taskData,
@@ -2502,6 +2695,8 @@ finalHours = 8;}
     finalHours = Number(hours || 0);
   }
 }
+// 特休額度不足提示（事假除外）
+if (!checkAnnualLeaveEnough(form.type, finalStart, finalHours)) { return; }
 if (form.type === '補休') {
 let totalOvertime = 0;
 leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && isOvertimeComp(l.type)) { totalOvertime += Number(l.hours); } });
