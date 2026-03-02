@@ -291,6 +291,24 @@ const normalizeOvertimeType = (t) => {
 const isOvertimeComp = (t) => normalizeOvertimeType(t) === OVERTIME_COMP_TYPE;
 const isOvertimePay = (t) => normalizeOvertimeType(t) === OVERTIME_PAY_TYPE;
 
+// user key helpers (避免職代ID被強制轉小寫導致對不到)
+const getUserKey = (u) => String((u && (u.docId || u.uid)) || '');
+const findUserByAnyKey = (users, key) => {
+  const k = String(key || '');
+  const kl = k.toLowerCase();
+  return (users || []).find(u => {
+    const docOrUid = getUserKey(u);
+    if (docOrUid && docOrUid === k) return true;
+    if (String(u?.uid || '') === k) return true;
+    if (String(u?.docId || '') === k) return true;
+    if (String(u?.email || '').toLowerCase() === kl) return true;
+    return false;
+  });
+};
+const getUserNameByKey = (users, key, fallback='未知') => (findUserByAnyKey(users, key)?.name || fallback);
+
+
+
 
 
 
@@ -735,7 +753,7 @@ if (!user || !userData) return <LoginScreen auth={auth} />;
 const pendingApprovalCount = (userData.role === 'leader' || userData.role === 'admin')
 ? leaves.filter(l => l.status === 'deputy_signed').length
 : 0;
-const myPendingDeputy = leaves.filter(l => (l.deputyId === userData.uid || l.deputyId === (userData.email || '').toLowerCase()) && l.status === 'pending').length;
+const myPendingDeputy = leaves.filter(l => (l.deputyId === userData.uid || l.deputyId === userData.docId || String(l.deputyId||'').toLowerCase() === (userData.email||'').toLowerCase()) && l.status === 'pending').length;
 const totalAlert = pendingApprovalCount + myPendingDeputy;
 const approvalMenuCount = (userData.role === 'leader' || userData.role === 'admin') ? totalAlert : myPendingDeputy;
 const isLight = sidebarTheme === 'light';
@@ -882,7 +900,7 @@ const weatherList = (weatherData && weatherData.length) ? weatherData : WEATHER_
 const today = new Date();
 const weekDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
 const todayStr = getLocalDateString(today);
-const myDeputyPendingCount = leaves.filter(l => (l.deputyId === user.uid || l.deputyId === user.docId || l.deputyId === (user.email||'').toLowerCase()) && l.status === 'pending').length;
+const myDeputyPendingCount = leaves.filter(l => (l.deputyId === user.uid || l.deputyId === user.docId || String(l.deputyId||'').toLowerCase() === (user.email||'').toLowerCase()) && l.status === 'pending').length;
 const teamDeputyPendingCount = (user.role === 'leader' || user.role === 'admin') ? leaves.filter(l => l.status === 'pending' && !!l.deputyId).length : 0;
 const teamLeaderPendingCount = (user.role === 'leader' || user.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').length : 0;
 const myPendingCount = leaves.filter(l => (l.requesterId === user.uid || l.requesterId === user.docId) && (l.status === 'pending' || l.status === 'deputy_signed')).length;
@@ -1696,7 +1714,7 @@ let csv = "\uFEFF姓名,日期,時間,假別,時數(日時),職代,排班內容,
 filteredRows.forEach(r => {
 const time = TIME_SLOTS.find(s=>s.id===r.slot)?.label||'整天';
 const content = `${r.content}${r.area ? `(${r.area})` : ''}`;
-const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId || ((u.email||'').toLowerCase() === (r.rawLeave.deputyId||'')))?.name || '未知') : '-';
+const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
 csv += `${r.name},${r.date},${time},${r.leaveType},${r.leaveHours},${deputyName},${content},${r.reason},${r.note},${r.status}\n`;
 });
 const link = document.createElement("a");
@@ -1905,7 +1923,7 @@ return (
 <tbody>
 {filteredRows.map((r) => {
 const canRecall = r.rawLeave && ['pending','deputy_signed','approved'].includes(r.rawLeave.status);
-const deputyName = r.rawLeave?.deputyId ? (users.find(u => u.docId === r.rawLeave.deputyId || u.uid === r.rawLeave.deputyId || ((u.email||'').toLowerCase() === (r.rawLeave.deputyId||'')))?.name || '未知') : '-';
+const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
 const isOfficial = r.leaveType === '出差' || r.leaveType === '公出' || r.leaveType === '公假';
 return (
 <tr key={r.id} className={`border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors ${selectedIds.includes(r.id) ? 'bg-indigo-50/50' : ''}`}>
@@ -2000,7 +2018,7 @@ const handleSend = () => {
   if(!skipDeputy && !deputyId) { alert("請選擇職務代理人"); return; }
   onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, skipDeputy, hours: task.slot === 'all_day' ? 8 : 4 });
 }
-return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId||u.uid} value={(u.uid||u.docId||u.email||'').toLowerCase()}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
+return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId||u.uid} value={(u.docId || u.uid || (u.email||'').toLowerCase())}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
 function LeaveForm({ user, users, leaves, events, crud, leaveTypes, setView }) {
 const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
 const [form, setForm] = useState({ type: '', start:'', end:'', reason:'', deputyId:'' });
@@ -2298,7 +2316,7 @@ if(!isOvertime(form.type) && hasDeputyConflict(form.deputyId, finalStart, finalE
 const isOvertimeReq = isOvertime(form.type);
 if(!form.type){ alert('請先選擇假別'); setTypeError(true); return; }
 if(!isOvertimeReq && !form.deputyId){ alert('請先選擇職務代理人'); return; }
-const deputyName = isOvertimeReq ? '-' : (users.find(u => (u.docId||u.uid) === form.deputyId)?.name || '');
+const deputyName = isOvertimeReq ? '-' : (getUserNameByKey(users, form.deputyId, '') || '');
 const payload = { ...form, deputyId: isOvertimeReq ? '' : (form.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: isOvertimeReq ? 'deputy_signed' : 'pending', deputySignedAt: isOvertimeReq ? new Date() : null, deputySignedBy: isOvertimeReq ? 'SYSTEM' : null, timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() };
 setConfirmData({ type: payload.type, start: payload.start, end: payload.end, hours: payload.hours, deputyName, reason: payload.reason || '' });
 setPendingSubmit(payload);
@@ -2636,7 +2654,7 @@ return (
                 <select className="w-full border p-2.5 rounded-lg bg-white" value={form.deputyId} onChange={e=>setForm({ ...form, deputyId: e.target.value })} required={!(form.type||'').includes('加班')}>
                   <option value="">請選擇</option>
                   {deputies.map(d => (
-                    <option key={d.docId || d.uid} value={(d.uid || d.docId || d.email || "").toLowerCase()}>{d.name}</option>
+                    <option key={d.docId || d.uid} value={(d.docId || d.uid || (d.email||"").toLowerCase())}>{d.name}</option>
                   ))}
                 </select>
                 <div className="text-[11px] text-gray-500 mt-1">同日已排請假者不會出現在清單中</div>
@@ -2772,7 +2790,7 @@ const d1 = l.start.split('T')[0];
 const t1 = l.start.split('T')[1] || '';
 const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
-const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId || ((u.email||'').toLowerCase() === (l.deputyId||'')))?.name || '未知') : '-';
+const deputyName = l.deputyId ? (getUserNameByKey(users, l.deputyId, '未知')) : '-';
 csv += `${l.requesterName},${l.type},${deputyName},${d1},${t1},${d2},${t2},${l.hours},${l.status},${l.recallReason || ''}\n`
 });
 const link = document.createElement("a");
@@ -2780,7 +2798,7 @@ link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
 link.download = "全團隊請假紀錄.csv";
 link.click();
 };
-const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === (currentUser.email || '').toLowerCase() || l.deputyId === currentUser.docId) && l.status === 'pending');
+const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending');
 const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
 // --- Bulk approval selection (leader) ---
 useEffect(() => {
@@ -3027,7 +3045,7 @@ const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
 const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
 const timeStr = `${t1} ~ ${t2}`;
-const deputyName = l.deputyId ? (users.find(u => u.docId === l.deputyId || u.uid === l.deputyId || ((u.email||'').toLowerCase() === (l.deputyId||'')))?.name || '未知') : '-';
+const deputyName = l.deputyId ? (getUserNameByKey(users, l.deputyId, '未知')) : '-';
 const isOwner = l.requesterId === currentUser.uid || l.requesterId === currentUser.docId;
 const isAdmin = currentUser.role === 'admin';
 return (
