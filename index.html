@@ -3544,9 +3544,11 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedUserId, setSelectedUserId] = useState('ALL'); // ALL = 全體
   const [showOther, setShowOther] = useState(false);
+  const [extraCompAdj, setExtraCompAdj] = useState(0);
 
   const viewableUsers = users || [];
   const targetUser = selectedUserId === 'ALL' ? null : (viewableUsers.find(u => u.docId === selectedUserId) || currentUser);
+  useEffect(() => { setExtraCompAdj(0); }, [selectedUserId, selectedYear]);
 
   const yearOptions = [...Array(11)].map((_, i) => now.getFullYear() - 5 + i);
   const months = [...Array(12)].map((_, i) => String(i + 1).padStart(2, '0'));
@@ -3649,6 +3651,17 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     return toInt(total);
   })();
 
+  const calcExtraCompHoursFromLeaves = (arr) => {
+    let total = 0;
+    (arr || []).forEach(l => {
+      const t = String(l.type || '');
+      if (t.includes('加班') && t.includes('補休') && t !== '補休') {
+        total += Number(l.hours || 0);
+      }
+    });
+    return toInt(total);
+  };
+
   const buildExportDatasetForUser = (u) => {
     const userLeaves = (leaves || []).filter(l => {
       if (l.status !== 'approved') return false;
@@ -3733,13 +3746,24 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
         const honorEarned = Number(u.honorEarned || 0);
         const honorUsed = Number(u.honorUsed || 0);
 
+        const userLeavesForExport = (leaves || []).filter(l => {
+          if (l.status !== 'approved') return false;
+          if (!String(l.start || '').startsWith(String(selectedYear))) return false;
+          const rid = l.requesterId;
+          return (rid === u.uid || rid === u.docId);
+        });
+        const extraCompEarned = calcExtraCompHoursFromLeaves(userLeavesForExport);
+        const honorBalance = Math.max(0, honorEarned - honorUsed);
+        const baseAnnualHoursExport = toInt(((seniority.days||0)*8) + (extraLeaveDays*8) + honorBalance);
+
         const userInfoLines = [
           esc(u.name || u.displayName || u.email || '—'),
           join ? esc(`${join}到職`) : '未設定到職日',
-          `年資：${esc(seniority.text)}`,
+          `年資：${esc(seniority.entitlementText || seniority.text)}`,
           `特休：${toInt((seniority.days||0)*8)} (勞基法${seniority.days||0}天) / ${toInt(extraLeaveDays*8)} (單位${extraLeaveDays}天)`,
           `榮譽假：${toInt(honorEarned)} (小時)`,
-          `本年度可修：${toInt((seniority.days||0)*8 + extraLeaveDays*8 + Math.max(0, honorEarned - honorUsed))} (小時)`
+          `額外加班(可補休)：${toInt(extraCompEarned)} (小時) / ${toInt(extraCompEarned/8)} (天)`,
+          `本年度可休總計為：${toInt(baseAnnualHoursExport + extraCompEarned)} (小時) / ${toInt((baseAnnualHoursExport + extraCompEarned)/8)} (天)  ( ${toInt(baseAnnualHoursExport)}小時/${toInt(baseAnnualHoursExport/8)}天 + 額外加班 ${toInt(extraCompEarned)}小時/${toInt(extraCompEarned/8)}天 )`
         ];
         const userCell = userInfoLines.join('<br/>');
 
@@ -3793,6 +3817,14 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   const honorEarned = targetUser ? scopedLeaves.filter(l => l.type === '榮譽假(獲得)').reduce((s,l)=>s+Number(l.hours||0),0) : 0;
   const honorUsed = targetUser ? scopedLeaves.filter(l => l.type === '榮譽假').reduce((s,l)=>s+Number(l.hours||0),0) : 0;
 
+  const honorBalance = Math.max(0, honorEarned - honorUsed);
+  const baseAnnualHours = ((seniority?.days||0) + (extraLeaveDays||0)) * 8 + honorBalance;
+  const baseAnnualDays = ((seniority?.days||0) + (extraLeaveDays||0)) + Math.round(honorBalance/8);
+  const extraCompTotal = Math.max(0, Number(extraCompHours||0) + Number(extraCompAdj||0));
+  const extraCompDays = Math.round(extraCompTotal/8);
+  const grandTotalHours = baseAnnualHours + extraCompTotal;
+  const grandTotalDays = baseAnnualDays + extraCompDays;
+
   const fmt = (v) => {
     const n = Number(v || 0);
     if (!n) return '';
@@ -3832,8 +3864,35 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
                 <div className="flex justify-between"><span className="text-gray-700">2. 特休</span><span className="font-bold"><span className="text-[10px] text-gray-400 ml-1">(勞基法 {(seniority?.days||0)}天)</span><span className="text-[10px] text-gray-400 ml-1">(單位 {extraLeaveDays}天)</span><span className="ml-2 text-base font-bold text-gray-900">共 {((seniority?.days||0)+(extraLeaveDays||0))*8}時({(seniority?.days||0)+(extraLeaveDays||0)}天)</span></span></div>
 <div className="flex justify-between"><span className="text-gray-700">3. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)}小時({Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></div>
 <div className="flex justify-between pt-1 border-t"><span className="text-gray-700 font-bold">以上本年度基本假別可休共</span><span className="font-bold">{(((seniority?.days||0)+(extraLeaveDays||0))*8) + Math.max(0, honorEarned - honorUsed)}小時({((seniority?.days||0)+(extraLeaveDays||0)) + Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></div>
-<div className="flex justify-between"><span className="text-gray-700">#額外加班: 可補休</span><span className="font-bold">{extraCompHours}小時({Math.round(extraCompHours/8)}天) <span className="text-[10px] text-gray-400 ml-1">依加班(補休)數量而增加</span></span></div>
-                <div className="flex justify-between text-indigo-700 pt-2 border-t"><span className="font-bold">5. 本年度可修</span><span className="font-black">{(seniority?.days||0)*8 + extraLeaveDays*8 + Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
+<div className="flex justify-between">
+                  <span className="text-gray-700">#額外加班: 可補休</span>
+                  <span className="font-bold flex items-center gap-2">
+                    <span>{extraCompTotal}小時({extraCompDays}天)</span>
+                    <button
+                      type="button"
+                      onClick={()=>setExtraCompAdj(v=>Math.max(-extraCompHours, Number(v||0) - 1))}
+                      className="px-2 py-0.5 text-xs rounded border bg-gray-50 hover:bg-white"
+                      title="刪除 1 小時（調整額外加班可補休）"
+                    >-</button>
+                    <button
+                      type="button"
+                      onClick={()=>setExtraCompAdj(v=>Number(v||0) + 1)}
+                      className="px-2 py-0.5 text-xs rounded border bg-gray-50 hover:bg-white"
+                      title="增加 1 小時（調整額外加班可補休）"
+                    >+</button>
+                    <span className="text-[10px] text-gray-400 ml-1">依加班(補休)數量，可調整</span>
+                  </span>
+                </div>
+
+                <div className="flex justify-between text-indigo-700 pt-2 border-t">
+                  <span className="font-bold">本年度可休總計為</span>
+                  <span className="font-black">
+                    {grandTotalHours}小時({grandTotalDays}天)
+                    <span className="text-[10px] text-gray-400 ml-2">
+                      ( {baseAnnualHours}小時({baseAnnualDays}天) + 額外加班 {extraCompTotal}小時({extraCompDays}天) )
+                    </span>
+                  </span>
+                </div>
                 <div className="text-[10px] text-gray-400 leading-relaxed pt-1"></div>
               </div>
             )}
