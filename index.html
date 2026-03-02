@@ -257,13 +257,33 @@ const DEFAULT_LEAVE_TYPES = [
 
 
 // --- Overtime type canonicalization (legacy compatibility) ---
-const OVERTIME_COMP_TYPE = "加班申請(補休)";
-const OVERTIME_COMP_TYPE_LEGACY = "加班申請(列計)";
-const OVERTIME_PAY_TYPE = "加班申請(不列計)";
-const OVERTIME_PAY_LABEL = "加班(請款)";
+// 你指定的命名規則：
+// - 新名稱：加班(補休)；舊名稱：加班申請(列計)、加班申請(補休) → 統一視為「加班(補休)」
+// - 新名稱：加班(請款)；舊名稱：加班申請(不列計)、加班申請(請款) → 統一視為「加班(請款)」
+const OVERTIME_COMP_TYPE = "加班(補休)";
+const OVERTIME_COMP_LEGACY_TYPES = new Set(["加班申請(列計)", "加班申請(補休)", "加班(列計)"]);
+const OVERTIME_PAY_TYPE = "加班(請款)";
+const OVERTIME_PAY_LEGACY_TYPES = new Set(["加班申請(不列計)", "加班申請(請款)", "加班(不列計)"]);
 const isOvertime = (t) => (t || "").includes("加班");
-const isOvertimeComp = (t) => (t === OVERTIME_COMP_TYPE || t === OVERTIME_COMP_TYPE_LEGACY);
-const normalizeOvertimeType = (t) => (t === OVERTIME_COMP_TYPE_LEGACY ? OVERTIME_COMP_TYPE : t);
+
+// 將資料庫/舊資料的字串正規化為「加班(補休)」或「加班(請款)」
+const normalizeOvertimeType = (t) => {
+  const x = (t || "").trim();
+  if (!x) return x;
+  if (OVERTIME_COMP_LEGACY_TYPES.has(x) || (x.includes("加班") && (x.includes("補休") || x.includes("補修") || x.includes("列計")) && !x.includes("不列計") && !x.includes("請款"))) {
+    return OVERTIME_COMP_TYPE;
+  }
+  if (OVERTIME_PAY_LEGACY_TYPES.has(x) || (x.includes("加班") && (x.includes("不列計") || x.includes("請款")))) {
+    return OVERTIME_PAY_TYPE;
+  }
+  return x;
+};
+
+// 判斷是否屬於「加班(補休)」或「加班(請款)」
+const isOvertimeComp = (t) => normalizeOvertimeType(t) === OVERTIME_COMP_TYPE;
+const isOvertimePay = (t) => normalizeOvertimeType(t) === OVERTIME_PAY_TYPE;
+
+
 
 const DEFAULT_ROLE_NAMES = {
 staff: '專員',
@@ -1963,7 +1983,11 @@ const overtimeTypeName = officialTypes.find(t => (t.name||'').includes('加班')
 const [type, setType] = useState(officialTypes.length > 0 ? officialTypes[0].name : '');
 const [deputyId, setDeputyId] = useState('');
 const selectedTypeDesc = officialTypes.find(t => t.name === type)?.desc || '';
-const handleSend = () => { if(!deputyId) { alert("請選擇職務代理人"); return; } onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, hours: task.slot === 'all_day' ? 8 : 4 }); }
+const handleSend = () => {
+  const skipDeputy = isOvertime(type);
+  if(!skipDeputy && !deputyId) { alert("請選擇職務代理人"); return; }
+  onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, skipDeputy, hours: task.slot === 'all_day' ? 8 : 4 });
+}
 return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId||u.uid} value={(u.uid||u.docId||u.email||'').toLowerCase()}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
 function LeaveForm({ user, users, leaves, events, crud, leaveTypes, setView }) {
 const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
@@ -2163,10 +2187,51 @@ useEffect(() => {
     return calHit;
   };
 
-const handleTaskSubmit = async (taskData, taskId) => { setSubmittingTaskId(taskId); try { const now = new Date(); if(hasDeputyConflict(taskData.deputyId, taskData.start, taskData.end)){ alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。'); return; }
-await crud.createLeave({ ...taskData, deputyId: taskData.skipDeputy ? '' : (taskData.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, status: taskData.skipDeputy ? 'deputy_signed' : 'pending', deputySignedAt: taskData.skipDeputy ? now : null, deputySignedBy: taskData.skipDeputy ? 'SYSTEM' : null, timestamp: now, submittedAt: now, sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '' });
-// (送出申請不發mail)
-alert("差單已送出，已顯示在日曆上！"); } catch (e) { alert("送出失敗"); } finally { setSubmittingTaskId(null); } }
+const handleTaskSubmit = async (taskData, taskId) => {
+  // 第一區塊（排班日曆）送出：改為先跳確認視窗
+  setSubmittingTaskId(taskId);
+  try {
+    const now = new Date();
+    const isOt = isOvertime(taskData.type);
+    const skipDeputy = !!taskData.skipDeputy || isOt;
+    if(!skipDeputy && hasDeputyConflict(taskData.deputyId, taskData.start, taskData.end)){
+      alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。');
+      setSubmittingTaskId(null);
+      return;
+    }
+    if(!skipDeputy && !taskData.deputyId){
+      alert('請先選擇職務代理人');
+      setSubmittingTaskId(null);
+      return;
+    }
+    const deputyName = skipDeputy ? '-' : (users.find(u => (u.docId||u.uid||u.email||'').toLowerCase() === (taskData.deputyId||'').toLowerCase())?.name || '');
+    const payload = {
+      ...taskData,
+      deputyId: skipDeputy ? '' : (taskData.deputyId||''),
+      requesterId: user.docId || user.uid,
+      requesterUid: user.uid,
+      requesterDocId: user.docId || null,
+      requesterEmail: (user.email||'').toLowerCase(),
+      requesterName: user.name,
+      status: skipDeputy ? 'deputy_signed' : 'pending',
+      deputySignedAt: skipDeputy ? now : null,
+      deputySignedBy: skipDeputy ? 'SYSTEM' : null,
+      timestamp: now,
+      submittedAt: now,
+      sourceGroupId: taskId || null,
+      sourceType: taskId ? 'calendar_event' : ''
+    };
+    setConfirmData({ type: payload.type, start: payload.start, end: payload.end, hours: payload.hours, deputyName, reason: payload.reason || '' });
+    setPendingSubmit(payload);
+    setConfirmOpen(true);
+  } catch (e) {
+    console.error(e);
+    alert("送出失敗");
+    setSubmittingTaskId(null);
+  }
+}
+
+
 const handleManualSubmit = async (e) => {
 e.preventDefault();
 let finalStart = form.start;
@@ -2227,6 +2292,25 @@ setConfirmData({ type: payload.type, start: payload.start, end: payload.end, hou
 setPendingSubmit(payload);
 setConfirmOpen(true);
 };
+
+const executeConfirmedSubmit = async () => {
+  if(!pendingSubmit) { setConfirmOpen(false); return; }
+  setIsSubmitting(true);
+  try {
+    await crud.createLeave(pendingSubmit);
+    setConfirmOpen(false);
+    setConfirmData(null);
+    setPendingSubmit(null);
+    const msg = isOvertime(pendingSubmit.type) ? "加班申請已送出！" : "申請已送出！";
+    alert(msg);
+  } catch (e) {
+    console.error(e);
+    alert("送出失敗");
+  } finally {
+    setIsSubmitting(false);
+    setSubmittingTaskId(null);
+  }
+};
 const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
 const busyIds = leaves.filter(l=>l.status!=='rejected' && l.status!=='withdrawn' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
 const deputies = users.filter(u=>u.name!==user.name);
@@ -2245,13 +2329,13 @@ return (
             onClick={(e) => {
               e.stopPropagation();
               setOpenBlock2(true);
-              // 導到第二區塊，並預選加班假別
-              setForm(f => ({ ...f, type: overtimeTypeName || f.type }));
+              setShowOfficialTypes(true);
+              setTypeError(false);
+              // 導到第二區塊，並預選「加班(請款/不列計)」假別（兼容不同命名）
+              const otPayName = (leaveTypes.find(t => (t.name||'').includes('加班') && (((t.name||'').includes('不列計')) || ((t.name||'').includes('請款'))))?.name) || OVERTIME_PAY_TYPE || overtimeTypeName || '';
+              setForm(prev => ({ ...prev, type: otPayName || prev.type }));
               setTimeout(() => block2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-                      setShowOfficialTypes(true);
-                      setTypeError(false);
-                      setForm(prev => ({ ...prev, type: '加班(不列計)' }));
-}}
+            }}
             className="px-3 py-1.5 rounded-lg bg-indigo-700 text-white text-xs font-bold hover:bg-indigo-800"
             title="加班申請不會顯示在日曆，請由此入口送出"
           >
@@ -2595,6 +2679,63 @@ return (
         </div>
       )}
     </div>
+
+    {/* 送出前確認視窗：第一區塊/第二區塊共用 */}
+    {confirmOpen && confirmData && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-indigo-100 overflow-hidden">
+          <div className="px-5 py-4 bg-indigo-50 border-b border-indigo-100">
+            <div className="text-lg font-black text-indigo-900">送出前確認</div>
+            <div className="text-xs text-indigo-700/80 mt-1">確認資訊無誤後再送出（可返回修改）。</div>
+          </div>
+          <div className="p-5 space-y-3 text-sm">
+            <div className="flex justify-between gap-3">
+              <div className="text-gray-500 font-bold">假別</div>
+              <div className="text-gray-900 font-black text-right">{confirmData.type || '-'}</div>
+            </div>
+            <div className="flex justify-between gap-3">
+              <div className="text-gray-500 font-bold">時間日期</div>
+              <div className="text-gray-900 text-right">
+                <div>{formatDateTime(confirmData.start)}</div>
+                <div className="text-gray-500">至</div>
+                <div>{formatDateTime(confirmData.end)}</div>
+              </div>
+            </div>
+            <div className="flex justify-between gap-3">
+              <div className="text-gray-500 font-bold">時數</div>
+              <div className="text-gray-900 font-black text-right">{Number(confirmData.hours || 0)} 小時</div>
+            </div>
+            <div className="flex justify-between gap-3">
+              <div className="text-gray-500 font-bold">職代</div>
+              <div className="text-gray-900 font-black text-right">{confirmData.deputyName || '-'}</div>
+            </div>
+            <div className="pt-2 border-t">
+              <div className="text-gray-500 font-bold mb-1">事由</div>
+              <div className="text-gray-900 whitespace-pre-wrap break-words">{confirmData.reason || '-'}</div>
+            </div>
+          </div>
+          <div className="px-5 py-4 bg-gray-50 border-t flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setConfirmOpen(false); }}
+              className="px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-800 text-sm font-bold hover:bg-gray-100"
+              disabled={isSubmitting}
+            >
+              修改
+            </button>
+            <button
+              type="button"
+              onClick={executeConfirmedSubmit}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-black hover:bg-indigo-700 disabled:opacity-50"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "送出中…" : "確認送出"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
   </div>
 );
 
@@ -2867,7 +3008,7 @@ return (
 <th className="p-3 font-bold w-24">狀態</th><th className="p-3 font-bold">送出時間</th>
 <th className="p-3 font-bold text-center">操作</th></tr></thead>
 <tbody>
-{[...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start)).map(l => {
+{filteredAllLeaves.map(l => {
 const d1 = l.start.split('T')[0];
 const t1 = l.start.split('T')[1] || '';
 const d2 = l.end.split('T')[0];
@@ -3007,7 +3148,7 @@ if (l.type.includes('特休')) usedAnnual += hours;
 if (l.type.includes('病假') || l.type.includes('生理假')) usedSick += hours;
 if (l.type.includes('事假') && !l.type.includes('公假')) usedPersonal += hours;
 if (isOvertimeComp(l.type)) totalCompensatoryEarned += hours;
-if (l.type === OVERTIME_PAY_TYPE) usedOvertimePay += hours;
+if (isOvertimePay(l.type)) usedOvertimePay += hours;
 if (l.type === '補休') totalCompensatoryUsed += hours;
 // 其他假別
 if (l.type.includes('婚假')) usedMarriage += hours;
@@ -3028,7 +3169,7 @@ let totalHonorUsed = 0;
 leaves.forEach(l => {
 if ((l.requesterId === targetUser.uid || l.requesterId === targetUser.docId) && l.status === 'approved') {
 if (isOvertimeComp(l.type)) allTimeCompensatoryEarned += Number(l.hours);
-if (l.type === OVERTIME_PAY_TYPE) allTimeOvertimePay += Number(l.hours);
+if (isOvertimePay(l.type)) allTimeOvertimePay += Number(l.hours);
 if (l.type === '補休') allTimeCompensatoryUsed += Number(l.hours);
 // 榮譽假加總
 if (l.type === '榮譽假(獲得)') totalHonorEarned += Number(l.hours);
