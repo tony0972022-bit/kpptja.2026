@@ -1454,6 +1454,7 @@ const renderLeaves = () => {
     dStr >= l.start.split('T')[0] &&
     dStr <= l.end.split('T')[0] &&
     !(duplicateTypes.includes(l.type) && externalScheduledUsers.has(l.requesterName))
+    && !['出差','公出'].includes(l.type)
   );
 
   return leavesOnDay.map(l => (
@@ -1490,7 +1491,8 @@ const daysLeft = Math.ceil((new Date(it.date).setHours(0,0,0,0) - new Date().set
 const md = (it.date || '').slice(5).replace('-', '/');
 const urgencyCls = daysLeft <= 7 ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : daysLeft <= 14 ? 'bg-orange-50 hover:bg-orange-100 text-orange-800 border-orange-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200';
 const rawOwners = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : []));
-const ownerUsers = rawOwners.map(x => users.find(u => u.docId === x || u.uid === x || u.name === x) || { initials: String(x).slice(-1), color: 'bg-gray-200', usePhoto: false });
+const ownersForShow = rawOwners.includes('ALL') ? ['ALL'] : rawOwners;
+const ownerUsers = ownersForShow.map(x => users.find(u => u.docId === x || u.uid === x || u.name === x) || { initials: String(x).slice(-1), color: 'bg-gray-200', usePhoto: false });
 const textShort = (it.text || '').length > 10 ? (it.text || '').slice(0,10) + '...' : (it.text || '');
 return (
 <button key={it.id} onClick={()=>openImportantEdit(it)} className={`px-2 py-1 rounded-full border text-xs flex items-center gap-2 ${urgencyCls}`}>
@@ -1582,14 +1584,46 @@ return (
         </div>
         <div>
           <div className="text-xs font-bold text-gray-500 mb-1">主責人</div>
-          <select multiple className="w-full border p-2 rounded text-sm bg-white" value={importantForm.ownerIds || []} onChange={e=>setImportantForm({ ...importantForm, ownerIds: Array.from(e.target.selectedOptions).map(o=>o.value) })}>
-            {(users||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'zh-Hant')).map(u=>(
-              <option key={u.docId||u.uid||u.email} value={(u.docId||u.uid||u.email||'').toLowerCase() || u.name}>{u.name}</option>
-            ))}
-          </select>
+          <div className="w-full border p-2 rounded text-sm bg-white max-h-40 overflow-auto">
+  {(() => {
+    const sortedUsers = (users||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'zh-Hant'));
+    const cur = importantForm.ownerIds || [];
+    const hasAll = cur.includes('ALL');
+    const toggleUser = (id, checked) => {
+      let next = (importantForm.ownerIds || []).filter(x => x !== 'ALL');
+      if (checked) {
+        if (!next.includes(id)) next = [...next, id];
+      } else {
+        next = next.filter(x => x !== id);
+      }
+      setImportantForm({ ...importantForm, ownerIds: next });
+    };
+    const setAll = (checked) => {
+      setImportantForm({ ...importantForm, ownerIds: checked ? ['ALL'] : [] });
+    };
+    return (
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 py-1">
+          <input type="checkbox" checked={hasAll} onChange={e=>setAll(e.target.checked)} />
+          <span className="font-bold">全體</span>
+        </label>
+        <div className="border-t my-1"></div>
+        {sortedUsers.map(u=>{
+          const id = ((u.docId||u.uid||u.email)||'').toLowerCase() || u.name;
+          return (
+            <label key={id} className={`flex items-center gap-2 py-1 ${hasAll ? 'opacity-40 cursor-not-allowed' : ''}`}>
+              <input type="checkbox" disabled={hasAll} checked={(importantForm.ownerIds||[]).includes(id)} onChange={e=>toggleUser(id, e.target.checked)} />
+              <span>{u.name}</span>
+            </label>
+          );
+        })}
+      </div>
+    );
+  })()}
+</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {(importantForm.ownerIds||[]).map((id,idx)=>{
-              const ou = (users||[]).find(u=>u.docId===id||u.uid===id||u.name===id) || { initials: String(id).slice(-1), color:'bg-gray-200', usePhoto:false };
+              const ou = id==='ALL' ? { initials:'全', color:'bg-slate-200', usePhoto:false } : ((users||[]).find(u=>u.docId===id||u.uid===id||u.name===id) || { initials: String(id).slice(-1), color:'bg-gray-200', usePhoto:false });
               return <UserAvatar key={idx} user={ou} size="w-8 h-8" textSize="text-sm" className="shadow-sm border-white border-[1.5px]" />;
             })}
           </div>
