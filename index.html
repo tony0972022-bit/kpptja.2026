@@ -242,7 +242,7 @@ const DEFAULT_LEAVE_TYPES = [
 { id: 'l1', name: "出差", category: "official", desc: "處理公務" },
 { id: 'l2', name: "公出", category: "official", desc: "短暫外出洽公" },
 { id: 'l3', name: "公假", category: "official", desc: "依法令規定給予之公假" },
-{ id: 'l4_1', name: "加班申請(列計)", category: "official", desc: "延長工時，可累積補休時數" },
+{ id: 'l4_1', name: "加班申請(補休)", category: "official", desc: "延長工時，可累積補休時數" },
 { id: 'l4_2', name: "加班申請(不列計)", category: "official", desc: "延長工時，不累積補休" },
 { id: 'l5', name: "特休(休假)", category: "personal", desc: "有薪，依年資給予" },
 { id: 'l6', name: "事假", category: "personal", desc: "無薪，一年最多14天" },
@@ -254,6 +254,17 @@ const DEFAULT_LEAVE_TYPES = [
 { id: 'l12', name: "家庭照顧假", category: "personal", desc: "無薪，併入事假計算，一年最多7天" },
 { id: 'l13', name: "補休", category: "personal", desc: "使用加班累積之時數" },
 { id: 'l14', name: "榮譽假", category: "personal", desc: "內部獎勵" }];
+
+
+// --- Overtime type canonicalization (legacy compatibility) ---
+const OVERTIME_COMP_TYPE = "加班申請(補休)";
+const OVERTIME_COMP_TYPE_LEGACY = "加班申請(列計)";
+const OVERTIME_PAY_TYPE = "加班申請(不列計)";
+const OVERTIME_PAY_LABEL = "加班(請款)";
+const isOvertime = (t) => (t || "").includes("加班");
+const isOvertimeComp = (t) => (t === OVERTIME_COMP_TYPE || t === OVERTIME_COMP_TYPE_LEGACY);
+const normalizeOvertimeType = (t) => (t === OVERTIME_COMP_TYPE_LEGACY ? OVERTIME_COMP_TYPE : t);
+
 const DEFAULT_ROLE_NAMES = {
 staff: '專員',
 leader: '組長',
@@ -1375,7 +1386,7 @@ const leavesOnDay = leaves.filter(l =>
 l.status !== 'rejected' && l.status !== 'withdrawn' &&
 dStr >= l.start.split('T')[0] &&
 dStr <= l.end.split('T')[0] &&
-!["出差", "公出", "公假", "加班申請(列計)", "加班申請(不列計)", "榮譽假(獲得)"].includes(l.type));
+!["出差", "公出", "公假", OVERTIME_COMP_TYPE, OVERTIME_COMP_TYPE_LEGACY, OVERTIME_PAY_TYPE, "榮譽假(獲得)"].includes(l.type));
 return leavesOnDay.map(l => (
 <div key={l.id} className="text-xs border border-pink-200 bg-pink-50 text-pink-700 px-2 py-1 my-1 w-full truncate font-bold rounded-md shadow-sm flex items-center justify-between">
 <span>{l.requesterName}</span>
@@ -1560,7 +1571,7 @@ const myLeave = leaves.find(l =>
 l.start.startsWith(dateStr));
 let status = '正常';
 const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
-const officialLeaves = ["公出", "公假", "出差", "加班申請(列計)", "加班申請(不列計)"];
+const officialLeaves = ["公出", "公假", "出差", OVERTIME_COMP_TYPE, OVERTIME_COMP_TYPE_LEGACY, OVERTIME_PAY_TYPE];
 const isOfficialLeave = myLeave && officialLeaves.includes(myLeave.type);
 const isPersonalLeave = myLeave && !officialLeaves.includes(myLeave.type);
 if (isExternal && !myLeave) status = '缺公務單';
@@ -1717,7 +1728,8 @@ const handleEditResubmit = async () => {
   if (!editForm.type) { alert('請選擇假別'); return; }
   if (!start || !end) { alert('請選擇開始與結束時間'); return; }
   if (hours <= 0) { alert('時數必須大於 0'); return; }
-  if (hasDeputyConflictLite(editForm.deputyId, start, end, editTarget.id)) {
+  const isOvertimeReq = isOvertime(editForm.type);
+  if (!isOvertimeReq && hasDeputyConflictLite(editForm.deputyId, start, end, editTarget.id)) {
     alert('【職代防呆】所選職代於該時段已安排請假/審核中，請更換人員。');
     return;
   }
@@ -1731,12 +1743,12 @@ const handleEditResubmit = async () => {
       end,
       hours,
       reason: editForm.reason || '',
-      deputyId: editForm.deputyId || '',
-      // 重新送審：清除前次簽核痕跡
-      status: 'pending',
-      deputySignedAt: null,
-      deputySignedBy: null,
-      deputySignedByName: null,
+      deputyId: isOvertimeReq ? '' : (editForm.deputyId || ''),
+      // 重新送審：依假別決定是否需要職代
+      status: isOvertimeReq ? 'deputy_signed' : 'pending',
+      deputySignedAt: isOvertimeReq ? new Date() : null,
+      deputySignedBy: isOvertimeReq ? 'SYSTEM' : null,
+      deputySignedByName: isOvertimeReq ? 'SYSTEM' : null,
       approverId: null,
       approvalDate: null,
       resubmittedAt: new Date()
@@ -1943,7 +1955,7 @@ return (
 </tr>
 );
 }) : <tr><td colSpan="12" className="p-8 text-center text-gray-400">目前沒有需要您擔任職代的假單。</td></tr>}
-</tbody>></table></div>
+</tbody></table></div>
 )}</div>);}
 const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
 const officialTypes = leaveTypes.filter(t => t.category === 'official');
@@ -1986,6 +1998,9 @@ const [workShift, setWorkShift] = useState(() => {
 useEffect(() => { try { localStorage.setItem('workShift', workShift); } catch {} }, [workShift]);
 
 const [isSubmitting, setIsSubmitting] = useState(false);
+const [confirmOpen, setConfirmOpen] = useState(false);
+const [confirmData, setConfirmData] = useState(null);
+const [pendingSubmit, setPendingSubmit] = useState(null);
 const [submittingTaskId, setSubmittingTaskId] = useState(null);
 const [openBlock1, setOpenBlock1] = useState(true);
 const [openBlock2, setOpenBlock2] = useState(false);
@@ -2197,26 +2212,20 @@ finalHours = 8;}
 }
 if (form.type === '補休') {
 let totalOvertime = 0;
-leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '加班申請(列計)') { totalOvertime += Number(l.hours); } });
+leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && isOvertimeComp(l.type)) { totalOvertime += Number(l.hours); } });
 let usedCompensatory = 0;
 leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '補休') { usedCompensatory += Number(l.hours); } });
 const balance = totalOvertime - usedCompensatory;
 if (finalHours > balance) { alert(`補休時數不足！\n目前可用餘額: ${balance} 小時\n您申請時數: ${finalHours} 小時`); return; }}
-if(hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。'); return; }
-setIsSubmitting(true);
-try {
-const isOvertime = (form.type||'').includes('加班');
+if(!isOvertime(form.type) && hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ alert('【職代防呆】所選職代於該時段已安排出差/請假，請更換人員。'); return; }
+const isOvertimeReq = isOvertime(form.type);
 if(!form.type){ alert('請先選擇假別'); setTypeError(true); return; }
-if(!isOvertime && !form.deputyId){ alert('請先選擇職務代理人'); return; }
-await crud.createLeave({ ...form, deputyId: isOvertime ? '' : (form.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: isOvertime ? 'deputy_signed' : 'pending', deputySignedAt: isOvertime ? new Date() : null, deputySignedBy: isOvertime ? 'SYSTEM' : null, timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() });
-// (送出申請不發mail)
-alert("請假單已送出，已同步顯示在日曆上！");
-setForm({ type: '', start:'', end:'', reason:'', deputyId:'' });
-      setShowOfficialTypes(false);
-      setTypeError(false);
-setSlotDate(getLocalDateString());
-setSlotType('all_day');
-} catch (e) { alert("送出失敗，請稍後再試。"); } finally { setIsSubmitting(false); }
+if(!isOvertimeReq && !form.deputyId){ alert('請先選擇職務代理人'); return; }
+const deputyName = isOvertimeReq ? '-' : (users.find(u => (u.docId||u.uid) === form.deputyId)?.name || '');
+const payload = { ...form, deputyId: isOvertimeReq ? '' : (form.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: isOvertimeReq ? 'deputy_signed' : 'pending', deputySignedAt: isOvertimeReq ? new Date() : null, deputySignedBy: isOvertimeReq ? 'SYSTEM' : null, timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() };
+setConfirmData({ type: payload.type, start: payload.start, end: payload.end, hours: payload.hours, deputyName, reason: payload.reason || '' });
+setPendingSubmit(payload);
+setConfirmOpen(true);
 };
 const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
 const busyIds = leaves.filter(l=>l.status!=='rejected' && l.status!=='withdrawn' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
@@ -2982,6 +2991,7 @@ const usageFilteredLeaves = usageTypeFilter==='all'?filteredLeaves:filteredLeave
 let usedAnnual = 0;
 let usedSick = 0;
 let usedPersonal = 0;
+let usedOvertimePay = 0; // 加班(請款)
 let totalCompensatoryEarned = 0;
 let totalCompensatoryUsed = 0;
 // 新增：其他假別統計計算
@@ -2996,7 +3006,8 @@ const days = hours / 8;
 if (l.type.includes('特休')) usedAnnual += hours;
 if (l.type.includes('病假') || l.type.includes('生理假')) usedSick += hours;
 if (l.type.includes('事假') && !l.type.includes('公假')) usedPersonal += hours;
-if (l.type === '加班申請(列計)') totalCompensatoryEarned += hours;
+if (isOvertimeComp(l.type)) totalCompensatoryEarned += hours;
+if (l.type === OVERTIME_PAY_TYPE) usedOvertimePay += hours;
 if (l.type === '補休') totalCompensatoryUsed += hours;
 // 其他假別
 if (l.type.includes('婚假')) usedMarriage += hours;
@@ -3011,11 +3022,13 @@ if (l.type === '出差' || l.type === '公出' || l.type === '公假') usedOffic
 });
 let allTimeCompensatoryEarned = 0;
 let allTimeCompensatoryUsed = 0;
+let allTimeOvertimePay = 0;
 let totalHonorEarned = 0;
 let totalHonorUsed = 0;
 leaves.forEach(l => {
 if ((l.requesterId === targetUser.uid || l.requesterId === targetUser.docId) && l.status === 'approved') {
-if (l.type === '加班申請(列計)') allTimeCompensatoryEarned += Number(l.hours);
+if (isOvertimeComp(l.type)) allTimeCompensatoryEarned += Number(l.hours);
+if (l.type === OVERTIME_PAY_TYPE) allTimeOvertimePay += Number(l.hours);
 if (l.type === '補休') allTimeCompensatoryUsed += Number(l.hours);
 // 榮譽假加總
 if (l.type === '榮譽假(獲得)') totalHonorEarned += Number(l.hours);
@@ -3080,7 +3093,7 @@ return (
 <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h2 className="text-xl font-bold flex items-center gap-2"><PieChart/> 假別統計與明細</h2><div className="flex gap-3 flex-wrap">{(<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedUserId} onChange={e=>setSelectedUserId(e.target.value)}>{viewableUsers.map(u => <option key={u.docId} value={u.docId}>{u.name}</option>)}</select>)}<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedYear} onChange={e=>setSelectedYear(Number(e.target.value))}>{[...Array(11)].map((_, i) => { const y = new Date().getFullYear() - 5 + i; return <option key={y} value={y}>{y} 年度</option> })}</select><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}><option value="all">全年總計</option>{[...Array(12)].map((_, i) => { const m = String(i + 1).padStart(2, '0'); return <option key={m} value={m}>{i + 1} 月</option> })}</select></div></div>
 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-indigo-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">特休假</h3><p className="text-xs text-gray-500 mt-1">{seniority.text}</p></div><div className="text-right"><span className="text-2xl font-black text-indigo-600">{totalAnnualEntitled - usedAnnual}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>法定:</span><span className="font-bold">{seniority.days*8}<span className="text-[10px] text-gray-400 ml-1">({seniority.days}天)</span></span></div><div className="flex justify-between"><span className="flex items-center gap-1">額外: {isAdminOrLeader && <button onClick={handleEditExtraLeave}><Edit2 size={10}/></button>}</span><span className="font-bold">{extraLeaveDays*8}<span className="text-[10px] text-gray-400 ml-1">({extraLeaveDays}天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedAnnual}<span className="text-[10px] text-gray-400 ml-1">({(usedAnnual/8).toFixed(2)}天)</span></span></div></div></div>
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-purple-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">補休時數</h3><p className="text-xs text-gray-500 mt-1">加班累積</p></div><div className="text-right"><span className="text-2xl font-black text-purple-600">{compensatoryBalance}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>總累積:</span><span className="font-bold">{allTimeCompensatoryEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{allTimeCompensatoryUsed}</span></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-purple-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">加班(補休)</h3><p className="text-xs text-gray-500 mt-1">補休餘額</p></div><div className="text-right"><span className="text-2xl font-black text-purple-600">{compensatoryBalance}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>總累積:</span><span className="font-bold">{allTimeCompensatoryEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{allTimeCompensatoryUsed}</span></div></div></div>
 {/* 新增：榮譽假統計卡片 */}
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-yellow-400 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">榮譽假</h3><p className="text-xs text-gray-500 mt-1">單位獎勵</p></div><div className="text-right"><span className="text-2xl font-black text-yellow-600">{honorBalance}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span className="flex items-center gap-1">總獲得: {isAdminOrLeader && <button onClick={handleAddHonorLeave} title="發放榮譽假" className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 p-0.5 rounded flex items-center justify-center"><Plus size={12}/></button>}</span><span className="font-bold">{totalHonorEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{totalHonorUsed}</span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-5"><div className="flex justify-between items-start border-b pb-3 mb-3"><div><h3 className="font-bold text-gray-800 text-lg">病假</h3><p className="text-xs text-gray-500 mt-1">含生理假</p></div><div className="text-right"><span className="text-2xl font-black text-emerald-600">{30*8 - usedSick}</span><span className="text-xs text-gray-500 ml-1">時餘</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{30*8}<span className="text-[10px] text-gray-400 ml-1">(30天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}<span className="text-[10px] text-gray-400 ml-1">({(usedSick/8).toFixed(2)}天)</span></span></div></div></div>
@@ -3441,12 +3454,19 @@ return (
 {Object.keys(customHolidays).length === 0 && <div className="text-sm text-gray-400 sm:col-span-2 lg:col-span-3">尚未設定任何自訂特別假日。</div>}</div></div>
 <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><List/> 假別設定 & 說明 (區段分類)</h2><div className={`border rounded-lg p-4 mb-6 transition-colors ${editLeaveId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}><h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between"><span>{editLeaveId ? '修改假別' : '新增假別'}</span>{editLeaveId && <button onClick={()=>{setEditLeaveId(null); setNewLeave({name:'', category:'personal', desc:''});}} className="text-xs text-gray-500 hover:text-gray-800 underline">取消編輯</button>}</h3><div className="grid grid-cols-1 md:grid-cols-4 gap-3"><div className="md:col-span-1"><select className="border rounded px-3 py-2 text-sm w-full bg-white" value={newLeave.category} onChange={e=>setNewLeave({ ...newLeave, category: e.target.value})}><option value="official">區段一: 公務/加班</option><option value="personal">區段二: 私假</option></select></div><div className="md:col-span-1"><input className="border rounded px-3 py-2 text-sm w-full bg-white" placeholder="假別名稱 (例: 特休)" value={newLeave.name} onChange={e=>setNewLeave({ ...newLeave, name: e.target.value})} /></div><div className="md:col-span-2 flex gap-2"><input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="勞基法說明 (例: 有薪，依年資給予)" value={newLeave.desc} onChange={e=>setNewLeave({ ...newLeave, desc: e.target.value})} /><button onClick={handleAddLeave} className={`${editLeaveId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>{editLeaveId ? '儲存修改' : '新增'}</button></div></div></div><div className="space-y-4"><div><h3 className="text-sm font-bold text-indigo-700 mb-2 border-b pb-1">區段一：公務與加班</h3><div className="flex flex-col gap-2">{leaveTypes.filter(t=>t.category==='official').map(t => (<div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-indigo-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}><div><span className="font-bold text-gray-800 inline-block w-24">{t.name}</span><span className="text-gray-500 text-xs">{t.desc}</span></div><div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"><button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button><button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button></div></div>))}</div></div><div><h3 className="text-sm font-bold text-orange-700 mb-2 border-b pb-1 mt-4">區段二：私假 (依法令給假)</h3><div className="flex flex-col gap-2">{leaveTypes.filter(t=>t.category==='personal').map(t => (<div key={t.id} className={`flex justify-between items-center bg-white border px-3 py-2 rounded-lg text-sm group hover:border-orange-300 ${editLeaveId === t.id ? 'ring-2 ring-yellow-400' : ''}`}><div><span className="font-bold text-gray-800 inline-block w-24">{t.name}</span><span className="text-gray-500 text-xs">{t.desc}</span></div><div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"><button onClick={()=>startEditLeave(t)} className="text-gray-400 hover:text-blue-600 p-1.5 bg-gray-50 rounded"><Edit size={14}/></button><button onClick={()=>handleManageLeaveTypes('delete', t.id)} className="text-gray-400 hover:text-red-600 p-1.5 bg-red-50 rounded"><Trash2 size={14}/></button></div></div>))}</div></div></div></div>
 <button onClick={handleSaveSettings} className={`mt-6 px-6 py-3 rounded shadow transition font-bold flex items-center justify-center gap-2 w-full ${isSettingsSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}>{isSettingsSaved ? <><CheckCircle size={18}/> 設定已儲存！</> : '儲存系統設定'}</button></div>);}
-function DatabaseAdminView({ events, leaves, crud, db }) {
+function DatabaseAdminView({ events, leaves, users, crud, db }) {
 const [activeTab, setActiveTab] = useState('events');
 const [selectedEvents, setSelectedEvents] = useState([]);
 const [selectedLeaves, setSelectedLeaves] = useState([]);
 const [isProcessing, setIsProcessing] = useState(false);
 const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+const [leaveFilterMonth, setLeaveFilterMonth] = useState('all');
+const [leaveFilterUser, setLeaveFilterUser] = useState('all');
+const [leaveFilterType, setLeaveFilterType] = useState('all');
+const [leaveFilterStatus, setLeaveFilterStatus] = useState('all');
+const [editOpen, setEditOpen] = useState(false);
+const [editTarget, setEditTarget] = useState(null);
+const [editForm, setEditForm] = useState({ type:'', start:'', end:'', hours:0, reason:'', status:'pending', deputyId:'' });
 const eventGroups = useMemo(() => {
 const groups = {};
 events.forEach(e => {
@@ -3456,10 +3476,73 @@ if (e.type === 'tag') { groups[e.groupId].type = e.item; groups[e.groupId].date 
 return Object.values(groups).sort((a, b) => new Date(b.date) - new Date(a.date));
 }, [events]);
 const sortedLeaves = [...leaves].sort((a,b) => new Date(b.timestamp || b.start) - new Date(a.timestamp || a.start));
+const leaveTypeOptions = useMemo(()=>{
+  const set = new Set(sortedLeaves.map(l=>normalizeOvertimeType(l.type||'')).filter(Boolean));
+  return Array.from(set).sort();
+}, [sortedLeaves]);
+const filteredLeaves = useMemo(()=>{
+  return sortedLeaves.filter(l=>{
+    const d = (l.start||l.timestamp||'').split('T')[0];
+    if(!d) return false;
+    const parts = d.split('-');
+    const y = Number(parts[0]);
+    const m = parts[1];
+    if(targetYear && y !== Number(targetYear)) return false;
+    if(leaveFilterMonth !== 'all' && m !== String(leaveFilterMonth).padStart(2,'0')) return false;
+    if(leaveFilterUser !== 'all') {
+      const rid = l.requesterId || l.requesterUid || l.requesterDocId || '';
+      const did = l.requesterDocId || '';
+      if(!(rid === leaveFilterUser || did === leaveFilterUser)) return false;
+    }
+    const t = normalizeOvertimeType(l.type||'');
+    if(leaveFilterType !== 'all' && t !== leaveFilterType) return false;
+    if(leaveFilterStatus !== 'all' && (l.status||'') !== leaveFilterStatus) return false;
+    return true;
+  });
+}, [sortedLeaves, targetYear, leaveFilterMonth, leaveFilterUser, leaveFilterType, leaveFilterStatus]);
 const handleToggleEvent = (id) => { setSelectedEvents(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 const handleToggleLeave = (id) => { setSelectedLeaves(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 const toggleAllEvents = () => { if (selectedEvents.length === eventGroups.length) setSelectedEvents([]); else setSelectedEvents(eventGroups.map(g => g.id)); };
-const toggleAllLeaves = () => { if (selectedLeaves.length === leaves.length) setSelectedLeaves([]); else setSelectedLeaves(leaves.map(l => l.id)); };
+const toggleAllLeaves = () => { if (selectedLeaves.length === filteredLeaves.length) setSelectedLeaves([]); else setSelectedLeaves(filteredLeaves.map(l => l.id)); };
+const openEditLeave = (l) => {
+  if(!l) return;
+  setEditTarget(l);
+  setEditForm({
+    type: normalizeOvertimeType(l.type||''),
+    start: String(l.start||'').slice(0,16),
+    end: String(l.end||'').slice(0,16),
+    hours: Number(l.hours||0),
+    reason: l.reason||'',
+    status: l.status||'pending',
+    deputyId: l.deputyId||''
+  });
+  setEditOpen(true);
+};
+const saveEditLeave = async () => {
+  if(!editTarget) return;
+  if(!editForm.type) { alert('請選擇假別'); return; }
+  if(!editForm.start || !editForm.end) { alert('請填寫開始/結束'); return; }
+  const hours = Number(editForm.hours||0);
+  if(hours <= 0) { alert('時數必須大於 0'); return; }
+  try {
+    await crud.updateLeave(editTarget.id, {
+      type: editForm.type,
+      start: editForm.start,
+      end: editForm.end,
+      hours,
+      reason: editForm.reason||'',
+      status: editForm.status||'pending',
+      deputyId: isOvertime(editForm.type) ? '' : (editForm.deputyId||''),
+      editedAt: new Date()
+    });
+    alert('已更新資料');
+    setEditOpen(false);
+    setEditTarget(null);
+  } catch(e){
+    alert('更新失敗: ' + (e?.message || e));
+  }
+};
+
 const handleDeleteSelected = async () => {
 const targetIds = activeTab === 'events' ? selectedEvents : selectedLeaves;
 if (targetIds.length === 0) return alert("請先勾選要刪除的資料！");
@@ -3530,7 +3613,104 @@ return (
 <button onClick={handleDeleteYearly} disabled={isProcessing} className="flex-1 md:flex-none bg-red-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-700 transition disabled:opacity-50">
 <Trash2 size={16} /> 刪除 {targetYear} 年{activeTab === 'events' ? '排班' : '假單'}</button></div></div>
 <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-start gap-3"><AlertTriangle className="shrink-0 mt-0.5" size={20} /><div className="text-sm"><strong>管理員專用功能：</strong> 在此刪除的資料將會從雲端資料庫永久抹除，請謹慎使用。建議僅用於清理測試資料或無效的歷史紀錄。</div></div>
-<div className="bg-white rounded shadow-sm border overflow-hidden"><div className="p-3 bg-gray-50 border-b flex justify-between items-center"><span className="text-sm font-bold text-gray-600">已選取 {activeTab === 'events' ? selectedEvents.length : selectedLeaves.length} 項目 (手動勾選)</span><button onClick={handleDeleteSelected} disabled={isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0)} className={`bg-red-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 transition ${isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700'}`}>{isProcessing ? <><Loader2 size={16} className="animate-spin" /> 刪除中...</> : <><Trash2 size={16} /> 批次刪除勾選項目</>}</button></div><div className="overflow-x-auto max-h-[60vh]">{activeTab === 'events' ? (<table className="w-full text-sm text-left"><thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm"><tr><th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAllEvents} checked={eventGroups.length > 0 && selectedEvents.length === eventGroups.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></th><th className="p-3 w-32">日期</th><th className="p-3 w-40">工作項目</th><th className="p-3">排班人員</th><th className="p-3 w-40 text-xs text-gray-400">群組 ID</th></tr></thead><tbody>{eventGroups.map(g => (<tr key={g.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedEvents.includes(g.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleEvent(g.id)}><td className="p-3 text-center" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selectedEvents.includes(g.id)} onChange={() => handleToggleEvent(g.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></td><td className="p-3 font-medium">{g.date}</td><td className="p-3 text-blue-700 font-bold">{g.type || '無標籤'}</td><td className="p-3 flex gap-1 flex-wrap">{g.items.length > 0 ? g.items.map((n, i) => <span key={i} className="bg-gray-200 px-2 py-0.5 rounded-full text-xs">{n}</span>) : '-'}</td><td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={g.id}>{g.id}</td></tr>))}</tbody></table>) : (<table className="w-full text-sm text-left"><thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm"><tr><th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAllLeaves} checked={leaves.length > 0 && selectedLeaves.length === leaves.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></th><th className="p-3 w-24">申請人</th><th className="p-3 w-24">假別</th><th className="p-3">時間區間</th><th className="p-3 w-20">狀態</th><th className="p-3 w-40 text-xs text-gray-400">紀錄 ID</th></tr></thead><tbody>{sortedLeaves.map(l => (<tr key={l.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedLeaves.includes(l.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleLeave(l.id)}><td className="p-3 text-center" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selectedLeaves.includes(l.id)} onChange={() => handleToggleLeave(l.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></td><td className="p-3 font-medium text-gray-800">{l.requesterName}</td><td className="p-3 font-bold text-indigo-600">{l.type}</td><td className="p-3 text-xs text-gray-600">{l.start.replace('T', ' ')} ~ {l.end.replace('T', ' ')} <br/>({l.hours} 小時)</td><td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'approved' ? 'bg-green-100 text-green-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{l.status}</span></td><td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={l.id}>{l.id}</td></tr>))}</tbody></table>)}</div></div></div>);}
+<div className="bg-white rounded shadow-sm border overflow-hidden"><div className="p-3 bg-gray-50 border-b flex justify-between items-center"><span className="text-sm font-bold text-gray-600">已選取 {activeTab === 'events' ? selectedEvents.length : selectedLeaves.length} 項目 (手動勾選)</span><button onClick={handleDeleteSelected} disabled={isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0)} className={`bg-red-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 transition ${isProcessing || (activeTab === 'events' ? selectedEvents.length === 0 : selectedLeaves.length === 0) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700'}`}>{isProcessing ? <><Loader2 size={16} className="animate-spin" /> 刪除中...</> : <><Trash2 size={16} /> 批次刪除勾選項目</>}</button></div><div className="overflow-x-auto max-h-[60vh]">{activeTab === 'events' ? (<table className="w-full text-sm text-left"><thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm"><tr><th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAllEvents} checked={eventGroups.length > 0 && selectedEvents.length === eventGroups.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></th><th className="p-3 w-32">日期</th><th className="p-3 w-40">工作項目</th><th className="p-3">排班人員</th><th className="p-3 w-40 text-xs text-gray-400">群組 ID</th></tr></thead><tbody>{eventGroups.map(g => (<tr key={g.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedEvents.includes(g.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleEvent(g.id)}><td className="p-3 text-center" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selectedEvents.includes(g.id)} onChange={() => handleToggleEvent(g.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></td><td className="p-3 font-medium">{g.date}</td><td className="p-3 text-blue-700 font-bold">{g.type || '無標籤'}</td><td className="p-3 flex gap-1 flex-wrap">{g.items.length > 0 ? g.items.map((n, i) => <span key={i} className="bg-gray-200 px-2 py-0.5 rounded-full text-xs">{n}</span>) : '-'}</td><td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={g.id}>{g.id}</td></tr>))}</tbody></table>) : (<div className="space-y-3">
+<div className="bg-white/60 border border-gray-200 rounded-lg p-3 flex flex-wrap items-center gap-3 text-sm">
+  <span className="font-bold text-gray-700">篩選：</span>
+  <div className="flex items-center gap-2">
+    <span className="text-gray-600">月份</span>
+    <select value={leaveFilterMonth} onChange={e=>setLeaveFilterMonth(e.target.value)} className="border rounded px-2 py-1">
+      <option value="all">全年</option>
+      {Array.from({length:12}).map((_,i)=>{const v=String(i+1).padStart(2,'0'); return <option key={v} value={v}>{v} 月</option>;})}
+    </select>
+  </div>
+  <div className="flex items-center gap-2">
+    <span className="text-gray-600">人員</span>
+    <select value={leaveFilterUser} onChange={e=>setLeaveFilterUser(e.target.value)} className="border rounded px-2 py-1">
+      <option value="all">全部</option>
+      {(users||[]).map(u=> <option key={u.docId||u.uid} value={u.docId||u.uid}>{u.name}</option>)}
+    </select>
+  </div>
+  <div className="flex items-center gap-2">
+    <span className="text-gray-600">假別</span>
+    <select value={leaveFilterType} onChange={e=>setLeaveFilterType(e.target.value)} className="border rounded px-2 py-1">
+      <option value="all">全部</option>
+      {leaveTypeOptions.map(t=> <option key={t} value={t}>{t}</option>)}
+    </select>
+  </div>
+  <div className="flex items-center gap-2">
+    <span className="text-gray-600">狀態</span>
+    <select value={leaveFilterStatus} onChange={e=>setLeaveFilterStatus(e.target.value)} className="border rounded px-2 py-1">
+      <option value="all">全部</option>
+      <option value="pending">待職代</option>
+      <option value="deputy_signed">待組長</option>
+      <option value="approved">已核准</option>
+      <option value="rejected">退回</option>
+      <option value="withdrawn">已刪除</option>
+      <option value="recalled">已撤回</option>
+    </select>
+  </div>
+</div>
+<table className="w-full text-sm text-left"><thead className="bg-gray-100 text-gray-600 sticky top-0 z-10 shadow-sm"><tr><th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAllLeaves} checked={filteredLeaves.length > 0 && selectedLeaves.length === filteredLeaves.length} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></th><th className="p-3 w-24">申請人</th><th className="p-3 w-24">假別</th><th className="p-3">時間區間</th><th className="p-3 w-20">狀態</th><th className="p-3 w-40 text-xs text-gray-400">紀錄 ID</th><th className="p-3 w-24">操作</th></tr></thead><tbody>{filteredLeaves.map(l => (<tr key={l.id} className={`border-b hover:bg-red-50 transition cursor-pointer ${selectedLeaves.includes(l.id) ? 'bg-red-50/50' : ''}`} onClick={() => handleToggleLeave(l.id)}><td className="p-3 text-center" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selectedLeaves.includes(l.id)} onChange={() => handleToggleLeave(l.id)} className="w-4 h-4 text-red-600 rounded cursor-pointer" /></td><td className="p-3 font-medium text-gray-800">{l.requesterName}</td><td className="p-3 font-bold text-indigo-600">{normalizeOvertimeType(l.type)}</td><td className="p-3 text-xs text-gray-600">{l.start.replace('T', ' ')} ~ {l.end.replace('T', ' ')} <br/>({l.hours} 小時)</td><td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${l.status === 'approved' ? 'bg-green-100 text-green-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{l.status}</span></td><td className="p-3 text-xs text-gray-400 truncate max-w-[120px]" title={l.id}>{l.id}</td><td className="p-3" onClick={e=>e.stopPropagation()}><button onClick={()=>openEditLeave(l)} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded font-bold">編輯</button></td></tr>))}</tbody></table></div>)}
+{editOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div className="font-black text-gray-800">資料編輯</div>
+        <button onClick={()=>{setEditOpen(false); setEditTarget(null);}} className="p-2 rounded hover:bg-gray-100"><X size={18}/></button>
+      </div>
+      <div className="p-5 space-y-3 text-sm">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">假別</div>
+            <input value={editForm.type} onChange={e=>setEditForm(f=>({...f,type:e.target.value}))} className="w-full border rounded px-3 py-2" />
+            <div className="text-xs text-gray-400 mt-1">（可直接輸入或貼上）</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 mb-1">狀態</div>
+            <select value={editForm.status} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} className="w-full border rounded px-3 py-2">
+              <option value="pending">pending</option>
+              <option value="deputy_signed">deputy_signed</option>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+              <option value="withdrawn">withdrawn</option>
+              <option value="recalled">recalled</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">開始</div>
+            <input type="datetime-local" value={editForm.start} onChange={e=>setEditForm(f=>({...f,start:e.target.value}))} className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 mb-1">結束</div>
+            <input type="datetime-local" value={editForm.end} onChange={e=>setEditForm(f=>({...f,end:e.target.value}))} className="w-full border rounded px-3 py-2" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">時數</div>
+            <input type="number" step="0.5" value={editForm.hours} onChange={e=>setEditForm(f=>({...f,hours:e.target.value}))} className="w-full border rounded px-3 py-2" />
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 mb-1">職代(非加班才需要)</div>
+            <input value={editForm.deputyId} onChange={e=>setEditForm(f=>({...f,deputyId:e.target.value}))} className="w-full border rounded px-3 py-2" />
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500 mb-1">事由</div>
+          <textarea value={editForm.reason} onChange={e=>setEditForm(f=>({...f,reason:e.target.value}))} className="w-full border rounded px-3 py-2 min-h-[90px]" />
+        </div>
+      </div>
+      <div className="px-5 py-4 border-t flex justify-end gap-2">
+        <button onClick={()=>{setEditOpen(false); setEditTarget(null);}} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 font-bold">取消</button>
+        <button onClick={saveEditLeave} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold">儲存</button>
+      </div>
+    </div>
+  </div>
+)}
+
+</div></div></div>);}
 function LoginScreen({ auth }) {
 const [isLoggingIn, setIsLoggingIn] = useState(false);
 const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連線完成，請稍後再試。"); return; } setIsLoggingIn(true); const provider = new GoogleAuthProvider(); try { await signInWithPopup(auth, provider); } catch (error) { console.error("Google Sign-In Error", error); alert("登入被中斷或發生錯誤，請重試。\n詳細訊息: " + error.message); setIsLoggingIn(false); } };
