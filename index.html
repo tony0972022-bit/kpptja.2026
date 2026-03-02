@@ -322,7 +322,7 @@ leader: '組長',
 admin: '管理員'
 };
 const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出", "專案報告", "大宗"];
-const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "OFF", "專案報告", "大宗", "月報"];
+const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "專案報告", "大宗", "月報"];
 const DEFAULT_AREA_TAGS = ["高雄-身障","屏東-身障","台東-身障","澎湖-身障","訓就-岡山","訓就-鳳山","銀髮","分署"];
 const DEFAULT_ROTATION_RULES = [
 { id: 'visit', name: '澎東訪視', matchTag: '訪視', order: ['高湘怡', '黃國裕', '方姿云', '陳秋媚', '蔡凱宇', '盧怡倫'] },
@@ -3303,7 +3303,7 @@ return (
 <th className="p-4 text-sm font-semibold tracking-wide w-28">日期</th>
 <th className="p-4 text-sm font-semibold tracking-wide w-36 whitespace-nowrap">時間</th>
 <th className="p-4 text-sm font-semibold tracking-wide w-32">假別</th>
-<th className="p-4 text-sm font-semibold tracking-wide w-24">天/時數</th>
+<th className="p-4 text-sm font-semibold tracking-wide w-24">時數/天</th>
 <th className="p-4 text-sm font-semibold tracking-wide">事由</th>
 {isAdminOrLeader && <th className="p-4 text-sm font-semibold tracking-wide w-20 text-center">操作</th>}</tr></thead>
 <tbody>
@@ -3326,7 +3326,7 @@ return (
 {l.type}</span></td>
 <td className="p-4">
 <span className={`px-2 py-1 rounded-md font-bold text-sm ${isOfficialOrGain ? 'text-sky-700' : 'text-gray-700'}`}>
-{l.type.includes('加班') || l.type.includes('補休') || l.type.includes('榮譽假') ? `${l.hours} 時` : `${l.hours/8} 天`}</span></td>
+{Number(l.hours||0)} 時 <span className="text-xs text-gray-400">({(Number(l.hours||0)/8).toFixed(2)} 天)</span></span></td>
 <td className="p-4 text-sm text-gray-600 max-w-[250px] truncate" title={l.reason}>{l.reason}</td>
 {isAdminOrLeader && (
 <td className="p-4 text-center">
