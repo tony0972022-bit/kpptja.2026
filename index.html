@@ -3549,15 +3549,19 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     return { days, text: `${Math.max(0, years)} 年 ${Math.max(0, monthsDiff)} 個月` };
   };
 
-  // 會計用假別分組
+  // 會計用假別分組（例假日不納入統計）
+  // 依附圖的會計輸出格式：休假(特休)、榮譽假、加班(請款)、加班(補休用)、加班補休、其他假別
   const BASE_ROWS = [
-    { key: '例假日', label: '例假日', match: (t) => String(t||'').includes('例假') },
-    { key: '特休假', label: '特休假', match: (t) => String(t||'').includes('特休') && !String(t||'').includes('獲得') },
-    { key: '榮譽假', label: '榮譽假', match: (t) => String(t||'') === '榮譽假' },
-    { key: '加班(補休)', label: '加班(補休)', match: (t) => String(t||'').includes('加班') && String(t||'').includes('補休') },
-    { key: '加班(請款)', label: '加班(請款)', match: (t) => String(t||'').includes('加班') && String(t||'').includes('請款') },
-    { key: '事假', label: '事假', match: (t) => String(t||'').includes('事假') },
-    { key: '病假', label: '病假', match: (t) => String(t||'').includes('病假') },
+    { key: '休假時數(實休)', label: '休假時數(實休)', match: (t) => String(t||'').includes('特休') && !String(t||'').includes('獲得') },
+    { key: '休假時數(差勤表)', label: '休假時數(差勤表)', match: (t) => String(t||'').includes('特休') && !String(t||'').includes('獲得') }, // 目前同實休；如未來要用差勤表計算可再拆
+    { key: '榮譽假', label: '榮譽假時數(不秀)', match: (t) => String(t||'') === '榮譽假' },
+    { key: '加班(請款)', label: '加班(請領加班費)', match: (t) => String(t||'').includes('加班') && String(t||'').includes('請款') },
+    { key: '加班(補休)', label: '加班(補休用)', match: (t) => {
+        const s = String(t||'');
+        return s.includes('加班') && s.includes('補休') && s !== '加班補休';
+      }
+    },
+    { key: '補休', label: '加班補休', match: (t) => String(t||'') === '加班補休' },
   ];
 
   const personalLeaveNames = (leaveTypes || []).filter(t => t.category === 'personal').map(t => t.name);
@@ -3588,6 +3592,146 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     });
     return out;
   };
+  const toInt = (n) => {
+    const v = Number(n || 0);
+    if (!isFinite(v)) return 0;
+    // 會計輸出以整數小時計（若未來要保留小數可改這行）
+    return Math.round(v);
+  };
+
+  const buildExportDatasetForUser = (u) => {
+    const userLeaves = (leaves || []).filter(l => {
+      if (l.status !== 'approved') return false;
+      if (!String(l.start || '').startsWith(String(selectedYear))) return false;
+      const rid = l.requesterId;
+      return (rid === u.uid || rid === u.docId);
+    });
+
+    const months = [...Array(12)].map((_, i) => String(i + 1).padStart(2, '0'));
+    const sumByMatch = (matchFn) => {
+      const out = {};
+      months.forEach(mm => out[mm] = 0);
+      userLeaves.forEach(l => {
+        const mm = String(l.start || '').slice(5, 7);
+        if (!out[mm]) out[mm] = 0;
+        if (matchFn(l.type, l)) out[mm] += Number(l.hours || 0);
+      });
+      // 轉整數
+      months.forEach(mm => out[mm] = toInt(out[mm]));
+      return out;
+    };
+
+    const rows = BASE_ROWS.map(r => {
+      const byMonth = sumByMatch(r.match);
+      const total = months.reduce((a, mm) => a + (byMonth[mm] || 0), 0);
+      return { key: r.key, label: r.label, byMonth, total };
+    });
+
+    // 其他假別：把所有 personal 類別且未被上述列吃到的假別合併
+    const baseMatchers = BASE_ROWS.map(r => r.match);
+    const otherByMonth = {};
+    months.forEach(mm => otherByMonth[mm] = 0);
+    userLeaves.forEach(l => {
+      const mm = String(l.start || '').slice(5, 7);
+      const type = String(l.type || '');
+      const isPersonal = (leaveTypes || []).some(t => t.category === 'personal' && t.name === type);
+      if (!isPersonal) return;
+      // 排除已被 BASE_ROWS 分類者
+      const hit = baseMatchers.some(fn => fn(type, l));
+      if (hit) return;
+      otherByMonth[mm] += Number(l.hours || 0);
+    });
+    months.forEach(mm => otherByMonth[mm] = toInt(otherByMonth[mm]));
+    const otherTotal = months.reduce((a, mm) => a + (otherByMonth[mm] || 0), 0);
+    rows.push({ key: '其他假別', label: '其他假別', byMonth: otherByMonth, total: otherTotal });
+
+    return { months, rows };
+  };
+
+  const downloadExcelLike = () => {
+    try {
+      const yearLabel = `${selectedYear}年`;
+      const monthsLabel = [...Array(12)].map((_, i) => `${i+1}月`);
+
+      const usersToExport = (selectedUserId === 'ALL')
+        ? (viewableUsers || []).filter(u => u && (u.uid || u.docId))
+        : [targetUser].filter(Boolean);
+
+      // 內容：HTML Table（Excel 可直接開啟）
+      const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+      let html = '';
+      html += '<html><head><meta charset="utf-8"></head><body>';
+      html += '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Microsoft JhengHei,Arial;font-size:12px;">';
+
+      // Header row (像附圖：B1 顯示年度)
+      html += '<tr>';
+      html += '<th style="min-width:120px;"></th>';
+      html += `<th style="min-width:160px;text-align:left;">${esc(yearLabel)}</th>`;
+      monthsLabel.forEach(m => html += `<th style="min-width:60px;">${esc(m)}</th>`);
+      html += '<th style="min-width:70px;">總計</th>';
+      html += '<th style="min-width:120px;">備註</th>';
+      html += '</tr>';
+
+      usersToExport.forEach((u, uIdx) => {
+        const { months, rows } = buildExportDatasetForUser(u);
+
+        // 左側使用者資訊（附圖那種多行）
+        const join = u.joinDate || u.join_date || '';
+        const seniority = getSeniorityDays(join);
+        const extraLeaveDays = Number(u.extraLeaveDays || 0);
+        const honorEarned = Number(u.honorEarned || 0);
+        const honorUsed = Number(u.honorUsed || 0);
+
+        const userInfoLines = [
+          esc(u.name || u.displayName || u.email || '—'),
+          join ? esc(`${join}到職`) : '未設定到職日',
+          `年資：${esc(seniority.text)}`,
+          `特休：${toInt((seniority.days||0)*8)} (勞基法${seniority.days||0}天) / ${toInt(extraLeaveDays*8)} (單位${extraLeaveDays}天)`,
+          `榮譽假：${toInt(honorEarned)} (小時)`,
+          `本年度可修：${toInt((seniority.days||0)*8 + extraLeaveDays*8 + Math.max(0, honorEarned - honorUsed))} (小時)`
+        ];
+        const userCell = userInfoLines.join('<br/>');
+
+        rows.forEach((r, idx) => {
+          const isOvertimeGroup = (r.key === '加班(補休)' || r.key === '補休');
+          const bg = isOvertimeGroup ? 'background:#FFF2CC;' : '';
+          html += `<tr style="${bg}">`;
+
+          if (idx === 0) {
+            html += `<td rowspan="${rows.length}" style="vertical-align:top;white-space:nowrap;">${userCell}</td>`;
+          }
+          html += `<td style="text-align:left;white-space:nowrap;">${esc(r.label)}</td>`;
+          months.forEach(mm => {
+            const v = r.byMonth?.[mm] || 0;
+            html += `<td style="text-align:right;">${esc(v)}</td>`;
+          });
+          html += `<td style="text-align:right;font-weight:bold;">${esc(r.total || 0)}</td>`;
+          html += `<td></td>`;
+          html += '</tr>';
+        });
+
+        // 空白分隔列（像 Excel 會留一點空間）
+        html += '<tr><td colspan="16" style="border:none;height:8px;"></td></tr>';
+      });
+
+      html += '</table></body></html>';
+
+      const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${yearLabel}_會計統計.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert('匯出失敗：' + (e?.message || String(e)));
+      console.warn(e);
+    }
+  };
+
 
   const rowData = BASE_ROWS.map(r => ({ ...r, months: sumHoursBy((t) => r.match(t)) }));
   const otherAgg = sumHoursBy((t) => otherPersonalNames.includes(String(t||'')));
@@ -3617,6 +3761,9 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
           <select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedYear} onChange={e=>setSelectedYear(Number(e.target.value))}>
             {yearOptions.map(y => <option key={y} value={y}>{y} 年度</option>)}
           </select>
+          <button onClick={downloadExcelLike} className="inline-flex items-center gap-1.5 px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-sm shadow-sm">
+            <Download size={16}/> 匯出Excel
+          </button>
         </div>
       </div>
 
@@ -3633,10 +3780,10 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-gray-700">1. 年資(到職日)</span><span className="font-bold">{targetUser?.joinDate || '—'} <span className="text-[10px] text-gray-400 ml-1">({seniority?.text || '—'})</span></span></div>
                 <div className="flex justify-between"><span className="text-gray-700">2. 特休</span><span className="font-bold">{(seniority?.days||0)*8}<span className="text-[10px] text-gray-400 ml-1">(勞基法 {(seniority?.days||0)}天)</span> <span className="text-[10px] text-gray-400 ml-1">(單位 {extraLeaveDays}天)</span></span></div>
-                <div className="flex justify-between"><span className="text-gray-700">3. 例假日</span><span className="font-bold">— <span className="text-[10px] text-gray-400 ml-1">(小時/天)</span></span></div>
-                <div className="flex justify-between"><span className="text-gray-700">4. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
+                
+                <div className="flex justify-between"><span className="text-gray-700">3. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
                 <div className="flex justify-between text-indigo-700 pt-2 border-t"><span className="font-bold">5. 本年度可修</span><span className="font-black">{(seniority?.days||0)*8 + extraLeaveDays*8 + Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
-                <div className="text-[10px] text-gray-400 leading-relaxed pt-1">＊例假日配額若需計算，可後續加設定欄位（目前先保留格式）。</div>
+                <div className="text-[10px] text-gray-400 leading-relaxed pt-1"></div>
               </div>
             )}
           </div>
