@@ -128,6 +128,10 @@ const fmtISO = (s) => {
 
 
 
+
+// --- DateTime formatter (UI confirm modal) ---
+const formatDateTime = (v) => fmtDT(v);
+
 // -----------------------------------------------------------
 // --- Global Constants ---
 const WEATHER_LOCATIONS = [
@@ -261,6 +265,10 @@ const DEFAULT_LEAVE_TYPES = [
 // - 新名稱：加班(補休)；舊名稱：加班申請(列計)、加班申請(補休) → 統一視為「加班(補休)」
 // - 新名稱：加班(請款)；舊名稱：加班申請(不列計)、加班申請(請款) → 統一視為「加班(請款)」
 const OVERTIME_COMP_TYPE = "加班(補休)";
+var OVERTIME_COMP_TYPE_LEGACY = "加班申請(列計)"; // legacy: 舊名稱（列計）
+var OVERTIME_COMP_TYPE_LEGACY2 = "加班申請(補休)"; // legacy: 舊名稱（補休）
+// expose for safety
+window.OVERTIME_COMP_TYPE_LEGACY = OVERTIME_COMP_TYPE_LEGACY;
 const OVERTIME_COMP_LEGACY_TYPES = new Set(["加班申請(列計)", "加班申請(補休)", "加班(列計)"]);
 const OVERTIME_PAY_TYPE = "加班(請款)";
 const OVERTIME_PAY_LEGACY_TYPES = new Set(["加班申請(不列計)", "加班申請(請款)", "加班(不列計)"]);
@@ -285,6 +293,11 @@ const isOvertimePay = (t) => normalizeOvertimeType(t) === OVERTIME_PAY_TYPE;
 
 
 
+
+const isOfficialLeaveType = (t) => {
+  const nt = normalizeOvertimeType(t);
+  return ["公出","公假","出差",OVERTIME_COMP_TYPE,OVERTIME_PAY_TYPE].includes(nt);
+};
 const DEFAULT_ROLE_NAMES = {
 staff: '專員',
 leader: '組長',
@@ -1406,7 +1419,7 @@ const leavesOnDay = leaves.filter(l =>
 l.status !== 'rejected' && l.status !== 'withdrawn' &&
 dStr >= l.start.split('T')[0] &&
 dStr <= l.end.split('T')[0] &&
-!["出差", "公出", "公假", OVERTIME_COMP_TYPE, OVERTIME_COMP_TYPE_LEGACY, OVERTIME_PAY_TYPE, "榮譽假(獲得)"].includes(l.type));
+!["出差","公出","公假","榮譽假(獲得)"].includes(normalizeOvertimeType(l.type)) && ![OVERTIME_COMP_TYPE, OVERTIME_PAY_TYPE].includes(normalizeOvertimeType(l.type)));
 return leavesOnDay.map(l => (
 <div key={l.id} className="text-xs border border-pink-200 bg-pink-50 text-pink-700 px-2 py-1 my-1 w-full truncate font-bold rounded-md shadow-sm flex items-center justify-between">
 <span>{l.requesterName}</span>
@@ -1591,9 +1604,8 @@ const myLeave = leaves.find(l =>
 l.start.startsWith(dateStr));
 let status = '正常';
 const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
-const officialLeaves = ["公出", "公假", "出差", OVERTIME_COMP_TYPE, OVERTIME_COMP_TYPE_LEGACY, OVERTIME_PAY_TYPE];
-const isOfficialLeave = myLeave && officialLeaves.includes(myLeave.type);
-const isPersonalLeave = myLeave && !officialLeaves.includes(myLeave.type);
+const isOfficialLeave = myLeave && isOfficialLeaveType(myLeave.type);
+const isPersonalLeave = myLeave && !isOfficialLeaveType(myLeave.type);
 if (isExternal && !myLeave) status = '缺公務單';
 else if (isExternal && isPersonalLeave) status = '假別不符';
 else if (!myWork.length && isOfficialLeave) status = '異常公出';
