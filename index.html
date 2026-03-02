@@ -800,6 +800,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: approvalMenuCount},
 {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
 {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
+{id:'accounting', icon:<Calculator size={20}/>, label:'會計統計'},
 {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'},
 {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'}
 ].map(item => (
@@ -882,6 +883,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} />}
 {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} />}
 {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} crud={crud} />}
+{view === 'accounting' && <AccountingStatsView users={usersList} leaves={leaves} leaveTypes={leaveTypes} currentUser={userData} />}
 {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} settings={settings} />}
 {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
 {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
@@ -1685,7 +1687,7 @@ return (<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justi
 function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView }) {
 const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
 const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
-const [monthMode, setMonthMode] = useState('month'); // 'month' or 'year'
+const [monthMode, setMonthMode] = useState('year'); // 'month' or 'year' (預設全年)
 const [leaveFilter, setLeaveFilter] = useState('all');
 const [selectedIds, setSelectedIds] = useState([]);
 const scheduleData = useMemo(() => {
@@ -2034,8 +2036,36 @@ return (
 <button onClick={() => setActiveTab('mine')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'mine' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第一區：個人請假狀況</button>
 <button onClick={() => setActiveTab('deputy')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'deputy' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第二區：我是職代</button></div></div>
 <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
-<select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={monthMode} onChange={e=>setMonthMode(e.target.value)}><option value="month">月份</option><option value="year">全年</option></select>
-<input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
+<div className="flex bg-gray-100 p-1 rounded-lg">
+  <button
+    onClick={()=>{
+      setMonthMode('year');
+      // 切到全年時，保留年份；month 仍維持 yyyy-mm 以供後續計算
+      setMonth(m => (m && m.length>=4) ? `${m.slice(0,4)}-01` : `${new Date().getFullYear()}-01`);
+    }}
+    className={`px-3 py-1.5 text-sm font-bold rounded-md transition ${monthMode==='year' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
+  >全年</button>
+  <button
+    onClick={()=>setMonthMode('month')}
+    className={`px-3 py-1.5 text-sm font-bold rounded-md transition ${monthMode==='month' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
+  >月份</button>
+</div>
+
+{monthMode==='year' ? (
+  <select
+    className="border p-2 rounded text-sm bg-white flex-1 md:flex-none"
+    value={(month||'').slice(0,4)}
+    onChange={e=>setMonth(`${e.target.value}-01`)}
+    title="選擇年份"
+  >
+    {Array.from({length:7}).map((_,i)=>{
+      const y = new Date().getFullYear() - 3 + i;
+      return <option key={y} value={String(y)}>{y}年</option>;
+    })}
+  </select>
+) : (
+  <input type="month" className="border p-2 rounded text-sm flex-1 md:flex-none" value={month} onChange={e=>setMonth(e.target.value)} />
+)}
 {activeTab === 'mine' && (
 <>
 <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none"><option value="all">所有假別/出勤</option><optgroup label="公務與加班">{leaveTypes.filter(t=>t.category==='official').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="私假">{leaveTypes.filter(t=>t.category==='personal').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>
@@ -3484,6 +3514,178 @@ return (
 )}</tr>)
 })}
 {filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div></div>);}
+
+// === 會計統計 ===
+function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
+  const now = new Date();
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedUserId, setSelectedUserId] = useState('ALL'); // ALL = 全體
+  const [showOther, setShowOther] = useState(false);
+
+  const viewableUsers = users || [];
+  const targetUser = selectedUserId === 'ALL' ? null : (viewableUsers.find(u => u.docId === selectedUserId) || currentUser);
+
+  const yearOptions = [...Array(11)].map((_, i) => now.getFullYear() - 5 + i);
+  const months = [...Array(12)].map((_, i) => String(i + 1).padStart(2, '0'));
+
+  // 依年資計算法定特休天數（以年底為計算基準）
+  const getSeniorityDays = (joinDateStr) => {
+    if (!joinDateStr) return { days: 0, text: '未設定到職日' };
+    const joinDate = new Date(joinDateStr);
+    const checkDate = new Date(selectedYear, 11, 31);
+    let years = checkDate.getFullYear() - joinDate.getFullYear();
+    let monthsDiff = checkDate.getMonth() - joinDate.getMonth();
+    if (monthsDiff < 0 || (monthsDiff === 0 && checkDate.getDate() < joinDate.getDate())) { years--; monthsDiff += 12; }
+    if (checkDate.getDate() < joinDate.getDate()) { monthsDiff--; }
+    let totalMonths = (years * 12) + monthsDiff;
+    if (totalMonths < 0) totalMonths = 0;
+    let days = 0;
+    if (totalMonths >= 6 && totalMonths < 12) days = 3;
+    else if (totalMonths >= 12 && totalMonths < 24) days = 7;
+    else if (totalMonths >= 24 && totalMonths < 36) days = 10;
+    else if (totalMonths >= 36 && totalMonths < 60) days = 14;
+    else if (totalMonths >= 60 && totalMonths < 120) days = 15;
+    else if (totalMonths >= 120) days = Math.min(30, 15 + (Math.floor(totalMonths/12) - 9));
+    return { days, text: `${Math.max(0, years)} 年 ${Math.max(0, monthsDiff)} 個月` };
+  };
+
+  // 會計用假別分組
+  const BASE_ROWS = [
+    { key: '例假日', label: '例假日', match: (t) => String(t||'').includes('例假') },
+    { key: '特休假', label: '特休假', match: (t) => String(t||'').includes('特休') && !String(t||'').includes('獲得') },
+    { key: '榮譽假', label: '榮譽假', match: (t) => String(t||'') === '榮譽假' },
+    { key: '加班(補休)', label: '加班(補休)', match: (t) => String(t||'').includes('加班') && String(t||'').includes('補休') },
+    { key: '加班(請款)', label: '加班(請款)', match: (t) => String(t||'').includes('加班') && String(t||'').includes('請款') },
+    { key: '事假', label: '事假', match: (t) => String(t||'').includes('事假') },
+    { key: '病假', label: '病假', match: (t) => String(t||'').includes('病假') },
+  ];
+
+  const personalLeaveNames = (leaveTypes || []).filter(t => t.category === 'personal').map(t => t.name);
+  const otherPersonalNames = personalLeaveNames.filter(n => {
+    if (!n) return false;
+    const s = String(n);
+    if (s.includes('特休') || s === '榮譽假') return false;
+    if (s.includes('事假') || s.includes('病假')) return false;
+    if (s.includes('例假')) return false;
+    return true;
+  });
+
+  const scopedLeaves = (leaves || []).filter(l => {
+    if (l.status !== 'approved') return false;
+    if (!String(l.start || '').startsWith(String(selectedYear))) return false;
+    if (selectedUserId === 'ALL') return true;
+    const rid = l.requesterId;
+    return !!targetUser && (rid === targetUser.uid || rid === targetUser.docId);
+  });
+
+  const sumHoursBy = (matchFn) => {
+    const out = {};
+    months.forEach(m => out[m] = 0);
+    scopedLeaves.forEach(l => {
+      const m = String(l.start || '').slice(5, 7);
+      if (!out[m]) out[m] = 0;
+      if (matchFn(l.type, l)) out[m] += Number(l.hours || 0);
+    });
+    return out;
+  };
+
+  const rowData = BASE_ROWS.map(r => ({ ...r, months: sumHoursBy((t) => r.match(t)) }));
+  const otherAgg = sumHoursBy((t) => otherPersonalNames.includes(String(t||'')));
+  const otherDetail = otherPersonalNames.map(name => ({ key: `其他:${name}`, label: name, months: sumHoursBy((t) => String(t||'') === name) }));
+
+  // 基本配額說明（只在個人模式顯示）
+  const seniority = targetUser ? getSeniorityDays(targetUser.joinDate) : null;
+  const extraLeaveDays = targetUser ? Number(targetUser.extraLeaveDays || 0) : 0;
+  const honorEarned = targetUser ? scopedLeaves.filter(l => l.type === '榮譽假(獲得)').reduce((s,l)=>s+Number(l.hours||0),0) : 0;
+  const honorUsed = targetUser ? scopedLeaves.filter(l => l.type === '榮譽假').reduce((s,l)=>s+Number(l.hours||0),0) : 0;
+
+  const fmt = (v) => {
+    const n = Number(v || 0);
+    if (!n) return '';
+    return (n % 1 === 0) ? String(n) : n.toFixed(1);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto">
+      <div className="bg-white p-4 rounded shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <h2 className="text-xl font-bold flex items-center gap-2"><Calculator/> 會計統計</h2>
+        <div className="flex gap-2 flex-wrap items-center">
+          <select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedUserId} onChange={e=>{ setSelectedUserId(e.target.value); setShowOther(false); }}>
+            <option value="ALL">全體</option>
+            {viewableUsers.map(u => <option key={u.docId} value={u.docId}>{u.name}</option>)}
+          </select>
+          <select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={selectedYear} onChange={e=>setSelectedYear(Number(e.target.value))}>
+            {yearOptions.map(y => <option key={y} value={y}>{y} 年度</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-xl shadow-sm border p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-gray-800">基本假別說明</h3>
+              <span className="text-xs text-gray-500">{selectedYear} 年度</span>
+            </div>
+            {selectedUserId === 'ALL' ? (
+              <div className="text-sm text-gray-600 leading-relaxed">已選擇 <span className="font-bold">全體</span>，左側配額資訊僅在選擇個人時顯示。</div>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-700">1. 年資(到職日)</span><span className="font-bold">{targetUser?.joinDate || '—'} <span className="text-[10px] text-gray-400 ml-1">({seniority?.text || '—'})</span></span></div>
+                <div className="flex justify-between"><span className="text-gray-700">2. 特休</span><span className="font-bold">{(seniority?.days||0)*8}<span className="text-[10px] text-gray-400 ml-1">(勞基法 {(seniority?.days||0)}天)</span> <span className="text-[10px] text-gray-400 ml-1">(單位 {extraLeaveDays}天)</span></span></div>
+                <div className="flex justify-between"><span className="text-gray-700">3. 例假日</span><span className="font-bold">— <span className="text-[10px] text-gray-400 ml-1">(小時/天)</span></span></div>
+                <div className="flex justify-between"><span className="text-gray-700">4. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
+                <div className="flex justify-between text-indigo-700 pt-2 border-t"><span className="font-bold">5. 本年度可修</span><span className="font-black">{(seniority?.days||0)*8 + extraLeaveDays*8 + Math.max(0, honorEarned - honorUsed)} <span className="text-[10px] text-gray-400 ml-1">(小時)</span></span></div>
+                <div className="text-[10px] text-gray-400 leading-relaxed pt-1">＊例假日配額若需計算，可後續加設定欄位（目前先保留格式）。</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-xl shadow-sm border p-4 overflow-auto">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-bold text-gray-800">總表 (1-12月)</div>
+              <div className="text-xs text-gray-500">單位：小時</div>
+            </div>
+            <table className="min-w-[880px] w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-600">
+                  <th className="p-2 border text-left w-40">假別</th>
+                  {months.map((m,i)=>(<th key={m} className="p-2 border text-center">{i+1}</th>))}
+                </tr>
+              </thead>
+              <tbody>
+                {rowData.map(r => (
+                  <tr key={r.key} className="hover:bg-gray-50">
+                    <td className="p-2 border font-bold text-gray-700">{r.label}</td>
+                    {months.map(m => (<td key={m} className="p-2 border text-center">{fmt(r.months[m])}</td>))}
+                  </tr>
+                ))}
+                <tr className="bg-orange-50/40">
+                  <td className="p-2 border font-bold text-orange-700">
+                    <button className="flex items-center gap-2 hover:underline" onClick={()=>setShowOther(v=>!v)}>
+                      其他假別(私假)
+                      <span className="text-[10px] text-orange-600">{showOther ? '收合' : '展開'}</span>
+                    </button>
+                  </td>
+                  {months.map(m => (<td key={m} className="p-2 border text-center text-orange-700">{fmt(otherAgg[m])}</td>))}
+                </tr>
+                {showOther && otherDetail.map(r => (
+                  <tr key={r.key} className="hover:bg-orange-50/30">
+                    <td className="p-2 border text-gray-700 pl-5">— {r.label}</td>
+                    {months.map(m => (<td key={m} className="p-2 border text-center">{fmt(r.months[m])}</td>))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="text-[11px] text-gray-400 mt-3 leading-relaxed">＊「其他假別(私假)」會自動抓取系統假別設定中，未列在上方固定清單的私假類別；若日後新增假別，這裡會自動增加。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function AttendanceView({ user, db, attendanceRecords, leaves, leaveTypes, settings }) {
 const [selectedMonth, setSelectedMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
 const [localRecords, setLocalRecords] = useState({});
