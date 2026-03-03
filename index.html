@@ -2209,7 +2209,7 @@ return (
 <tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-4 font-semibold text-sm whitespace-nowrap">姓名</th><th className="p-4 font-semibold text-sm whitespace-nowrap">日期</th><th className="p-4 font-semibold text-sm whitespace-nowrap">時間</th><th className="p-4 font-semibold text-sm">假別</th><th className="p-4 font-semibold text-sm">時數</th><th className="p-4 font-semibold text-sm">職代</th><th className="p-4 font-semibold text-sm">排班內容</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm">備註</th><th className="p-4 font-semibold text-sm">狀態</th><th className="p-4 font-semibold text-sm text-center">操作</th></tr></thead>
 <tbody>
 {displayRows.map((r) => {
-const canRecall = r.rawLeave && ['pending','deputy_signed','approved'].includes(r.rawLeave.status);
+const canRecall = r.rawLeave && ['pending','deputy_signed','rejected','recalled','approved'].includes(r.rawLeave.status);
 const deputyName = r.rawLeave?.deputyId ? (getUserNameByKey(users, r.rawLeave.deputyId, '未知')) : '-';
 const isOfficial = r.leaveType === '出差' || r.leaveType === '公出' || r.leaveType === '公假';
 return (<>
@@ -2295,7 +2295,7 @@ const eD = (l.end||'').split('T')[0]||'';
 const eT = (l.end||'').split('T')[1]||'';
 const dateText = sD && eD && sD!==eD ? `${sD}~${eD}` : (sD || eD || '-');
 const timeText = sT && eT ? `${sT}~${eT}` : (sT || eT || '整天');
-const statusText = l.status === 'pending' ? '待職代審查中' : l.status === 'deputy_signed' ? '組長審查中' : l.status === 'rejected' ? '退回/未通過' : l.status === 'approved' ? '已核准' : l.status === 'recalled' ? '已撤回' : l.status;
+const statusText = l.status === 'pending' ? '待職代審查中' : l.status === 'deputy_signed' ? '組長審查中' : l.status === 'rejected' ? '退回/未通過（可修改後重送）' : l.status === 'approved' ? '已核准' : l.status === 'recalled' ? '已撤回（請修改後重送）' : l.status;
 const badge = l.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : l.status === 'deputy_signed' ? 'bg-blue-100 text-blue-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : l.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700';
 return (
 <tr key={l.id} className="border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors">
@@ -3324,17 +3324,18 @@ if(!recallModal.reason.trim()) { alert("請填寫撤簽原因！讓主管了解�
 setProcessingId(recallModal.leave.id);
 try {
 await crud.updateLeave(recallModal.leave.id, {
-status: 'pending',
+status: 'recalled',
+recalledAt: new Date(),
+recalledByName: currentUser.name || currentUser.displayName || '',
 deputySignedAt: null,
 deputySignedBy: null,
 deputySignedByName: null,
 approverId: null,
 approvalDate: null,
 recallReason: recallModal.reason,
-resubmittedAt: new Date(),
-note: (recallModal.leave.note ? recallModal.leave.note + ' | ' : '') + `[修改重送] ${recallModal.reason}`
+note: (recallModal.leave.note ? recallModal.leave.note + ' | ' : '') + `[已撤回] ${recallModal.reason}`
 });
-alert("假單已更新並重新送審，請等待職代與主管審核。");
+alert("此假單已撤回給申請人，可於『請假狀況』中修改後重新送出。");
 setRecallModal({ open: false, leave: null, reason: '' });
 } catch(e) { alert("操作失敗"); }
 setProcessingId(null);
@@ -4173,6 +4174,23 @@ if (!isRedDay) {
 if (!newRecords[dateStr]) { newRecords[dateStr] = { start: defaultStart, end: defaultEnd }; }}}
 setLocalRecords(newRecords);
 };
+const batchClear = () => {
+  const newRecords = { ...localRecords };
+  for (let i = 1; i <= daysInMonth; i++) {
+    const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
+    const dayOfWeek = new Date(dateStr).getDay();
+    const isRedDay = dayOfWeek === 0 || dayOfWeek === 6 || !!TAIWAN_HOLIDAYS_2026[dateStr] || !!settings?.customHolidays?.[dateStr];
+    // 只清除上班日（避免把你刻意填入的紅字加班/補班改掉）
+    if (!isRedDay) {
+      if (newRecords[dateStr]) {
+        newRecords[dateStr] = { ...newRecords[dateStr], start: '', end: '' };
+        if (!newRecords[dateStr].start && !newRecords[dateStr].end) delete newRecords[dateStr];
+      }
+    }
+  }
+  setLocalRecords(newRecords);
+};
+
 const saveAttendance = async () => {
 const batch = writeBatch(db);
 Object.keys(localRecords).forEach(date => {
@@ -4255,7 +4273,9 @@ return (
 <span className="text-xs text-gray-400">-</span>
 <input type="time" className="border rounded px-1.5 py-1 text-xs outline-none bg-white" value={defaultEnd} onChange={e=>setDefaultEnd(e.target.value)} />
 <button onClick={batchFill} className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 hover:bg-blue-200 transition">
-<CheckSquare size={16}/> 批量填入</button></div>
+<CheckSquare size={16}/> 批量填入</button>
+<button onClick={batchClear} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 hover:bg-gray-200 transition">
+<Trash2 size={16}/> 批量清除</button></div>
 <button onClick={downloadExcel} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-green-200 transition"><Download size={16}/> 下載 Excel</button></div></div>
 <div className="bg-white rounded shadow overflow-hidden border">
 <div className="max-h-[600px] overflow-y-auto">
