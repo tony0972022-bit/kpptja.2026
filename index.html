@@ -965,7 +965,7 @@ const todayStr = getLocalDateString(today);
 const myDeputyPendingCount = leaves.filter(l => (l.deputyId === user.uid || l.deputyId === user.docId || String(l.deputyId||'').toLowerCase() === (user.email||'').toLowerCase()) && l.status === 'pending').length;
 const teamDeputyPendingCount = (user.role === 'leader' || user.role === 'admin') ? leaves.filter(l => l.status === 'pending' && !!l.deputyId).length : 0;
 const teamLeaderPendingCount = (user.role === 'leader' || user.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').length : 0;
-const myPendingCount = leaves.filter(l => (l.requesterId === user.uid || l.requesterId === user.docId) && (l.status === 'pending' || l.status === 'deputy_signed')).length;
+const myPendingCount = leaves.filter(l => ((l.requesterId === user.uid || l.requesterId === user.docId || l.requesterUid === user.uid || l.requesterDocId === user.docId) && (l.status === 'pending' || l.status === 'deputy_signed'))).length;
 const personalLeaveTypeNames = leaveTypes.filter(t => t.category === 'personal').map(t => t.name);
 const todayLeavesDetails = leaves.filter(l => l.start.startsWith(todayStr) && l.status === 'approved' && personalLeaveTypeNames.includes(l.type)).map(l => {
 const timeStr = l.hours >= 8 ? '整天' : (l.start.includes('T08') || l.start.includes('T09') ? '上午' : '下午');
@@ -2550,10 +2550,10 @@ return (
 <button onClick={exportCSV} className="bg-green-600 text-white px-3 py-2 rounded flex items-center gap-1 text-sm hover:bg-green-700 transition" title="匯出 Excel"><FileSpreadsheet size={16}/></button></>
 )}</div></div>
 {activeTab === 'mine' ? (
-<div className="bg-white rounded-lg shadow-sm overflow-hidden animate-in fade-in border border-gray-200">
+<div className="bg-white rounded-lg shadow-sm overflow-x-auto animate-in fade-in border border-gray-200">
 <table className="w-full text-left">
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-<tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-4 font-semibold text-sm whitespace-nowrap">姓名</th><th className="p-4 font-semibold text-sm whitespace-nowrap">日期</th><th className="p-4 font-semibold text-sm whitespace-nowrap">時間</th><th className="p-4 font-semibold text-sm">假別</th><th className="p-4 font-semibold text-sm">時數</th><th className="p-4 font-semibold text-sm">職代</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm">備註</th><th className="p-4 font-semibold text-sm">狀態</th><th className="p-4 font-semibold text-sm text-center">操作</th></tr></thead>
+<tr><th className="p-4 w-10 text-center"><input type="checkbox" checked={isAllSelected} onChange={toggleAll} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" /></th><th className="p-4 font-semibold text-sm whitespace-nowrap">姓名</th><th className="p-4 font-semibold text-sm whitespace-nowrap">日期</th><th className="p-4 font-semibold text-sm whitespace-nowrap">時間</th><th className="p-4 font-semibold text-sm">假別</th><th className="p-4 font-semibold text-sm">時數</th><th className="p-4 font-semibold text-sm">職代</th><th className="p-4 font-semibold text-sm">事由</th><th className="p-4 font-semibold text-sm">備註</th><th className="p-4 font-semibold text-sm">狀態</th><th className="p-4 font-semibold text-sm whitespace-nowrap text-center w-44">操作</th></tr></thead>
 <tbody>
 {displayRows.map((r) => {
 const canRecall = r.rawLeave && ['pending','deputy_signed','rejected','recalled','approved'].includes(r.rawLeave.status);
@@ -2577,7 +2577,7 @@ return (<>
 <td className="p-4">
 <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight whitespace-nowrap ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
 {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}</span></td>
-<td className="p-4 text-center">
+<td className="p-4 text-center whitespace-nowrap min-w-[180px]">
   <div className="flex items-center justify-center gap-2 whitespace-nowrap">
     {r._groupKey && (
       <button onClick={()=>toggleGroupExpand(r._groupKey)} className="text-gray-700 hover:text-white border border-gray-200 bg-gray-50 hover:bg-gray-700 px-3 py-1.5 rounded-md text-xs font-bold transition inline-flex items-center gap-1 shadow-sm" title="展開/收合每日明細">
@@ -2617,7 +2617,7 @@ return (<>
 })}
 {filteredRows.length === 0 && <tr><td colSpan="11" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}</tbody></table></div>
 ) : (
-<div className="bg-white rounded-lg shadow-sm overflow-hidden animate-in fade-in border border-gray-200">
+<div className="bg-white rounded-lg shadow-sm overflow-x-auto animate-in fade-in border border-gray-200">
 <table className="w-full text-left">
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
 <tr>
@@ -2657,7 +2657,7 @@ return (
 <td className="p-4 text-sm text-gray-600">{l.note || '-'}</td>
 <td className="p-4"><span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${badge}`}>{statusText}</span></td>
 <td className="p-4 text-center text-sm text-gray-400">-</td>
-<td className="p-4 text-center">
+<td className="p-4 text-center whitespace-nowrap min-w-[180px]">
 <button onClick={() => setView && setView('approval')} disabled={l.status!=='pending'} className={`px-3 py-1.5 rounded-md text-xs font-bold shadow-sm border ${l.status==='pending' ? 'bg-indigo-600 text-white hover:bg-indigo-700 border-indigo-600' : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'}`}>前往審核</button>
 </td>
 </tr>
@@ -2715,6 +2715,7 @@ useEffect(() => { try { localStorage.setItem('workShift', workShift); } catch {}
 
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [submitError, setSubmitError] = useState('');
+const [submitSuccess, setSubmitSuccess] = useState('');
 const [confirmOpen, setConfirmOpen] = useState(false);
 const [confirmData, setConfirmData] = useState(null);
 const [pendingSubmit, setPendingSubmit] = useState(null);
@@ -2729,6 +2730,25 @@ const personalTypes = leaveTypes.filter(t => t.category === 'personal');
 const overtimeTypeName = officialTypes.find(t => (t.name||'').includes('加班'))?.name || '加班';
 const currentTypeDesc = leaveTypes.find(t => t.name === form.type)?.desc || '';
 const isOvertimePayType = isOvertimePay(form.type);
+const resetBlock2Form = () => {
+  const today = getLocalDateString();
+  setForm({ type: '', start:'', end:'', reason:'', deputyId:'' });
+  setTypeError(false);
+  setHours(0);
+  setInputMode('slot');
+  setSlotDate(today);
+  applySlotPreset('all_day');
+  setManualRangeType('gt1');
+  setShortDate(today);
+  setShortStartH('08'); setShortStartM('00');
+  setShortEndH('17'); setShortEndM('00');
+  setMultiStartDate(today);
+  setMultiDays(1);
+  setMultiDates([]);
+  setMultiSelected({});
+  setMultiStartH('08'); setMultiStartM('00');
+  setMultiEndH('17'); setMultiEndM('00');
+};
 // 加班可能超過 17:00：選到加班時自動切換到自訂時間（不受 08:00-17:00 限制）
 useEffect(() => {
   if (isOvertime(form.type)) {
@@ -3027,6 +3047,7 @@ const checkAnnualLeaveEnough = (typeName, startISO, hoursToUse) => {
 };
 const showSubmitError = (msg) => {
   const text = String(msg || '送出失敗，請檢查欄位');
+  setSubmitSuccess('');
   setSubmitError(text);
   alert(text);
 };
@@ -3038,6 +3059,7 @@ const fmtDaysHoursText = (h) => {
   return d + '天 + ' + rh + '小時';
 };
 const handleTaskSubmit = async (taskData, taskId) => {
+  setSubmitSuccess('');
   setSubmitError('');
   // 第一區塊（排班日曆）送出：改為先跳確認視窗
   setSubmittingTaskId(taskId);
@@ -3100,6 +3122,7 @@ const handleTaskSubmit = async (taskData, taskId) => {
 
 
 const handleManualSubmit = async (e) => {
+setSubmitSuccess('');
 setSubmitError('');
 e.preventDefault();
 let finalStart = form.start;
@@ -3152,9 +3175,9 @@ if (isOvertimePay(form.type)) {
 if (!checkAnnualLeaveEnough(form.type, finalStart, finalHours)) { return; }
 if (form.type === '補休') {
 let totalOvertime = 0;
-leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && isOvertimeComp(l.type)) { totalOvertime += Number(l.hours); } });
+leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId || l.requesterUid === user.uid || l.requesterDocId === user.docId) && l.status === 'approved' && isOvertimeComp(l.type)) { totalOvertime += Number(l.hours); } });
 let usedCompensatory = 0;
-leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId) && l.status === 'approved' && l.type === '補休') { usedCompensatory += Number(l.hours); } });
+leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId || l.requesterUid === user.uid || l.requesterDocId === user.docId) && l.status === 'approved' && l.type === '補休') { usedCompensatory += Number(l.hours); } });
 const balance = totalOvertime - usedCompensatory;
 if (finalHours > balance) { showSubmitError(`補休時數不足，目前可用 ${balance} 小時，申請 ${finalHours} 小時。`); return; }}
 if(!isOvertime(form.type) && hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ showSubmitError('職務代理人時段衝突，請改選其他人員。'); return; }
@@ -3209,6 +3232,18 @@ const executeConfirmedSubmit = async () => {
     setConfirmOpen(false);
     setConfirmData(null);
     setPendingSubmit(null);
+    setSubmitError('');
+    const fromBlock1 = !!safePayload?.sourceGroupId;
+    if (!fromBlock1) {
+      resetBlock2Form();
+      setOpenBlock2(true);
+      setTimeout(() => {
+        try { block2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+      }, 0);
+      setSubmitSuccess('已成功送出：' + (safePayload.type || '假單') + '。');
+    } else {
+      setSubmitSuccess('');
+    }
     const msg = isOvertime(safePayload.type) ? "加班申請已送出！" : "申請已送出！";
     alert(msg);
   } catch (e) {
@@ -3572,6 +3607,27 @@ return (
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-2">
               {submitError && <div className="w-full text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2">{submitError}</div>}
+              {submitSuccess && (
+                <div className="w-full text-sm bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-3 py-2 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div>{submitSuccess} 你可至「請假狀況」查看審核進度。</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setView && setView('personal')}
+                      className="px-3 py-1.5 rounded border border-emerald-300 bg-white text-emerald-700 text-xs font-bold hover:bg-emerald-100"
+                    >
+                      前往請假狀況
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubmitSuccess('')}
+                      className="px-3 py-1.5 rounded border border-emerald-200 bg-emerald-100 text-emerald-800 text-xs font-bold hover:bg-emerald-200"
+                    >
+                      關閉
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="text-xs text-gray-600">
                 {(() => {
                   try {
@@ -4354,7 +4410,7 @@ return (
 {Number(l.hours||0)} 時 <span className="text-xs text-gray-400">({(Number(l.hours||0)/8).toFixed(2)} 天)</span></span></td>
 <td className="p-4 text-sm text-gray-600 max-w-[250px] truncate" title={l.reason}>{l.reason}</td>
 {isAdminOrLeader && (
-<td className="p-4 text-center">
+<td className="p-4 text-center whitespace-nowrap min-w-[180px]">
 {l.type === '榮譽假(獲得)' && (
 <div className="flex justify-center gap-1">
 <button onClick={() => handleEditHonor(l)} className="text-blue-600 hover:bg-blue-100 p-1.5 rounded-md transition" title="修改時數"><Edit2 size={14}/></button>
@@ -4765,10 +4821,26 @@ const [defaultStart, setDefaultStart] = useState('08:00');
 const [defaultEnd, setDefaultEnd] = useState('17:00');
 const daysInMonth = new Date(selectedMonth.split('-')[0], selectedMonth.split('-')[1], 0).getDate();
 const officialTypes = leaveTypes.filter(t => t.category === 'official').map(t => t.name);
+const isMyLeave = (l) => {
+  if (!l) return false;
+  return (
+    l.requesterId === user.uid ||
+    l.requesterId === user.docId ||
+    l.requesterUid === user.uid ||
+    l.requesterDocId === user.docId
+  );
+};
+const isDateInLeaveRange = (l, dateStr) => {
+  if (!l || !dateStr) return false;
+  const s = String(l.start || '').split('T')[0];
+  const e = String(l.end || l.start || '').split('T')[0];
+  if (!s || !e) return false;
+  return dateStr >= s && dateStr <= e;
+};
 const getDayOvertimeRanges = (dateStr) => {
   return (leaves || [])
     .filter(l =>
-      (l.requesterId === user.uid || l.requesterId === user.docId) &&
+      isMyLeave(l) &&
       l.status === 'approved' &&
       l.start.startsWith(dateStr) &&
       (isOvertimePay(l.type) || isOvertimeComp(l.type))
@@ -4867,10 +4939,11 @@ const rec = localRecords[dateStr] || {};
 let morningState = isRedDay ? 'holiday' : 'normal';
 let afternoonState = isRedDay ? 'holiday' : 'normal';
 const dayLeaves = leaves.filter(l =>
-(l.requesterId === user.uid || l.requesterId === user.docId) &&
+isMyLeave(l) &&
 l.status === 'approved' &&
-l.start.startsWith(dateStr));
+isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
+if (isRedDay) return;
 const isOfficial = officialTypes.includes(dayLeave.type);
 const isAllDay = Number(dayLeave.hours) >= 8;
 const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
@@ -4954,10 +5027,11 @@ let afternoonState = isRedDay ? 'holiday' : 'normal';
 let morningOfficialLabel = '出差';
 let afternoonOfficialLabel = '出差';
 const dayLeaves = leaves.filter(l =>
-(l.requesterId === user.uid || l.requesterId === user.docId) &&
+isMyLeave(l) &&
 l.status === 'approved' &&
-l.start.startsWith(dateStr));
+isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
+if (isRedDay) return;
 const isOfficial = officialTypes.includes(dayLeave.type);
 const isAllDay = Number(dayLeave.hours) >= 8;
 const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
@@ -5383,6 +5457,17 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
+
+
+
+
+
 
 
 
