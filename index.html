@@ -354,7 +354,9 @@ const normalizeRotationRules = (rules = []) => {
   return list.map(r => ({
     ...r,
     order: Array.isArray(r?.order) ? r.order : [],
-    pausedUsers: Array.isArray(r?.pausedUsers) ? r.pausedUsers : []
+    pausedUsers: Array.isArray(r?.pausedUsers) ? r.pausedUsers : [],
+    nextCandidate: typeof r?.nextCandidate === 'string' ? r.nextCandidate : '',
+    lastAssignedDate: typeof r?.lastAssignedDate === 'string' ? r.lastAssignedDate : ''
   }));
 };
 const TIME_SLOTS = [
@@ -1248,30 +1250,24 @@ if (rule && stats[rule.id][e.userName] !== undefined) stats[rule.id][e.userName]
 });
 return stats;
 }, [events, rotationRules]);
+const getActiveOrder = (rule) => {
+  if (!rule || !Array.isArray(rule.order)) return [];
+  const pausedSet = new Set(rule.pausedUsers || []);
+  return rule.order.filter(name => !pausedSet.has(name));
+};
 const getNextRotationPerson = (matchTag) => {
 const rule = rotationRules.find(r => r.matchTag === matchTag);
 if (!rule || !rule.order?.length) return null;
-const pausedSet = new Set(rule.pausedUsers || []);
-const activeOrder = rule.order.filter(name => !pausedSet.has(name));
-const sortedEvents = [...events].filter(e => e.type === 'tag' && e.item === matchTag).sort((a,b) => new Date(b.date) - new Date(a.date));
+const activeOrder = getActiveOrder(rule);
 if (activeOrder.length === 0) {
-  return { user: null, lastDate: sortedEvents[0]?.date || null };
+  return { user: null, lastDate: rule.lastAssignedDate || null, nextName: null };
 }
-if (sortedEvents.length === 0) {
-  return { user: users.find(u => u.name === activeOrder[0]), lastDate: null };
-}
-const lastDate = sortedEvents[0].date;
-const lastGroup = sortedEvents[0].groupId;
-const pplInGroup = events.filter(e => e.groupId === lastGroup && e.type === 'person').map(e=>e.userName);
-const presentIndexes = pplInGroup.map(p => activeOrder.indexOf(p)).filter(i => i !== -1);
-const next = presentIndexes.length > 0
-  ? activeOrder[(Math.max(...presentIndexes) + 1) % activeOrder.length]
-  : activeOrder[0];
-return { user: users.find(u => u.name === next), lastDate };
+const nextName = (rule.nextCandidate && activeOrder.includes(rule.nextCandidate)) ? rule.nextCandidate : activeOrder[0];
+return { user: users.find(u => u.name === nextName), lastDate: rule.lastAssignedDate || null, nextName };
 };
 const rotationData = rotationRules.map(rule => {
 const info = getNextRotationPerson(rule.matchTag);
-return { ...rule, nextPerson: info?.user?.name || null, lastDate: info?.lastDate || null, pausedUsers: Array.isArray(rule.pausedUsers) ? rule.pausedUsers : [] };
+return { ...rule, nextPerson: info?.nextName || info?.user?.name || null, lastDate: info?.lastDate || null, pausedUsers: Array.isArray(rule.pausedUsers) ? rule.pausedUsers : [] };
 });
 const handleDayClick = (dObj) => {
 const dStr = getLocalDateString(dObj);
@@ -1308,6 +1304,29 @@ else {
   setSelUsers([]);
   alert('此輪序目前已全部暫停，請先到「輪序表」恢復至少一位人員。');
 }
+};
+const advanceRotationCursor = (matchTag, selectedUserIds, assignedDate) => {
+  const ruleIdx = rotationRules.findIndex(r => r.matchTag === matchTag);
+  if (ruleIdx === -1) return;
+  const rule = rotationRules[ruleIdx];
+  const activeOrder = getActiveOrder(rule);
+  if (!activeOrder.length) return;
+
+  const selectedNames = (selectedUserIds || [])
+    .map(uid => (users || []).find(u => u.uid === uid || u.docId === uid)?.name)
+    .filter(Boolean);
+  const idxList = selectedNames.map(name => activeOrder.indexOf(name)).filter(i => i !== -1);
+
+  const currentName = (rule.nextCandidate && activeOrder.includes(rule.nextCandidate)) ? rule.nextCandidate : activeOrder[0];
+  const currentIdx = Math.max(0, activeOrder.indexOf(currentName));
+  const pivotIdx = idxList.length ? Math.max(...idxList) : currentIdx;
+  const nextName = activeOrder[(pivotIdx + 1) % activeOrder.length];
+
+  const newRules = rotationRules.map((r, i) => i === ruleIdx
+    ? { ...r, nextCandidate: nextName, lastAssignedDate: assignedDate || r.lastAssignedDate || '' }
+    : r
+  );
+  onUpdateRotationRules(newRules);
 };
 const handleDeleteGroup = async () => {
 if(!editGroupId) return;
@@ -1461,6 +1480,9 @@ await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: mod
 for(const uid of selUsers) {
 const u = users.find(x=>x.uid === uid || x.docId === uid);
 if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });}
+if (!editGroupId) {
+  advanceRotationCursor(modalData.workItem, selUsers, modalData.date);
+}
 setModalOpen(false);
 setModalError('');
 alert(editGroupId ? '行程修改完成' : '行程新增完成');
@@ -1876,14 +1898,20 @@ function RotationModal({ open, onClose, rules, onUpdateRules, rotationData, rota
 const [editMode, setEditMode] = useState(null);
 const [tempOrder, setTempOrder] = useState([]);
 const [tempPaused, setTempPaused] = useState([]);
+const [tempNextCandidate, setTempNextCandidate] = useState('');
 const [password, setPassword] = useState('');
 const [showPass, setShowPass] = useState(false);
 if(!open) return null;
 
 const startEdit = (rule) => {
   setEditMode(rule.id);
-  setTempOrder([...(rule.order || [])]);
-  setTempPaused([...(rule.pausedUsers || [])]);
+  const nextOrder = [...(rule.order || [])];
+  const nextPaused = [...(rule.pausedUsers || [])];
+  const active = nextOrder.filter(n => !nextPaused.includes(n));
+  const initialNext = (rule.nextCandidate && active.includes(rule.nextCandidate)) ? rule.nextCandidate : (active[0] || '');
+  setTempOrder(nextOrder);
+  setTempPaused(nextPaused);
+  setTempNextCandidate(initialNext);
   setPassword('');
   setShowPass(false);
 };
@@ -1898,16 +1926,28 @@ const moveItem = (index, direction) => {
 };
 
 const togglePause = (name) => {
-  setTempPaused(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
+  setTempPaused(prev => {
+    const nextPaused = prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name];
+    const active = (tempOrder || []).filter(n => !nextPaused.includes(n));
+    if (nextPaused.includes(tempNextCandidate)) setTempNextCandidate(active[0] || '');
+    return nextPaused;
+  });
+};
+
+const setNextCandidate = (name) => {
+  setTempPaused(prev => prev.filter(x => x !== name));
+  setTempNextCandidate(name);
 };
 
 const saveOrder = () => {
   if(!showPass) { setShowPass(true); return; }
   if(password !== '0000') { alert('密碼錯誤'); return; }
-  const newRules = rules.map(r => r.id === editMode ? { ...r, order: tempOrder, pausedUsers: tempPaused } : r);
+  const active = (tempOrder || []).filter(n => !tempPaused.includes(n));
+  const finalNext = (tempNextCandidate && active.includes(tempNextCandidate)) ? tempNextCandidate : (active[0] || '');
+  const newRules = rules.map(r => r.id === editMode ? { ...r, order: tempOrder, pausedUsers: tempPaused, nextCandidate: finalNext } : r);
   onUpdateRules(newRules);
   setEditMode(null);
-  alert('順序與暫停名單已更新');
+  alert('順序、暫停名單與下一位已更新');
 };
 
 return (
@@ -1922,6 +1962,7 @@ return (
         {rotationData.map(r => {
           const displayOrder = (editMode === r.id ? tempOrder : (r.order || []));
           const pausedList = (editMode === r.id ? tempPaused : (r.pausedUsers || []));
+          const displayNext = (editMode === r.id ? (tempNextCandidate || '（已全暫停）') : (r.nextPerson || '（已全暫停）'));
 
           return (
             <div key={r.id} className="bg-gray-50 p-3 rounded-lg border">
@@ -1929,7 +1970,7 @@ return (
                 <div className="flex flex-col">
                   <span>{r.name}</span>
                   <span className="text-[10px] font-normal text-gray-500">上次: {r.lastDate || '無'}</span>
-                  <span className="text-[10px] font-normal text-gray-500">下一位: {r.nextPerson || '（已全暫停）'}</span>
+                  <span className="text-[10px] font-normal text-gray-500">下一位: {displayNext}</span>
                 </div>
 
                 {editMode !== r.id ? (
@@ -1960,6 +2001,9 @@ return (
                         <div className="mt-1 flex items-center justify-center gap-1">
                           <button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="左移"><ChevronLeft size={10}/></button>
                           <button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="右移"><ChevronRight size={10}/></button>
+                          <button onClick={()=>setNextCandidate(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${tempNextCandidate===p ? 'bg-blue-600 text-white border-blue-700' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                            {tempNextCandidate===p ? '下一位' : '設下一位'}
+                          </button>
                           <button onClick={()=>togglePause(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isPaused ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
                             {isPaused ? '恢復' : '暫停'}
                           </button>
@@ -1972,7 +2016,7 @@ return (
 
               {editMode === r.id && (
                 <div className="mt-2 text-[11px] text-gray-500">
-                  可針對產假/病假人員按「暫停」，輪派時會自動跳過；按「恢復」即可重新納入輪序。
+                  輪序會按你設定的「下一位」一路往下；不看日曆標籤。產假/病假可先暫停，回來再按恢復。
                 </div>
               )}
             </div>
@@ -5305,6 +5349,10 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
 
 
 
