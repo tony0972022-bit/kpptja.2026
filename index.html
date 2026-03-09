@@ -2379,7 +2379,7 @@ return (<>
 <td className="p-4 text-sm text-gray-600 whitespace-nowrap">{getTimeCellText(r.slot, r.rawLeave)}</td>
 <td className="p-4">
 {r.leaveType !== '-' ?
-<span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${isOfficial ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}`}>
+<span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap break-keep ${isOfficial ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}`}>
 {r.leaveType}</span>
 : <span className="text-gray-400">-</span>}</td>
 <td className="p-4 text-sm font-medium text-gray-700">{r.leaveHours}</td>
@@ -2390,22 +2390,25 @@ return (<>
 <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight whitespace-nowrap ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
 {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}</span></td>
 <td className="p-4 text-center">
-{r._groupKey && (
-  <button onClick={()=>toggleGroupExpand(r._groupKey)} className="text-gray-700 hover:text-white border border-gray-200 bg-gray-50 hover:bg-gray-700 px-3 py-1.5 rounded-md text-xs font-bold transition inline-flex items-center gap-1 shadow-sm mb-2" title="展開/收合每日明細">
-    <ChevronRight size={14} className={expandedGroups.includes(r._groupKey) ? 'rotate-90 transition-transform' : 'transition-transform'} />
-    {expandedGroups.includes(r._groupKey) ? '收合明細' : '展開明細'}
-  </button>
-)}
-{canRecall && (
-  <div className="flex items-center justify-center gap-2">
-    <button onClick={() => openEditResubmit(r.rawLeave)} className="text-blue-700 hover:text-white border border-blue-200 bg-blue-50 hover:bg-blue-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="修改請假內容">
-      <Edit2 size={14}/> 修改
-    </button>
-    <button onClick={() => handleDeleteLeave(r.rawLeave)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="刪除申請(未核准才可)">
-      <Trash2 size={14}/> 刪除
-    </button>
+  <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+    {r._groupKey && (
+      <button onClick={()=>toggleGroupExpand(r._groupKey)} className="text-gray-700 hover:text-white border border-gray-200 bg-gray-50 hover:bg-gray-700 px-3 py-1.5 rounded-md text-xs font-bold transition inline-flex items-center gap-1 shadow-sm" title="展開/收合每日明細">
+        <ChevronRight size={14} className={expandedGroups.includes(r._groupKey) ? 'rotate-90 transition-transform' : 'transition-transform'} />
+        {expandedGroups.includes(r._groupKey) ? '收合' : '展開'}
+      </button>
+    )}
+    {canRecall && (
+      <>
+        <button onClick={() => openEditResubmit(r.rawLeave)} className="text-blue-700 hover:text-white border border-blue-200 bg-blue-50 hover:bg-blue-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="修改請假內容">
+          <Edit2 size={14}/> 修改
+        </button>
+        <button onClick={() => handleDeleteLeave(r.rawLeave)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="刪除申請(未核准才可)">
+          <Trash2 size={14}/> 刪除
+        </button>
+      </>
+    )}
   </div>
-)}</td></tr>
+</td></tr>
 {r._groupKey && expandedGroups.includes(r._groupKey) && Array.isArray(r._children) && r._children.map((c, idx) => (
   <tr key={`${r.id}-c-${idx}`} className="border-b border-gray-100 last:border-0 bg-slate-50/40">
     <td className="p-4"></td>
@@ -2496,6 +2499,8 @@ const [slotDate, setSlotDate] = useState(getLocalDateString());
 const [slotType, setSlotType] = useState('all_day');
 const [slotStartH, setSlotStartH] = useState('08');
 const [slotStartM, setSlotStartM] = useState('00');
+const [slotEndH, setSlotEndH] = useState('17');
+const [slotEndM, setSlotEndM] = useState('00');
 // 自訂時間：分為「少於一天」與「大於一天」兩種
 const [manualRangeType, setManualRangeType] = useState('lt1'); // 'lt1' 少於一天；'gt1' 大於一天（以天計，1天=8小時）
 // 少於一天：日期 + 起訖時間（下拉選單）
@@ -2556,33 +2561,36 @@ useEffect(() => {
   }
 }, [inputMode, form.type, manualRangeType]);
 
-const getSlotRangeByType = (d, t, startH, startM) => {
-  if (!d) return { start: '', end: '', hours: 0 };
-  if (t === 'morning') return { start: `${d}T08:00`, end: `${d}T12:00`, hours: 4 };
-  if (t === 'afternoon') return { start: `${d}T13:00`, end: `${d}T17:00`, hours: 4 };
-  // all_day: 固定有效工時 8 小時，起始可調整；跨到午休會自動略過 12:00-13:00
-  let cur = Number(startH) * 60 + Number(startM);
-  let remain = 8 * 60;
-  while (remain > 0) {
-    if (cur < 12 * 60) {
-      const toLunch = Math.min(remain, 12 * 60 - cur);
-      cur += toLunch;
-      remain -= toLunch;
-      if (cur === 12 * 60) cur = 13 * 60;
-    } else if (cur >= 12 * 60 && cur < 13 * 60) {
-      cur = 13 * 60;
-    } else {
-      cur += remain;
-      remain = 0;
-    }
+const applySlotPreset = (nextSlot) => {
+  setSlotType(nextSlot);
+  if (nextSlot === 'morning') {
+    setSlotStartH('08'); setSlotStartM('00');
+    setSlotEndH('12'); setSlotEndM('00');
+  } else if (nextSlot === 'afternoon') {
+    setSlotStartH('13'); setSlotStartM('00');
+    setSlotEndH('17'); setSlotEndM('00');
+  } else {
+    setSlotStartH('08'); setSlotStartM('00');
+    setSlotEndH('17'); setSlotEndM('00');
   }
-  const endH = String(Math.floor(cur / 60) % 24).padStart(2, '0');
-  const endM = String(cur % 60).padStart(2, '0');
-  return {
-    start: `${d}T${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`,
-    end: `${d}T${endH}:${endM}`,
-    hours: 8,
-  };
+};
+
+const getSlotRange = (d, startH, startM, endH, endM) => {
+  if (!d) return { start: '', end: '', hours: 0, valid: false };
+  const ss = d + 'T' + String(startH).padStart(2,'0') + ':' + String(startM).padStart(2,'0');
+  const ee = d + 'T' + String(endH).padStart(2,'0') + ':' + String(endM).padStart(2,'0');
+  const s = new Date(ss);
+  const e = new Date(ee);
+  if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return { start: ss, end: ee, hours: 0, valid: false };
+
+  let h = (e - s) / 36e5;
+  const lunchS = new Date(d + 'T12:00');
+  const lunchE = new Date(d + 'T13:00');
+  const ov = Math.max(0, Math.min(e.getTime(), lunchE.getTime()) - Math.max(s.getTime(), lunchS.getTime()));
+  h = h - (ov / 36e5);
+  h = Math.max(0, Math.round(h * 2) / 2);
+
+  return { start: ss, end: ee, hours: h, valid: true };
 };
 const pendingExternalTasks = useMemo(() => {
 const groups = {};
@@ -2896,7 +2904,9 @@ let finalHours = hours;
 // 依據輸入模式準備資料
 if (inputMode === 'slot') {
 if (!slotDate) { alert("請選擇日期"); return; }
-const slotRange = getSlotRangeByType(slotDate, slotType, slotStartH, slotStartM);
+const slotRange = getSlotRange(slotDate, slotStartH, slotStartM, slotEndH, slotEndM);
+if (!slotRange.valid) { alert("結束時間需晚於開始時間"); return; }
+if (!(Number(slotRange.hours) > 0)) { alert("總計時數必須大於 0"); return; }
 finalStart = slotRange.start;
 finalEnd = slotRange.end;
 finalHours = slotRange.hours;
@@ -3158,7 +3168,7 @@ return (
             <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl space-y-4">
               <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
                 <button type="button" onClick={() => { if (!isOvertimePayType) setInputMode('slot'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>簡易時段</button>
-                <button type="button" onClick={() => { setInputMode('manual'); if (!isOvertime(form.type)) setManualRangeType('gt1'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>自訂時間</button>
+                <button type="button" onClick={() => { setInputMode('manual'); setManualRangeType(isOvertime(form.type) ? 'lt1' : 'gt1'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>大於一天</button>
               </div>
 
               {isOvertimePayType && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">加班(請款)限制：僅可申請 17:00-19:00，且每日每次固定為 2 小時。</div>}
@@ -3169,17 +3179,17 @@ return (
                     <input type="date" className="w-full border p-2 rounded-lg bg-white" value={slotDate} onChange={e=>setSlotDate(e.target.value)} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-600 block mb-1">時段</label>
+                    <label className="text-xs font-bold text-gray-600 block mb-1">時段（快速帶入）</label>
                     <div className="flex gap-2">
                       {[
-                        { id:'morning', label:'上午 4小時' },
-                        { id:'afternoon', label:'下午 4小時' },
-                        { id:'all_day', label:'整天 8小時' },
+                        { id:'morning', label:'上午' },
+                        { id:'afternoon', label:'下午' },
+                        { id:'all_day', label:'整天' },
                       ].map(s => (
                         <button
                           key={s.id}
                           type="button"
-                          onClick={()=>setSlotType(s.id)}
+                          onClick={()=>applySlotPreset(s.id)}
                           className={`flex-1 px-3 py-2 rounded-lg border text-sm font-bold transition ${
                             slotType===s.id ? 'bg-blue-600 text-white border-blue-700 shadow' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                           }`}
@@ -3189,39 +3199,35 @@ return (
                       ))}
                     </div>
                   </div>
-                  {slotType === 'all_day' && (
-                    <div className="md:col-span-2">
-                      <label className="text-xs font-bold text-gray-600 block mb-1">起始時間（固定 8 小時）</label>
-                      <div className="grid grid-cols-2 gap-2 md:w-[260px]">
+                  <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 block mb-1">起始時間</label>
+                      <div className="grid grid-cols-2 gap-2">
                         <select className="w-full border p-2 rounded-lg bg-white" value={slotStartH} onChange={e=>setSlotStartH(e.target.value)}>
-                          {Array.from({length:7}).map((_,i)=>{ const v=String(i+7).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
+                          {Array.from({length:24}).map((_,i)=>{ const v=String(i).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
                         </select>
                         <select className="w-full border p-2 rounded-lg bg-white" value={slotStartM} onChange={e=>setSlotStartM(e.target.value)}>
                           {['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}
                         </select>
                       </div>
-                      <div className="text-[11px] text-gray-500 mt-1">系統會自動扣除午休 12:00-13:00，並以 8 小時計算。</div>
                     </div>
-                  )}
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 block mb-1">結束時間</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select className="w-full border p-2 rounded-lg bg-white" value={slotEndH} onChange={e=>setSlotEndH(e.target.value)}>
+                          {Array.from({length:24}).map((_,i)=>{ const v=String(i).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
+                        </select>
+                        <select className="w-full border p-2 rounded-lg bg-white" value={slotEndM} onChange={e=>setSlotEndM(e.target.value)}>
+                          {['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="md:col-span-2 text-[11px] text-gray-500">時段按鈕為快速帶入，你仍可手動調整起訖時間；同日會自動扣除午休 12:00-13:00 重疊時數。</div>
                 </div>
               ) : (
                 <div className="space-y-4">
-  <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
-    {isOvertime(form.type) && (
-      <button
-        type="button"
-        onClick={() => setManualRangeType('lt1')}
-        className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${manualRangeType === 'lt1' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-      >少於一天</button>
-    )}
-    <button
-      type="button"
-      onClick={() => { if (!isOvertimePayType) setManualRangeType('gt1'); }}
-      className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${manualRangeType === 'gt1' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-    >大於一天</button>
-  </div>
 
-  {!isOvertime(form.type) && <div className="text-[11px] text-gray-500">一般請假若為當日 8 小時，請改用「簡易時段」的彈性起始時間。</div>}
 
   {manualRangeType === 'lt1' && isOvertime(form.type) ? (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3370,7 +3376,8 @@ return (
                     if (inputMode === "slot") {
                       const d = slotDate;
                       if (!d) return "請選擇日期";
-                      const r = getSlotRangeByType(d, slotType, slotStartH, slotStartM);
+                      const r = getSlotRange(d, slotStartH, slotStartM, slotEndH, slotEndM);
+                      if (!r.valid) return "結束時間需晚於開始時間";
                       return `預覽：${String(r.start||'').replace('T',' ')} ～ ${String(r.end||'').replace('T',' ')}（${fmtDaysHoursText(r.hours)}）`;
                     }
                     if (manualRangeType === "lt1" && isOvertime(form.type)) {
@@ -3756,7 +3763,18 @@ const d1 = l.start.split('T')[0];
 const t1 = l.start.split('T')[1] || '';
 const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
-const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
+const compactDateStr = (() => {
+  if (d1 === d2) return d1;
+  const y1 = d1.slice(0, 4), m1 = d1.slice(5, 7), dd1 = d1.slice(8, 10);
+  const y2 = d2.slice(0, 4), m2 = d2.slice(5, 7), dd2 = d2.slice(8, 10);
+  if (y1 === y2) {
+    if (m1 === m2) return `${m1}/${dd1}~${dd2}`;
+    return `${m1}/${dd1}~${m2}/${dd2}`;
+  }
+  return `${y1}/${m1}/${dd1}~${y2}/${m2}/${dd2}`;
+})();
+const dateStr = compactDateStr;
+const fullDateStr = d1 === d2 ? d1 : `${d1}~${d2}`;
 const timeStr = `${t1} ~ ${t2}`;
 const deputyName = l.deputyId ? (getUserNameByKey(users, l.deputyId, '未知')) : '-';
 const isOwner = l.requesterId === currentUser.uid || l.requesterId === currentUser.docId;
@@ -4094,7 +4112,7 @@ return (
 <table className="w-full text-left">
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
 <tr>
-<th className="p-4 text-sm font-semibold tracking-wide w-28">日期</th>
+<th className="p-4 text-sm font-semibold tracking-wide w-40 whitespace-nowrap">日期</th>
 <th className="p-4 text-sm font-semibold tracking-wide w-36 whitespace-nowrap">時間</th>
 <th className="p-4 text-sm font-semibold tracking-wide w-32">假別</th>
 <th className="p-4 text-sm font-semibold tracking-wide w-24">時數/天</th>
@@ -4107,13 +4125,24 @@ const d1 = l.start.split('T')[0];
 const t1 = l.start.split('T')[1] || '';
 const d2 = l.end.split('T')[0];
 const t2 = l.end.split('T')[1] || '';
-const dateStr = d1 === d2 ? d1 : `${d1} ~ ${d2}`;
+const compactDateStr = (() => {
+  if (d1 === d2) return d1;
+  const y1 = d1.slice(0, 4), m1 = d1.slice(5, 7), dd1 = d1.slice(8, 10);
+  const y2 = d2.slice(0, 4), m2 = d2.slice(5, 7), dd2 = d2.slice(8, 10);
+  if (y1 === y2) {
+    if (m1 === m2) return `${m1}/${dd1}~${dd2}`;
+    return `${m1}/${dd1}~${m2}/${dd2}`;
+  }
+  return `${y1}/${m1}/${dd1}~${y2}/${m2}/${dd2}`;
+})();
+const dateStr = compactDateStr;
+const fullDateStr = d1 === d2 ? d1 : `${d1}~${d2}`;
 const timeStr = `${t1} ~ ${t2}`;
 // 判斷是否為公務或正向發放
 const isOfficialOrGain = ['出差', '公出', '公假', '榮譽假(獲得)'].includes(l.type);
 return (
 <tr key={l.id} className="border-b border-gray-100 last:border-0 hover:bg-slate-50 transition-colors">
-<td className="p-4 text-sm text-gray-800 font-medium">{dateStr}</td>
+<td className="p-4 text-sm text-gray-800 font-medium whitespace-nowrap" title={fullDateStr}>{dateStr}</td>
 <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{timeStr}</td>
 <td className="p-4">
 <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${isOfficialOrGain ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}`}>
@@ -4773,12 +4802,11 @@ function MembersView({ db, users, currentUser, roleNames }) {
 const isAdmin = currentUser && currentUser.role === 'admin';
 const [isModalOpen, setIsModalOpen] = useState(false);
 const [editUser, setEditUser] = useState(null);
-const handleImportPredefined = async () => { if(!confirm("要將系統內建的預設名單(國裕, 湘怡等...)直接匯入資料庫嗎？\n這樣您馬上就能幫他們排班，不用等他們登入！")) return; try { for(const p of PREDEFINED_USERS) { const docId = p.email.toLowerCase(); const exists = users.find(u => u.docId === docId); if (!exists) { await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', docId), { uid: docId, email: p.email, name: p.name, role: p.role, initials: p.initials, color: p.color, borderColor: p.borderColor, usePhoto: false, avatarUrl: '', joinDate: '', extraLeaveDays: 0 }); } } alert("預設名單匯入完成！您可以去排班日曆了。"); } catch (e) { alert("匯入失敗: " + e.message); } };
 const handleSave = async (userData) => { try { const targetDocId = userData.docId || (userData.email ? userData.email.toLowerCase() : userData.name); const dataToSave = { ...userData }; delete dataToSave.docId; await setDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', targetDocId), dataToSave, { merge: true }); setIsModalOpen(false); setEditUser(null); } catch (e) { alert("儲存失敗: " + e.message); } };
 const handleDelete = async (docId) => { if(confirm("確定要刪除此成員嗎？")) { try { await deleteDoc(doc(db, 'artifacts', 'kpptjawork', 'public', 'data', 'user_profiles', docId)); } catch (e) { alert("刪除失敗: " + e.message); } } };
 const openAdd = () => { setEditUser(null); setIsModalOpen(true); };
 const openEdit = (u) => { setEditUser(u); setIsModalOpen(true); };
-return (<div className="max-w-5xl mx-auto space-y-6"><div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow-sm gap-4"><h2 className="text-xl font-bold flex items-center gap-2"><Users/> 成員管理</h2>{isAdmin && (<div className="flex gap-2"><button onClick={handleImportPredefined} className="bg-purple-100 text-purple-700 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-purple-200 transition"><Users size={16}/> 一鍵匯入預設名單</button><button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button></div>)}</div><div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">{users.map(u => (<div key={u.docId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group"><UserAvatar user={u} size="w-12 h-12" textSize="text-base" /><div className="flex-1 overflow-hidden"><div className="font-bold text-gray-800 text-lg truncate">{u.name}</div><div className="text-xs text-gray-400 truncate mb-1">{u.email || '未綁定 Email'}</div><div className="flex gap-2 mt-1"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role==='admin'?'bg-purple-100 text-purple-800':(u.role==='leader'?'bg-blue-100 text-blue-800':'bg-gray-100 text-gray-600')}`}>{roleNames[u.role] || u.role}</span></div></div>{isAdmin && (<div className="absolute top-2 right-2 hidden group-hover:flex gap-1"><button onClick={()=>openEdit(u)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-blue-100 hover:text-blue-600"><Edit size={14}/></button><button onClick={()=>handleDelete(u.docId)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-red-100 hover:text-red-600"><Trash2 size={14}/></button></div>)}</div>))}</div>{isModalOpen && (<MemberEditModal user={editUser} onClose={()=>{setIsModalOpen(false); setEditUser(null);}} onSave={handleSave} roleNames={roleNames} />)}</div>);}
+return (<div className="max-w-5xl mx-auto space-y-6"><div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded shadow-sm gap-4"><h2 className="text-xl font-bold flex items-center gap-2"><Users/> 成員管理</h2>{isAdmin && (<div className="flex gap-2"><button onClick={openAdd} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition"><Plus size={16}/> 新增成員</button></div>)}</div><div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">{users.map(u => (<div key={u.docId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center gap-3 relative group"><UserAvatar user={u} size="w-12 h-12" textSize="text-base" /><div className="flex-1 overflow-hidden"><div className="font-bold text-gray-800 text-lg truncate">{u.name}</div><div className="text-xs text-gray-400 truncate mb-1">{u.email || '未綁定 Email'}</div><div className="flex gap-2 mt-1"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role==='admin'?'bg-purple-100 text-purple-800':(u.role==='leader'?'bg-blue-100 text-blue-800':'bg-gray-100 text-gray-600')}`}>{roleNames[u.role] || u.role}</span></div></div>{isAdmin && (<div className="absolute top-2 right-2 hidden group-hover:flex gap-1"><button onClick={()=>openEdit(u)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-blue-100 hover:text-blue-600"><Edit size={14}/></button><button onClick={()=>handleDelete(u.docId)} className="p-1.5 bg-gray-100 rounded text-gray-500 hover:bg-red-100 hover:text-red-600"><Trash2 size={14}/></button></div>)}</div>))}</div>{isModalOpen && (<MemberEditModal user={editUser} onClose={()=>{setIsModalOpen(false); setEditUser(null);}} onSave={handleSave} roleNames={roleNames} />)}</div>);}
 function MemberEditModal({ user, onClose, onSave, roleNames }) {
 const [form, setForm] = useState(user || { lastName: '', name: '', email: '', role: 'staff', initials: '', color: 'bg-gray-200', borderColor: '#e5e7eb', usePhoto: false, avatarUrl: '', joinDate: '', extraLeaveDays: 0 });
 return (<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}><div className="bg-white rounded-xl w-full max-w-md shadow-2xl p-6" onClick={e=>e.stopPropagation()}><h3 className="font-bold text-lg mb-4 text-gray-800">{user ? '編輯成員' : '新增成員'}</h3><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">姓名</label><input className="w-full border p-2 rounded" value={form.name} onChange={e=>setForm({ ...form, name:e.target.value, initials: e.target.value.slice(-1)})} placeholder="例如: 蔡凱宇"/></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">Email (登入綁定用)</label><input className="w-full border p-2 rounded" value={form.email} onChange={e=>setForm({ ...form, email:e.target.value})} placeholder="example@gmail.com"/></div><div><label className="block text-xs font-bold text-gray-500 mb-1">職稱 (角色權限)</label><select className="w-full border p-2 rounded bg-white" value={form.role} onChange={e=>setForm({ ...form, role:e.target.value})}><option value="staff">{roleNames['staff']} (一般權限)</option><option value="leader">{roleNames['leader']} (可審核)</option><option value="admin">{roleNames['admin']} (完全控制)</option></select></div></div><div className="grid grid-cols-2 gap-4 border-t border-gray-100 pt-3"><div><label className="block text-xs font-bold text-gray-500 mb-1">到職日期 (計算特休用)</label><input type="date" className="w-full border p-2 rounded" value={form.joinDate || ''} onChange={e=>setForm({ ...form, joinDate:e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">單位額外特休 (手動給假)</label><input type="number" min="0" className="w-full border p-2 rounded" value={form.extraLeaveDays || 0} onChange={e=>setForm({ ...form, extraLeaveDays: Number(e.target.value)})} /></div></div><div className="grid grid-cols-2 gap-4 pt-1"><div><label className="block text-xs font-bold text-gray-500 mb-1">顯示單字</label><input className="w-full border p-2 rounded" value={form.initials} onChange={e=>setForm({ ...form, initials:e.target.value})} maxLength={1}/></div><div><label className="block text-xs font-bold text-gray-500 mb-1">頭像顏色</label><input type="color" className="h-9 w-full rounded border cursor-pointer" value={form.borderColor || '#e5e7eb'} onChange={e=>setForm({ ...form, borderColor:e.target.value})} /></div></div><div className="pt-2 flex gap-3"><button onClick={onClose} className="flex-1 py-2 text-gray-500 hover:bg-gray-100 rounded">取消</button><button onClick={()=>onSave(form)} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-700">儲存</button></div></div></div></div>);}
@@ -5153,6 +5181,11 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
 
 
 
