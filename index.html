@@ -2593,7 +2593,7 @@ useEffect(() => {
   const ov = Math.max(0, Math.min(e.getTime(), lunchE.getTime()) - Math.max(s.getTime(), lunchS.getTime()));
   h = h - (ov / 36e5);
   const isOT = isOvertime(form.type);
-  if (!isOT) h = Math.max(0, Math.min(8, h));
+  h = Math.max(0, Math.min(8, h));
   setHours(Math.max(0, Math.round(h*2)/2));
 }, [inputMode, manualRangeType, shortDate, shortStartH, shortStartM, shortEndH, shortEndM]);
 
@@ -2644,40 +2644,39 @@ useEffect(() => {
 
   let total = 0;
   for (let i = 0; i < picked.length; i++) {
-    const d = picked[i];
-    let dayStart = 0;
-    let dayEnd = 24*60;
-    if (i === 0) dayStart = toMin(multiStartH, multiStartM);
-    if (i === picked.length - 1) dayEnd = toMin(multiEndH, multiEndM);
-    if (picked.length === 1) { dayStart = toMin(multiStartH, multiStartM); dayEnd = toMin(multiEndH, multiEndM); }
+    // 避免跨夜膨脹：多天時，中間天固定工作日窗口 08:00-17:00
+    let dayStart = toMin(multiStartH, multiStartM);
+    let dayEnd = toMin(multiEndH, multiEndM);
+    if (picked.length > 1) {
+      if (i !== 0) dayStart = 8 * 60;
+      if (i !== picked.length - 1) dayEnd = 17 * 60;
+    }
     if (dayEnd <= dayStart) { total = 0; break; }
 
     if (isOT) {
-      // 加班：不受 08:00-17:00 限制；同日仍扣除午休 12:00-13:00 重疊
+      // 加班：依每日窗口計算，不跨夜；同日扣除午休 12:00-13:00 重疊
       const raw = (dayEnd - dayStart) / 60;
       const lunchOv = Math.max(0, Math.min(dayEnd, 13*60) - Math.max(dayStart, 12*60)) / 60;
-      total += Math.max(0, raw - lunchOv);
+      const dayHours = Math.max(0, raw - lunchOv);
+      total += Math.min(8, dayHours);
     } else {
       // 一般：只計入工作時段 08:00-12:00、13:00-17:00
+      let dayHours = 0;
       workBlocks.forEach(b => {
         const os = Math.max(dayStart, b.s);
         const oe = Math.min(dayEnd, b.e);
-        if (oe > os) total += (oe - os) / 60;
+        if (oe > os) dayHours += (oe - os) / 60;
       });
+      total += Math.min(8, dayHours);
     }
   }
 
   // 以 0.5 小時為刻度顯示
   total = Math.max(0, Math.round(total * 2) / 2);
   setHours(total);
-}, [inputMode, manualRangeType, multiDates, multiSelected, multiStartH, multiStartM, multiEndH, multiEndM]);
+}, [inputMode, manualRangeType, multiDates, multiSelected, multiStartH, multiStartM, multiEndH, multiEndM, form.type]);
 
-useEffect(() => {
-  if (inputMode !== 'manual') return;
-  if (manualRangeType !== 'gt1') return;
-  const cnt = (multiDates || []).filter(x => multiSelected && multiSelected[x.date]).length;
-  if (!isNaN(cnt)) setHours(cnt * 8);
-}, [inputMode, manualRangeType, multiDates, multiSelected]);
+
 // 職代防呆：職代於同時段已安排出差/請假則禁止選擇（同時檢查假單與行事曆）
   const hasDeputyConflictLite = (deputyId, start, end) => {
     if (!deputyId || !start || !end) return false;
@@ -2779,6 +2778,13 @@ const showSubmitError = (msg) => {
   const text = String(msg || '送出失敗，請檢查欄位');
   setSubmitError(text);
   alert(text);
+};
+const fmtDaysHoursText = (h) => {
+  const n = Number(h || 0);
+  if (!isFinite(n) || n <= 0) return '0天 + 0小時';
+  const d = Math.floor(n / 8);
+  const rh = Math.round((n - d * 8) * 10) / 10;
+  return d + '天 + ' + rh + '小時';
 };
 const handleTaskSubmit = async (taskData, taskId) => {
   setSubmitError('');
@@ -3233,7 +3239,7 @@ return (
           <div className="text-xs text-gray-500">—</div>
         )}
         <div className="text-[11px] text-gray-500 mt-2">
-          已勾選 {(multiDates||[]).filter(x=>multiSelected?.[x.date]).length} 天（{hours} 小時）
+          已勾選 {(multiDates||[]).filter(x=>multiSelected?.[x.date]).length} 天（{fmtDaysHoursText(hours)}）
         </div>
       </div>
     </div>
@@ -3246,11 +3252,11 @@ return (
         try {
           if (manualRangeType === 'lt1') {
             if (!shortDate) return '—';
-            return `${shortDate} ${shortStartH}:${shortStartM} ～ ${shortDate} ${shortEndH}:${shortEndM}（共 ${hours} 小時）`;
+            return `${shortDate} ${shortStartH}:${shortStartM} ～ ${shortDate} ${shortEndH}:${shortEndM}（共 ${fmtDaysHoursText(hours)}）`;
           }
           const picked = (multiDates || []).filter(x => multiSelected?.[x.date]).map(x => x.date).sort();
           if (!picked.length) return '—';
-          return `${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（共 ${hours} 小時）`;
+          return `${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（共 ${fmtDaysHoursText(hours)}）`;
         } catch { return '—'; }
       })()}
     </div>
@@ -3293,17 +3299,17 @@ return (
                       const start = (t === "morning") ? `${d} 08:00` : (t === "afternoon") ? `${d} 13:00` : `${d} 08:00`;
                       const end   = (t === "morning") ? `${d} 12:00` : (t === "afternoon") ? `${d} 17:00` : `${d} 17:00`;
                       const hrs   = (t === "all_day") ? 8 : 4;
-                      return `預覽：${start} ～ ${end}（${hrs} 小時）`;
+                      return `預覽：${start} ～ ${end}（${fmtDaysHoursText(hrs)}）`;
                     }
                     if (manualRangeType === "lt1") {
                       if (!shortDate) return "請選擇日期";
                       const s = `${shortDate} ${shortStartH}:${shortStartM}`;
                       const e = `${shortDate} ${shortEndH}:${shortEndM}`;
-                      return `預覽：${s} ～ ${e}（${hours} 小時）`;
+                      return `預覽：${s} ～ ${e}（${fmtDaysHoursText(hours)}）`;
                     }
                     const picked = (multiDates || []).filter(x => multiSelected?.[x.date]).map(x => x.date).sort();
                     if (!picked.length) return "請填寫起始日期與天數";
-                    return `預覽：${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（${hours} 小時）`;
+                    return `預覽：${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（${fmtDaysHoursText(hours)}）`;
                   } catch {
                     return "";
                   }
@@ -4058,7 +4064,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     const s = String(n);
     if (s.includes('特休') || s === '榮譽假') return false;
     if (s.includes('補休')) return false;
-    if (s.includes('事假') || s.includes('病假')) return false;
+    if (s.includes('病假')) return false;
     if (s.includes('例假')) return false;
     return true;
   });
@@ -4261,7 +4267,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
 
   const rowData = BASE_ROWS.map(r => ({ ...r, months: sumHoursBy((t) => r.match(t)) }));
   const otherAgg = sumHoursBy((t) => otherPersonalNames.includes(String(t||'')));
-  const otherDetail = otherPersonalNames.map(name => ({ key: `其他:${name}`, label: name, months: sumHoursBy((t) => String(t||'') === name) }));
+  const otherDetail = [...otherPersonalNames].sort((a, b) => { if (a === '事假' && b !== '事假') return -1; if (b === '事假' && a !== '事假') return 1; return String(a).localeCompare(String(b), 'zh-Hant'); }).map(name => ({ key: '其他:' + name, label: name, months: sumHoursBy((t) => String(t||'') === name) }));
 
   // 基本配額說明（只在個人模式顯示）
   const seniority = targetUser ? getSeniorityDays(targetUser.joinDate) : null;
@@ -4313,13 +4319,13 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
             ) : (
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-gray-700">1. 年資(到職日)</span><span className="font-bold">{targetUser?.joinDate || '—'} <span className="text-[10px] text-gray-400 ml-1">({seniority?.text || '—'})</span></span></div>
-                <div className="flex justify-between"><span className="text-gray-700">2. 特休</span><span className="font-bold"><span className="text-[10px] text-gray-400 ml-1">(勞基法 {(seniority?.days||0)}天)</span><span className="text-[10px] text-gray-400 ml-1">(單位 {extraLeaveDays}天)</span><span className="ml-2 text-base font-black text-gray-900">共 {((seniority?.days||0)+(extraLeaveDays||0))*8}時({(seniority?.days||0)+(extraLeaveDays||0)}天)</span></span></div>
-<div className="flex justify-between"><span className="text-gray-700">3. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)}小時({Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></div>
-<div className="flex justify-between pt-1 border-t"><span className="text-gray-700 font-bold">以上本年度基本假別可休共</span><span className="font-bold">{(((seniority?.days||0)+(extraLeaveDays||0))*8) + Math.max(0, honorEarned - honorUsed)}小時({((seniority?.days||0)+(extraLeaveDays||0)) + Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></div>
+                <div className="flex justify-between"><span className="text-gray-700">2. 特休</span><span className="font-bold"><span className="text-[10px] text-gray-400 ml-1">(勞基法 {(seniority?.days||0)}天)</span><span className="text-[10px] text-gray-400 ml-1">(單位 {extraLeaveDays}天)</span><span className="ml-2 text-base font-black text-gray-900">共 {((seniority?.days||0)+(extraLeaveDays||0))*8}小時 <span className="text-[11px] text-gray-500">({(seniority?.days||0)+(extraLeaveDays||0)}天)</span></span></span></div>
+<div className="flex justify-between"><span className="text-gray-700">3. 榮譽假</span><span className="font-bold">{Math.max(0, honorEarned - honorUsed)}小時 <span className="text-[11px] text-gray-500">({Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></span></div>
+<div className="flex justify-between pt-1 border-t"><span className="text-gray-700 font-bold">以上本年度基本假別可休共</span><span className="font-bold">{(((seniority?.days||0)+(extraLeaveDays||0))*8) + Math.max(0, honorEarned - honorUsed)}小時 <span className="text-[11px] text-gray-500">({((seniority?.days||0)+(extraLeaveDays||0)) + Math.round(Math.max(0, honorEarned - honorUsed)/8)}天)</span></span></div>
 <div className="flex justify-between">
                   <span className="text-gray-700">4. 額外加班：可補休</span>
                   <span className="text-base font-black flex items-center gap-2">
-                    <span>{extraCompTotal}小時({extraCompDays}天)</span>
+                    <span>{extraCompTotal}小時 <span className="text-[11px] text-gray-500">({extraCompDays}天)</span></span>
                     
                   </span>
                 </div>
@@ -4327,9 +4333,9 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
                 <div className="flex justify-between text-indigo-700 pt-2 border-t">
                   <span className="font-bold">本年度可休總計為</span>
                   <span className="text-base font-black">
-                    {grandTotalHours}小時({grandTotalDays}天)
+                    {grandTotalHours}小時 <span className="text-[11px] text-gray-500">({grandTotalDays}天)</span>
                     <span className="text-[10px] text-gray-400 ml-2">
-                      ( {baseAnnualHours}小時({baseAnnualDays}天) + 額外加班 {extraCompTotal}小時({extraCompDays}天) )
+                      ( {baseAnnualHours}小時 <span className="text-[11px] text-gray-500">({baseAnnualDays}天)</span> + 額外加班 {extraCompTotal}小時 <span className="text-[11px] text-gray-500">({extraCompDays}天)</span> )
                     </span>
                   </span>
                 </div>
@@ -4370,7 +4376,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
                 </tr>
                 {showOther && otherDetail.map(r => (
                   <tr key={r.key} className="hover:bg-orange-50/30">
-                    <td className="p-1 border text-gray-700 pl-5">— {r.label}</td>
+                    <td className="p-1 border text-gray-700 pl-5">{r.label}</td>
                     {months.map(m => (<td key={m} className="p-1 border text-center">{fmt(r.months[m])}</td>))}
                   </tr>
                 ))}
@@ -4960,6 +4966,13 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
+
 
 
 
