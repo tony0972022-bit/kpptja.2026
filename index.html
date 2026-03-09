@@ -1119,7 +1119,7 @@ return (
 <td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td>
 <td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td>
 <td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td></tr></React.Fragment>
-)})}</tbody></table></div></div></div>);}
+)})}</tbody></table></div></div>);}
 function CalendarView({ users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
 const [date, setDate] = useState(new Date());
 const [viewMode, setViewMode] = useState('month');
@@ -4082,7 +4082,7 @@ return (
 )}</td>
 )}</tr>)
 })}
-{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div></div></div>);}
+{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div></div>);}
 
 // === 會計統計 ===
 function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
@@ -5104,6 +5104,7 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
 
 
 
