@@ -1136,6 +1136,8 @@ const [isSubmitting, setIsSubmitting] = useState(false);
 const [modalError, setModalError] = useState('');
 const [importantModalOpen, setImportantModalOpen] = useState(false);
 const [importantForm, setImportantForm] = useState({ id: null, date: '', ownerIds: [], owner: '', text: '' });
+const IMPORTANT_VISIBLE_DAYS = 14;
+const [showAllImportant, setShowAllImportant] = useState(false);
 
 const usersBySeniority = useMemo(() => {
   const arr = [...(users || [])];
@@ -1180,6 +1182,18 @@ const upcomingImportant = useMemo(() => {
     .filter(x => x?.date && new Date(x.date) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) && new Date(x.date) <= end)
     .sort((a,b)=> new Date(a.date)-new Date(b.date));
 }, [importantItems]);
+const importantWithDays = useMemo(() => {
+  const now = new Date();
+  const todayTs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return (upcomingImportant || []).map(it => {
+    const itemTs = new Date(it.date).setHours(0, 0, 0, 0);
+    const daysLeft = Math.ceil((itemTs - todayTs) / 86400000);
+    return { ...it, _daysLeft: daysLeft };
+  });
+}, [upcomingImportant]);
+const nearImportant = useMemo(() => importantWithDays.filter(it => it._daysLeft <= IMPORTANT_VISIBLE_DAYS), [importantWithDays]);
+const farImportant = useMemo(() => importantWithDays.filter(it => it._daysLeft > IMPORTANT_VISIBLE_DAYS), [importantWithDays]);
+const importantListForDisplay = showAllImportant ? importantWithDays : nearImportant;
 const openImportantNew = () => { setImportantForm({ id:null, date:getLocalDateString(new Date()), owner:'', text:'' }); setImportantModalOpen(true); };
 const openImportantEdit = (it) => { const ids = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : [])); setImportantForm({ id: it.id, date: it.date || '', ownerIds: ids, owner: it.owner || '', text: it.text || '' }); setImportantModalOpen(true); };
 const saveImportant = async () => {
@@ -1645,11 +1659,23 @@ return (
 <button onClick={openImportantNew} className="text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 hover:bg-amber-50 text-amber-700 font-bold"><Bell size={14}/> 重要事項</button>
 <button onClick={()=>setRotationModalOpen(true)} className="text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 hover:bg-blue-50 text-blue-600 font-bold"><RefreshCw size={14}/> 輪序表</button></div>
 {upcomingImportant.length>0 && (
-<div className="px-4 py-2 border-b bg-white flex flex-col md:flex-row md:items-center gap-2">
+<div className="px-4 py-2 border-b bg-white flex flex-col gap-2">
+<div className="w-full flex flex-wrap items-center gap-2">
 <div className="text-xs font-bold text-gray-600 flex items-center gap-1 shrink-0"><Bell size={14} className="text-amber-600"/> 公告重要事項（近兩個月）</div>
+<div className="text-[11px] text-gray-500">{IMPORTANT_VISIBLE_DAYS}天內 {nearImportant.length} 項｜{IMPORTANT_VISIBLE_DAYS + 1}天以上 {farImportant.length} 項</div>
+{farImportant.length > 0 && (
+<button
+  type="button"
+  onClick={() => setShowAllImportant(v => !v)}
+  className="ml-auto text-[11px] px-2 py-1 rounded border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 font-bold"
+>
+  {showAllImportant ? `收合 ${IMPORTANT_VISIBLE_DAYS + 1} 天以上` : `展開 ${IMPORTANT_VISIBLE_DAYS + 1} 天以上`}
+</button>
+)}
+</div>
 <div className="flex flex-wrap gap-2">
-{upcomingImportant.map(it=>{
-const daysLeft = Math.ceil((new Date(it.date).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000);
+{importantListForDisplay.map(it=>{
+const daysLeft = it._daysLeft;
 const md = (it.date || '').slice(5).replace('-', '/');
 const urgencyCls = daysLeft <= 7 ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : daysLeft <= 14 ? 'bg-orange-50 hover:bg-orange-100 text-orange-800 border-orange-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200';
 const rawOwners = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : []));
@@ -1669,7 +1695,8 @@ return (
 <span className="font-bold">D-{Math.max(daysLeft,0)}</span>
 </button>
 );
-})}</div>
+})}
+</div>
 </div>
 )}
 <div className="flex-1 overflow-auto">
@@ -5104,6 +5131,10 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
 
 
 
