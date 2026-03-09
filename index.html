@@ -3927,7 +3927,7 @@ return (
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">病<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-emerald-600">{30*8 - usedSick}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{30*8}<span className="text-[10px] text-gray-400 ml-1">(30天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}<span className="text-[10px] text-gray-400 ml-1">({(usedSick/8).toFixed(2)}天)</span></span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">事<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-amber-600">{14*8 - usedPersonal}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{14*8}<span className="text-[10px] text-gray-400 ml-1">(14天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedPersonal}<span className="text-[10px] text-gray-400 ml-1">({(usedPersonal/8).toFixed(2)}天)</span></span></div></div></div>
 {/* 新增：公務出差卡片 */}
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">公<br/>務<br/>出<br/>差</div><span className="text-[10px] text-gray-500">出差/公出/公假</span></div><div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between text-gray-600"><span>本期累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">公<br/>務<br/>出<br/>差</div><details className="text-[10px] text-gray-500"><summary className="cursor-pointer select-none hover:text-sky-700">假別說明</summary><div className="mt-1">出差/公出/公假</div></details></div><div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div></div></div></div>
 {/* 新增：其他假別統計摺疊區塊 */}
 <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
 <button onClick={() => setShowOtherLeaves(!showOtherLeaves)} className="w-full px-4 py-3 flex justify-between items-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition">
@@ -4279,6 +4279,14 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   const extraCompDays = Math.round(extraCompTotal/8);
   const grandTotalHours = baseAnnualHours + extraCompTotal;
   const grandTotalDays = baseAnnualDays + extraCompDays;
+  const toDayHourText = (hours) => {
+    const h = Math.max(0, Math.round(Number(hours || 0)));
+    const d = Math.floor(h / 8);
+    const r = h % 8;
+    if (d > 0 && r > 0) return `${d}天${r}小時`;
+    if (d > 0) return `${d}天`;
+    return `${r}小時`;
+  };
 
   const fmt = (v) => {
     const n = Number(v || 0);
@@ -4322,19 +4330,13 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
 <div className="flex justify-between">
                   <span className="text-gray-700">4. 額外加班：可補休</span>
                   <span className="text-base font-black flex items-center gap-2">
-                    <span>{extraCompTotal}小時 <span className="text-[11px] text-gray-500">({extraCompDays}天)</span></span>
+                    <span>{extraCompTotal}小時 <span className="text-[11px] text-gray-500">({toDayHourText(extraCompTotal)})</span></span>
                     
                   </span>
                 </div>
 
-                <div className="flex justify-between text-indigo-700 pt-2 border-t">
-                  <span className="font-bold">本年度可休總計為</span>
-                  <span className="text-base font-black">
-                    {grandTotalHours}小時 <span className="text-[11px] text-gray-500">({grandTotalDays}天)</span>
-                    <span className="text-[10px] text-gray-400 ml-2">
-                      ( {baseAnnualHours}小時 <span className="text-[11px] text-gray-500">({baseAnnualDays}天)</span> + 額外加班 {extraCompTotal}小時 <span className="text-[11px] text-gray-500">({extraCompDays}天)</span> )
-                    </span>
-                  </span>
+                <div className="text-indigo-700 pt-2 border-t">
+                  <span className="text-base font-black">本年度可休總計為 {grandTotalHours}小時 <span className="text-[11px] text-gray-500">({grandTotalDays}天)</span></span>
                 </div>
                 <div className="text-[10px] text-gray-400 leading-relaxed pt-1"></div>
               </div>
@@ -4351,14 +4353,14 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
             <table className="w-full text-xs table-fixed">
               <thead>
                 <tr className="bg-gray-50 text-gray-600">
-                  <th className="p-1 border text-left w-32">假別</th>
+                  <th className="p-1 border text-left w-52 whitespace-nowrap">假別</th>
                   {months.map((m,i)=>(<th key={m} className="p-1 border text-center">{i+1}</th>))}
                 </tr>
               </thead>
               <tbody>
                 {rowData.map(r => (
                   <tr key={r.key} className={((r.key==='加班(補休)'||r.key==='補休') ? "bg-yellow-50 hover:bg-yellow-100/60" : "hover:bg-gray-50")}>
-                    <td className={"p-2 border font-bold " + ((r.key==='加班(補休)'||r.key==='補休') ? "text-yellow-800" : "text-gray-700")}>{r.label}</td>
+                    <td className={"p-2 border font-bold whitespace-nowrap " + ((r.key==='加班(補休)'||r.key==='補休') ? "text-yellow-800" : "text-gray-700")}>{r.label}</td>
                     {months.map(m => (<td key={m} className="p-1 border text-center">{fmt(r.months[m])}</td>))}
                   </tr>
                 ))}
@@ -4373,7 +4375,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
                 </tr>
                 {showOther && otherDetail.map(r => (
                   <tr key={r.key} className="hover:bg-orange-50/30">
-                    <td className="p-1 border text-gray-700 pl-5">{r.label}</td>
+                    <td className="p-1 border text-gray-700 pl-5 whitespace-nowrap">{r.label}</td>
                     {months.map(m => (<td key={m} className="p-1 border text-center">{fmt(r.months[m])}</td>))}
                   </tr>
                 ))}
@@ -4963,6 +4965,8 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
 
 
 
