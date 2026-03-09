@@ -1335,17 +1335,37 @@ try {
   // 先刪除排班日曆行程
   await crud.deleteEventsByGroup(editGroupId);
 
-  // 【同步處理】若同日同人員存在「待審中」假單，提供一併撤回，避免日曆刪了但審核列表還留著
+  // 【同步處理】若存在同一行程關聯／同時段同人員待審假單，提供一併撤回，避免殘留
   const groupDate = modalData?.date || '';
   const targetNames = (selUsers || []).map(uid => (users || []).find(u => (u.uid === uid || u.docId === uid))?.name).filter(Boolean);
+  const slotPreset = getSlotPreset(selSlot || 'all_day');
+  const groupStart = groupDate ? `${groupDate}T${(modalStartTime || slotPreset.start || '08:00')}` : '';
+  const groupEnd = groupDate ? `${groupDate}T${(modalEndTime || slotPreset.end || '17:00')}` : '';
+  const hasTimeOverlap = (s1, e1, s2, e2) => {
+    try {
+      const a1 = new Date(s1).getTime();
+      const b1 = new Date(e1).getTime();
+      const a2 = new Date(s2).getTime();
+      const b2 = new Date(e2).getTime();
+      if ([a1, b1, a2, b2].some(x => !Number.isFinite(x))) return false;
+      return a1 < b2 && a2 < b1;
+    } catch {
+      return false;
+    }
+  };
 
   const relatedLeaves = (leaves || []).filter(l => {
     if(!l) return false;
     const st = String(l.status || '');
     if(['approved','rejected','withdrawn','recalled'].includes(st)) return false; // 已結案不動
-    if(!groupDate || !String(l.start||'').startsWith(groupDate)) return false;
     const isTarget = (targetNames.includes(l.requesterName)) || (selUsers || []).includes(l.requesterId);
-    return isTarget;
+    if (!isTarget) return false;
+    if (!groupDate) return false;
+
+    const ls = String(l.start || '');
+    const le = String(l.end || l.start || '');
+    if (!groupStart || !groupEnd || !ls || !le) return ls.startsWith(groupDate);
+    return hasTimeOverlap(groupStart, groupEnd, ls, le);
   });
 
   const linkedLeaves = (leaves || []).filter(l => l && l.id && l.sourceGroupId === editGroupId && ['pending','deputy_signed'].includes(l.status));
@@ -1356,7 +1376,7 @@ try {
   if (toRemove.length > 0) {
     const ok = confirm(`已刪除排班行程。
 
-另外找到 ${toRemove.length} 筆「同一行程關聯／同日同人」的待審假單。
+另外找到 ${toRemove.length} 筆「同一行程關聯／同時段同人」的待審假單。
 是否一併刪除，避免審核頁面仍出現？
 
 （只會刪除待審/待核准，不會動到已核准紀錄）`);
@@ -2314,7 +2334,7 @@ const overlaps = (s1, e1, s2, e2) => {
     const a2 = new Date(s2).getTime();
     const b2 = new Date(e2).getTime();
     if ([a1,b1,a2,b2].some(x => !Number.isFinite(x))) return false;
-    return a1 <= b2 && a2 <= b1;
+    return a1 < b2 && a2 < b1;
   } catch { return false; }
 };
 
@@ -2779,10 +2799,26 @@ if (!g.tag.startTime && !g.tag.endTime) {
   if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
   else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
 }
-// 過濾掉已被退回與已撤銷的假單，允許重送
-const hasLeave = leaves.some(l =>
-(l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) &&
-l.start.startsWith(d) && l.status !== 'rejected' && l.status !== 'withdrawn');
+// 只過濾「同一排班來源」的假單，避免同日其他假單誤擋第一區塊
+const hasLeave = leaves.some(l => {
+if (!l) return false;
+const isMine =
+  l.requesterId === user.uid ||
+  l.requesterId === user.docId ||
+  l.requesterUid === user.uid ||
+  l.requesterDocId === user.docId ||
+  l.requesterName === user.name;
+if (!isMine) return false;
+if (['rejected', 'withdrawn', 'recalled'].includes(l.status)) return false;
+
+// 新版：有 sourceGroupId 時，僅比對同一 groupId
+if (l.sourceGroupId && l.sourceGroupId === g.tag.groupId) return true;
+
+// 舊版相容：若缺 sourceGroupId，僅對第一區塊來源單用時間重疊判斷
+if (l.sourceGroupId) return false;
+if (l.sourceType !== 'calendar_event') return false;
+return overlaps(startTime, endTime, l.start, l.end || l.start);
+});
 if (!hasLeave) {
 // 將陣列轄區轉成字串帶入事由
 const areaStr = Array.isArray(g.tag.area) ? g.tag.area.join(', ') : (g.tag.area || '');
@@ -2907,7 +2943,7 @@ useEffect(() => {
         const a2 = new Date(l.start).getTime();
         const b2 = new Date(l.end || l.start).getTime();
         if (!Number.isFinite(a2) || !Number.isFinite(b2)) return false;
-        return a1 <= b2 && a2 <= b1;
+        return a1 < b2 && a2 < b1;
       });
     } catch {
       return false;
@@ -3190,8 +3226,6 @@ const executeConfirmedSubmit = async () => {
     setSubmittingTaskId(null);
   }
 };
-const currentDate = inputMode === 'slot' ? slotDate : form.start?.split('T')[0];
-const busyIds = leaves.filter(l=>l.status!=='rejected' && l.status!=='withdrawn' && currentDate && l.start.startsWith(currentDate)).map(l=>l.requesterName);
 const deputies = users.filter(u=>u.name!==user.name);
 
 return (
@@ -3523,7 +3557,7 @@ return (
                     <option key={d.docId || d.uid} value={(d.docId || d.uid || (d.email||"").toLowerCase())}>{d.name}</option>
                   ))}
                 </select>
-                <div className="text-[11px] text-gray-500 mt-1">同日已排請假者不會出現在清單中</div>
+                <div className="text-[11px] text-gray-500 mt-1">送出時將自動檢查職代時段衝突</div>
               </div>
               <div>
                 <label className="text-sm font-bold text-gray-700 block mb-1">事由（可補充）</label>
@@ -5349,6 +5383,11 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
 
 
 
