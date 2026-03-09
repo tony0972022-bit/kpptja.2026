@@ -655,7 +655,7 @@ setRotationRules(newRules);
 localStorage.setItem('rotationRules', JSON.stringify(newRules));
 };
 const handleAddTag = (type, val) => {
-if(!val) return;
+if(!val) { alert('請先輸入名稱。'); return; }
 if(type==='work') {
 const t = [...workTags, val];
 setWorkTags(t);
@@ -677,7 +677,8 @@ setAreaTags(t);
 localStorage.setItem('areaTags', JSON.stringify(t));}
 };
 const handleUpdateTag = (type, oldVal, newVal) => {
-if(!newVal || oldVal === newVal) return;
+if(!newVal) { alert('名稱不可為空白。'); return; }
+if(oldVal === newVal) { alert('名稱未變更，無需儲存。'); return; }
 if(type === 'area') {
 if (areaTags.includes(newVal)) { alert("此轄區已存在"); return; }
 const t = areaTags.map(item => item === oldVal ? newVal : item);
@@ -1126,6 +1127,8 @@ const [modalOpen, setModalOpen] = useState(false);
 const [rotationModalOpen, setRotationModalOpen] = useState(false);
 const [modalData, setModalData] = useState({ date: '', workItem: '', note: '' });
 const [selSlot, setSelSlot] = useState('morning');
+const [modalStartTime, setModalStartTime] = useState('08:00');
+const [modalEndTime, setModalEndTime] = useState('12:00');
 const [selAreas, setSelAreas] = useState([]); // 修改：改為陣列支援複選
 const [selUsers, setSelUsers] = useState([]);
 const [editGroupId, setEditGroupId] = useState(null);
@@ -1146,6 +1149,17 @@ const userMetaById = useMemo(() => {
   return m;
 }, [users]);
 const slotLabel = (s) => (s === 'all_day' ? '整天' : (s === 'morning' ? '上午' : '下午'));
+const getSlotPreset = (slot) => {
+  if (slot === 'morning') return { start: '08:00', end: '12:00' };
+  if (slot === 'afternoon') return { start: '13:00', end: '17:00' };
+  return { start: '08:00', end: '17:00' };
+};
+const applySlotPreset = (slot) => {
+  setSelSlot(slot);
+  const p = getSlotPreset(slot);
+  setModalStartTime(p.start);
+  setModalEndTime(p.end);
+};
 const getWorkBgClass = (tagName, hasPeople) => {
   if (!hasPeople) return "bg-yellow-200"; // 待派員
   const n = String(tagName || "");
@@ -1224,7 +1238,7 @@ return { ...rule, nextPerson: info?.user?.name || rule.order[0], lastDate: info?
 const handleDayClick = (dObj) => {
 const dStr = getLocalDateString(dObj);
 setModalData({ date: dStr, workItem: '', note: '' });
-setSelSlot('morning');
+applySlotPreset('morning');
 setSelAreas([]); // 初始化清空
 setSelUsers([]);
 setModalError('');
@@ -1237,7 +1251,10 @@ const tagEv = groupEvents.find(ev => ev.type === 'tag');
 const personEvs = groupEvents.filter(ev => ev.type === 'person');
 if (tagEv) {
 setModalData({ date: tagEv.date, workItem: tagEv.item, note: tagEv.note || '' });
-setSelSlot(tagEv.slot || 'all_day');
+applySlotPreset(tagEv.slot || 'all_day');
+const preset = getSlotPreset(tagEv.slot || 'all_day');
+setModalStartTime(tagEv.startTime || preset.start);
+setModalEndTime(tagEv.endTime || preset.end);
 // 處理舊資料(字串)與新資料(陣列)的相容性
 setSelAreas(Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []));
 setSelUsers(personEvs.map(p => p.userId));
@@ -1303,12 +1320,9 @@ const handleModalSave = async () => {
 setModalError('');
 if(!modalData.date) { const msg = "請選擇日期"; setModalError(msg); alert(msg); return; }
 if(!modalData.workItem) { const msg = "請選擇工作項目"; setModalError(msg); alert(msg); return; }
-const slotStart = selSlot === 'morning'
-  ? `${modalData.date}T08:00`
-  : (selSlot === 'afternoon' ? `${modalData.date}T13:00` : `${modalData.date}T08:00`);
-const slotEnd = selSlot === 'morning'
-  ? `${modalData.date}T12:00`
-  : (selSlot === 'afternoon' ? `${modalData.date}T17:00` : `${modalData.date}T17:00`);
+if(!modalStartTime || !modalEndTime) { const msg = "請輸入起訖時間"; setModalError(msg); alert(msg); return; }
+const slotStart = `${modalData.date}T${modalStartTime}`;
+const slotEnd = `${modalData.date}T${modalEndTime}`;
 const hasTimeOverlap = (s1, e1, s2, e2) => {
   try {
     const a1 = new Date(s1).getTime();
@@ -1321,6 +1335,31 @@ const hasTimeOverlap = (s1, e1, s2, e2) => {
     return false;
   }
 };
+const s0 = new Date(slotStart);
+const e0 = new Date(slotEnd);
+if (!Number.isFinite(s0.getTime()) || !Number.isFinite(e0.getTime()) || e0 <= s0) {
+  const msg = '結束時間需晚於起始時間';
+  setModalError(msg);
+  alert(msg);
+  return;
+}
+const lunchS = new Date(`${modalData.date}T12:00`);
+const lunchE = new Date(`${modalData.date}T13:00`);
+const rawH = (e0.getTime() - s0.getTime()) / 36e5;
+const lunchOverlapMs = Math.max(0, Math.min(e0.getTime(), lunchE.getTime()) - Math.max(s0.getTime(), lunchS.getTime()));
+const effectiveHours = Math.max(0, rawH - lunchOverlapMs / 36e5);
+if (effectiveHours <= 0) {
+  const msg = '有效工時需大於 0（已扣除午休 12:00-13:00）';
+  setModalError(msg);
+  alert(msg);
+  return;
+}
+if (effectiveHours > 8) {
+  const msg = `單日有效工時不可超過 8 小時（目前 ${effectiveHours.toFixed(1)} 小時）`;
+  setModalError(msg);
+  alert(msg);
+  return;
+}
 const hasLeaveConflictFor = (u) => {
   if (!u) return false;
   const uid = String(u.uid || u.docId || '');
@@ -1342,15 +1381,27 @@ const hasLeaveConflictFor = (u) => {
     return hasTimeOverlap(slotStart, slotEnd, ls, le);
   });
 };
+const getEventRange = (ev) => {
+  const d = ev?.date || modalData.date;
+  if (ev?.startTime && ev?.endTime) {
+    return { start: `${d}T${ev.startTime}`, end: `${d}T${ev.endTime}` };
+  }
+  const p = getSlotPreset(ev?.slot || 'all_day');
+  return { start: `${d}T${p.start}`, end: `${d}T${p.end}` };
+};
 const conflicts = [];
 for(const uid of selUsers) {
 const userEvents = events.filter(e => e.date === modalData.date && e.type === 'person' && e.userId === uid && e.groupId !== editGroupId);
-const hasAllDay = userEvents.find(e => e.slot === 'all_day');
-const hasMorning = userEvents.find(e => e.slot === 'morning');
-const hasAfternoon = userEvents.find(e => e.slot === 'afternoon');
 const targetUser = users.find(u=>u.uid === uid || u.docId === uid);
 const uName = targetUser?.name || '未命名人員';
-if (selSlot === 'all_day' && (hasMorning || hasAfternoon || hasAllDay)) { conflicts.push(`${uName}：已有「${hasMorning?'上午':(hasAfternoon?'下午':'整天')}」行程，無法再排整天`); } else if (selSlot === 'morning' && (hasAllDay || hasMorning)) { conflicts.push(`${uName}：已有「${hasAllDay?'整天':'上午'}」行程`); } else if (selSlot === 'afternoon' && (hasAllDay || hasAfternoon)) { conflicts.push(`${uName}：已有「${hasAllDay?'整天':'下午'}」行程`); }
+const hitEvent = userEvents.find(ev => {
+  const r = getEventRange(ev);
+  return hasTimeOverlap(slotStart, slotEnd, r.start, r.end);
+});
+if (hitEvent) {
+  const r = getEventRange(hitEvent);
+  conflicts.push(`${uName}：${String(r.start).slice(11,16)}-${String(r.end).slice(11,16)} 已有排班，時段衝突`);
+}
 if (targetUser && hasLeaveConflictFor(targetUser)) {
   conflicts.push(`${uName}：該時段已有請假(排休)資料，與排班衝突`);
 }}
@@ -1364,11 +1415,11 @@ setIsSubmitting(true);
 try {
 if (editGroupId) await crud.deleteEventsByGroup(editGroupId);
 const groupId = `g_${Date.now()}`;
-// 儲存 selAreas 陣列
-await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, slot: selSlot, note: modalData.note, timestamp: new Date() });
+// 儲存 selAreas 陣列 + 自訂起訖時間
+await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, note: modalData.note, timestamp: new Date() });
 for(const uid of selUsers) {
 const u = users.find(x=>x.uid === uid || x.docId === uid);
-if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, timestamp: new Date() });}
+if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });}
 setModalOpen(false);
 setModalError('');
 alert(editGroupId ? '行程修改完成' : '行程新增完成');
@@ -1651,7 +1702,18 @@ return (
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-1">選擇時段</label>
 <div className="flex bg-gray-100 rounded p-1">
-{TIME_SLOTS.map(s => (<button key={s.id} onClick={()=>setSelSlot(s.id)} className={`flex-1 py-1.5 text-xs rounded transition ${selSlot===s.id ? 'bg-white shadow text-black font-bold' : 'text-gray-500'}`}>{s.label}</button>))}</div></div></div>
+{TIME_SLOTS.map(s => (<button key={s.id} onClick={()=>applySlotPreset(s.id)} className={`flex-1 py-1.5 text-xs rounded transition ${selSlot===s.id ? 'bg-white shadow text-black font-bold' : 'text-gray-500'}`}>{s.label}</button>))}</div></div></div>
+<div className="grid grid-cols-2 gap-3">
+<div>
+<label className="block text-xs font-bold text-gray-700 mb-1">起始時間</label>
+<input type="time" className="w-full border p-2 rounded bg-white text-sm" value={modalStartTime} onChange={e=>setModalStartTime(e.target.value)} />
+</div>
+<div>
+<label className="block text-xs font-bold text-gray-700 mb-1">結束時間</label>
+<input type="time" className="w-full border p-2 rounded bg-white text-sm" value={modalEndTime} onChange={e=>setModalEndTime(e.target.value)} />
+</div>
+</div>
+<div className="text-[11px] text-gray-500">系統會自動扣除午休 12:00-13:00，單日有效工時上限 8 小時。</div>
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-1">選擇轄區 (可點擊複選)</label>
 <div className="flex flex-wrap gap-2 p-2 border rounded bg-gray-50">
@@ -2124,7 +2186,7 @@ const openEditResubmit = (leaveObj) => {
 };
 
 const handleEditResubmit = async () => {
-  if (!editTarget) return;
+  if (!editTarget) { alert("找不到可重送的假單資料，請重新操作。"); return; }
   const start = editForm.start;
   const end = editForm.end;
   const hours = Number(editForm.hours || 0);
@@ -2496,10 +2558,12 @@ if (!g.tag) return;
 const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
 if (!isMe) return;
 const d = g.tag.date;
-let startTime = `${d}T08:00`;
-let endTime = `${d}T17:00`;
-if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
-else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
+let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
+let endTime = g.tag.endTime ? `${d}T${g.tag.endTime}` : `${d}T17:00`;
+if (!g.tag.startTime && !g.tag.endTime) {
+  if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
+  else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
+}
 // 過濾掉已被退回與已撤銷的假單，允許重送
 const hasLeave = leaves.some(l =>
 (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) &&
@@ -2714,8 +2778,11 @@ const handleTaskSubmit = async (taskData, taskId) => {
       setSubmittingTaskId(null);
       return;
     }
+    if(!taskData.start || !taskData.end){ showSubmitError('缺少起訖時間，請回排班日曆重新儲存該筆行程。'); setSubmittingTaskId(null); return; }
+    if(!(Number(taskData.hours) > 0)){ showSubmitError('缺少有效時數，請回排班日曆檢查起訖時間設定。'); setSubmittingTaskId(null); return; }
     if (!checkAnnualLeaveEnough(taskData.type, taskData.start, taskData.hours)) { setSubmittingTaskId(null); return; }
-    const deputyName = skipDeputy ? '-' : (users.find(u => (u.docId||u.uid||u.email||'').toLowerCase() === (taskData.deputyId||'').toLowerCase())?.name || '');
+    const deputyKey = String(taskData.deputyId || '').toLowerCase();
+    const deputyName = skipDeputy ? '-' : (((users || []).find(u => String(u.docId || u.uid || u.email || '').toLowerCase() === deputyKey))?.name || '');
     const payload = {
       ...taskData,
       deputyId: skipDeputy ? '' : (taskData.deputyId||''),
@@ -2737,7 +2804,7 @@ const handleTaskSubmit = async (taskData, taskId) => {
     setConfirmOpen(true);
   } catch (e) {
     console.error(e);
-    showSubmitError('送出失敗，請稍後再試。');
+    showSubmitError(`送出失敗：${e?.message || e || '請稍後再試'}`);
     setSubmittingTaskId(null);
   }
 }
@@ -2808,27 +2875,58 @@ setConfirmOpen(true);
 };
 
 const executeConfirmedSubmit = async () => {
-  if(!pendingSubmit) { setConfirmOpen(false); return; }
-    setSubmitError('');
+  if(!pendingSubmit) { showSubmitError("找不到待送資料，請重新填寫後送出。"); setConfirmOpen(false); return; }
+  setSubmitError('');
+  const cleanUndefined = (obj) => {
+    const out = {};
+    Object.keys(obj || {}).forEach(k => {
+      const v = obj[k];
+      if (v !== undefined) out[k] = v;
+    });
+    return out;
+  };
+  const safePayload = cleanUndefined({
+    ...pendingSubmit,
+    requesterId: pendingSubmit?.requesterId || pendingSubmit?.requesterUid || pendingSubmit?.requesterDocId || user?.docId || user?.uid || '',
+    requesterUid: pendingSubmit?.requesterUid || user?.uid || '',
+    requesterDocId: pendingSubmit?.requesterDocId || user?.docId || '',
+    requesterEmail: String(pendingSubmit?.requesterEmail || user?.email || '').toLowerCase(),
+    requesterName: pendingSubmit?.requesterName || user?.name || '',
+    deputyId: pendingSubmit?.deputyId || '',
+    reason: pendingSubmit?.reason || '',
+    sourceGroupId: pendingSubmit?.sourceGroupId || '',
+    sourceType: pendingSubmit?.sourceType || '',
+  });
+  if (!safePayload.requesterId) {
+    showSubmitError('送出失敗：找不到申請人識別資料，請重新登入後再試。');
+    return;
+  }
   setIsSubmitting(true);
   try {
     // 若來自第一區塊(行事曆行程)且已存在同一 sourceGroupId 的申請，改為更新避免分裂成兩單
-    const existing = pendingSubmit?.sourceGroupId
-      ? leaves.find(l => l.sourceGroupId === pendingSubmit.sourceGroupId && (l.requesterId === pendingSubmit.requesterId) && l.status !== 'withdrawn')
+    const existing = safePayload?.sourceGroupId
+      ? leaves.find(l => l.sourceGroupId === safePayload.sourceGroupId && (l.requesterId === safePayload.requesterId) && l.status !== 'withdrawn')
       : null;
     if (existing?.id) {
-      await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', existing.id), { ...pendingSubmit, updatedAt: new Date() });
+      await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', existing.id), { ...safePayload, updatedAt: new Date() });
     } else {
-      await crud.createLeave(pendingSubmit);
+      await crud.createLeave(safePayload);
     }
     setConfirmOpen(false);
     setConfirmData(null);
     setPendingSubmit(null);
-    const msg = isOvertime(pendingSubmit.type) ? "加班申請已送出！" : "申請已送出！";
+    const msg = isOvertime(safePayload.type) ? "加班申請已送出！" : "申請已送出！";
     alert(msg);
   } catch (e) {
     console.error(e);
-    showSubmitError('送出失敗，請稍後再試。');
+    const code = String(e?.code || '');
+    if (code.includes('permission-denied')) {
+      showSubmitError('送出失敗：目前帳號沒有寫入權限，請重新登入或聯絡管理員。');
+    } else if (code.includes('unauthenticated')) {
+      showSubmitError('送出失敗：登入狀態已失效，請重新登入後再試。');
+    } else {
+      showSubmitError(`送出失敗：${e?.message || e || '請稍後再試'}`);
+    }
   } finally {
     setIsSubmitting(false);
     setSubmittingTaskId(null);
@@ -3305,13 +3403,13 @@ const toggleLeaderSelect = (id) => {
   setSelectedLeaderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 };
 const toggleLeaderSelectAll = () => {
-  if (pendingLeader.length === 0) return;
+  if (pendingLeader.length === 0) { alert("目前沒有可勾選的待審項目。"); return; }
   setSelectedLeaderIds(prev => (prev.length === pendingLeader.length) ? [] : pendingLeader.map(l => l.id));
 };
 
 const handleLeaderBulkApprove = async () => {
   if (selectedLeaderIds.length === 0) { alert("請先勾選要核准的項目"); return; }
-  if (processingId) return;
+  if (processingId) { alert("目前有作業進行中，請稍候再試。"); return; }
   if (!confirm(`確定要一次核准 ${selectedLeaderIds.length} 筆差單嗎？`)) return;
 
   setProcessingId('bulk_leader');
@@ -3374,7 +3472,7 @@ const handleLeaderBulkApprove = async () => {
 };
 
 const handleDeputyAgree = async (leave) => {
-  if (processingId) return;
+  if (processingId) { alert("目前有作業進行中，請稍候再試。"); return; }
   const myKey = (currentUser.docId || currentUser.uid || '').toLowerCase();
   const myEmail = (currentUser.email || '').toLowerCase();
   const did = String(leave.deputyId || '').toLowerCase();
@@ -3386,7 +3484,7 @@ const handleDeputyAgree = async (leave) => {
 // 職代審核通過：不寄信（全部審核完才通知申請者）
 
  } catch(e) { alert("操作失敗"); } finally { setProcessingId(null); } };
-const handleLeaderApprove = async (leave) => { if (processingId) return; setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid, approvedAt: new Date(), approvedByName: currentUser.name || currentUser.displayName || '' });
+const handleLeaderApprove = async (leave) => { if (processingId) { alert("目前有作業進行中，請稍候再試。"); return; } setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'approved', approverId: currentUser.uid, approvedAt: new Date(), approvedByName: currentUser.name || currentUser.displayName || '' });
 // --- Mail notify: approved -> requester ---
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
@@ -3412,7 +3510,7 @@ try {
   }
 } catch (mailErr) { console.warn("mail notify (approved) failed:", mailErr); }
  } catch(e) { alert("操作失敗"); } finally { setProcessingId(null); } };
-const handleReject = async (leave) => { if (processingId) return; setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'rejected', approverId: currentUser.uid });
+const handleReject = async (leave) => { if (processingId) { alert("目前有作業進行中，請稍候再試。"); return; } setProcessingId(leave.id); try { await crud.updateLeave(leave.id, { status: 'rejected', approverId: currentUser.uid });
 // --- Mail notify: rejected -> requester ---
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
@@ -3731,18 +3829,18 @@ const compensatoryBalance = allTimeCompensatoryEarned - allTimeCompensatoryUsed;
 const honorBalance = totalHonorEarned - totalHonorUsed;
 const totalAnnualEntitled = (seniority.days + extraLeaveDays) * 8;
 const handleEditExtraLeave = () => {
-if (!isAdminOrLeader) return;
+if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
 const newDays = prompt(`請輸入 ${targetUser.name} 的「單位額外特休」天數 (目前為 ${extraLeaveDays} 天)：\n*若要取消/刪除配額，請直接輸入 0。`, extraLeaveDays);
 if (newDays !== null && !isNaN(newDays) && newDays.trim() !== '') {
 onUpdateAnyProfile(targetUser.docId, { extraLeaveDays: Number(newDays) });}
 };
 // 新增：發放榮譽假功能
 const handleAddHonorLeave = async () => {
-if (!isAdminOrLeader) return;
+if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
 const hoursStr = prompt(`請輸入要發放給 ${targetUser.name} 的「榮譽假」時數\n(例如：1天請輸入 8)：`);
-if (!hoursStr || isNaN(hoursStr) || Number(hoursStr) <= 0) return;
+if (!hoursStr || isNaN(hoursStr) || Number(hoursStr) <= 0) { alert("請輸入大於 0 的有效時數。"); return; }
 const reason = prompt(`請輸入獲得榮譽假的事由：`);
-if (!reason) return;
+if (!reason) { alert("請輸入事由後再送出。"); return; }
 const todayStr = getLocalDateString(new Date());
 try {
 await crud.createLeave({
@@ -3765,7 +3863,7 @@ alert('發放失敗: ' + e.message);}
 };
 // 新增：刪除與編輯榮譽假功能
 const handleDeleteHonor = async (id) => {
-if (!isAdminOrLeader) return;
+if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
 if(confirm("確定要刪除這筆「榮譽假(獲得)」紀錄嗎？")) {
 try {
 await crud.deleteLeave(id);
@@ -3773,7 +3871,7 @@ alert("刪除成功");
 } catch(e) { alert("刪除失敗: " + e.message); }}
 };
 const handleEditHonor = async (l) => {
-if (!isAdminOrLeader) return;
+if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
 const newHours = prompt(`修改「榮譽假(獲得)」時數：`, l.hours);
 if (newHours !== null && !isNaN(newHours) && newHours.trim() !== '') {
 try {
@@ -4492,7 +4590,7 @@ const [isSettingsSaved, setIsSettingsSaved] = useState(false);
 const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
 const handleColorChange = (area, colorClass) => { setAreaC({ ...areaC, [area]: colorClass}); };
 const handleAddAreaWithColor = () => {
-if(!newArea) return;
+if(!newArea) { alert("請先輸入轄區名稱。"); return; }
 if(editAreaId) {
 tags.handleUpdateTag('area', editAreaId, newArea);
 setEditAreaId(null);
@@ -4644,7 +4742,7 @@ const openEditLeave = (l) => {
   setEditOpen(true);
 };
 const saveEditLeave = async () => {
-  if(!editTarget) return;
+  if(!editTarget) { alert("找不到可編輯的假單資料，請重新開啟視窗。"); return; }
   if(!editForm.type) { alert('請選擇假別'); return; }
   if(!editForm.start || !editForm.end) { alert('請填寫開始/結束'); return; }
   const hours = Number(editForm.hours||0);
@@ -4842,6 +4940,24 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
