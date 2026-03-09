@@ -2530,16 +2530,18 @@ const personalTypes = leaveTypes.filter(t => t.category === 'personal');
   const [typeError, setTypeError] = useState(false);
 const overtimeTypeName = officialTypes.find(t => (t.name||'').includes('加班'))?.name || '加班';
 const currentTypeDesc = leaveTypes.find(t => t.name === form.type)?.desc || '';
+const isOvertimePayType = isOvertimePay(form.type);
 // 加班可能超過 17:00：選到加班時自動切換到自訂時間（不受 08:00-17:00 限制）
 useEffect(() => {
   if (isOvertime(form.type)) {
     setInputMode('manual');
     setManualRangeType('lt1');
-    // 預設帶入常用區間
-    try {
-      if (!shortStartH) setShortStartH('17');
-      if (!shortEndH) setShortEndH('19');
-    } catch (e) {}
+    // 加班(請款)固定 17:00-19:00，2 小時
+    if (isOvertimePay(form.type)) {
+      setShortStartH('17'); setShortStartM('00');
+      setShortEndH('19'); setShortEndM('00');
+      setHours(2);
+    }
   }
 }, [form.type]);
 const pendingExternalTasks = useMemo(() => {
@@ -2802,6 +2804,18 @@ const handleTaskSubmit = async (taskData, taskId) => {
       return;
     }
     if(!taskData.start || !taskData.end){ showSubmitError('缺少起訖時間，請回排班日曆重新儲存該筆行程。'); setSubmittingTaskId(null); return; }
+    if (isOvertimePay(taskData.type)) {
+      const ds = String(taskData.start || '').slice(0,10);
+      const de = String(taskData.end || '').slice(0,10);
+      const ts = String(taskData.start || '').split('T')[1]?.slice(0,5);
+      const te = String(taskData.end || '').split('T')[1]?.slice(0,5);
+      if (ds !== de || ts !== '17:00' || te !== '19:00') {
+        showSubmitError('加班(請款)僅可申請 17:00-19:00，且每日每次固定為 2 小時。');
+        setSubmittingTaskId(null);
+        return;
+      }
+      taskData.hours = 2;
+    }
     if(!(Number(taskData.hours) > 0)){ showSubmitError('缺少有效時數，請回排班日曆檢查起訖時間設定。'); setSubmittingTaskId(null); return; }
     if (!checkAnnualLeaveEnough(taskData.type, taskData.start, taskData.hours)) { setSubmittingTaskId(null); return; }
     const deputyKey = String(taskData.deputyId || '').toLowerCase();
@@ -2876,6 +2890,17 @@ finalHours = 8;}
     // hours 由上方 useEffect 依工作時段重疊自動計算
     finalHours = Number(hours || 0);
   }
+}
+if (isOvertimePay(form.type)) {
+  const ds = String(finalStart || '').slice(0,10);
+  const de = String(finalEnd || '').slice(0,10);
+  const ts = String(finalStart || '').split('T')[1]?.slice(0,5);
+  const te = String(finalEnd || '').split('T')[1]?.slice(0,5);
+  if (ds !== de || ts !== '17:00' || te !== '19:00') {
+    showSubmitError('加班(請款)僅可申請 17:00-19:00，且每日每次固定為 2 小時。');
+    return;
+  }
+  finalHours = 2;
 }
 // 特休額度不足提示（事假除外）
 if (!checkAnnualLeaveEnough(form.type, finalStart, finalHours)) { return; }
@@ -3098,10 +3123,11 @@ return (
 
             <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl space-y-4">
               <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
-                <button type="button" onClick={() => setInputMode('slot')} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>簡易時段</button>
+                <button type="button" onClick={() => { if (!isOvertimePayType) setInputMode('slot'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>簡易時段</button>
                 <button type="button" onClick={() => setInputMode('manual')} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>自訂時間</button>
               </div>
 
+              {isOvertimePayType && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">加班(請款)限制：僅可申請 17:00-19:00，且每日每次固定為 2 小時。</div>}
               {inputMode === 'slot' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -3140,7 +3166,7 @@ return (
     >少於一天</button>
     <button
       type="button"
-      onClick={() => setManualRangeType('gt1')}
+      onClick={() => { if (!isOvertimePayType) setManualRangeType('gt1'); }}
       className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${manualRangeType === 'gt1' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
     >大於一天</button>
   </div>
@@ -3155,10 +3181,10 @@ return (
         <div>
           <label className="text-xs font-bold text-gray-600 block mb-1">起</label>
           <div className="flex gap-2">
-            <select className="w-full border p-2 rounded-lg bg-white" value={shortStartH} onChange={e=>setShortStartH(e.target.value)}>
+            <select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortStartH} onChange={e=>setShortStartH(e.target.value)}>
               {Array.from({length:24}).map((_,i)=>{ const v=String(i).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
             </select>
-            <select className="w-full border p-2 rounded-lg bg-white" value={shortStartM} onChange={e=>setShortStartM(e.target.value)}>
+            <select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortStartM} onChange={e=>setShortStartM(e.target.value)}>
               {['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
@@ -3166,10 +3192,10 @@ return (
         <div>
           <label className="text-xs font-bold text-gray-600 block mb-1">迄</label>
           <div className="flex gap-2">
-            <select className="w-full border p-2 rounded-lg bg-white" value={shortEndH} onChange={e=>setShortEndH(e.target.value)}>
+            <select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortEndH} onChange={e=>setShortEndH(e.target.value)}>
               {Array.from({length:24}).map((_,i)=>{ const v=String(i).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
             </select>
-            <select className="w-full border p-2 rounded-lg bg-white" value={shortEndM} onChange={e=>setShortEndM(e.target.value)}>
+            <select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortEndM} onChange={e=>setShortEndM(e.target.value)}>
               {['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
@@ -3851,11 +3877,40 @@ if (l.type === '榮譽假') totalHonorUsed += Number(l.hours);}
 const compensatoryBalance = allTimeCompensatoryEarned - allTimeCompensatoryUsed;
 const honorBalance = totalHonorEarned - totalHonorUsed;
 const totalAnnualEntitled = (seniority.days + extraLeaveDays) * 8;
+const overtimePayQuota = Number(((targetUser?.overtimePayQuotaByYear || {})[String(selectedYear)] ?? targetUser?.overtimePayQuota ?? 0));
+const overtimePayUsedYear = leaves.filter(l =>
+(l.requesterId === targetUser.uid || l.requesterId === targetUser.docId) &&
+l.status === 'approved' &&
+String(l.start||'').startsWith(String(selectedYear)) &&
+isOvertimePay(l.type)
+).reduce((s,l)=>s + getEffectiveLeaveHours(l), 0);
+const overtimePayAvailable = Math.max(0, overtimePayQuota - overtimePayUsedYear);
 const handleEditExtraLeave = () => {
 if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
 const newDays = prompt(`請輸入 ${targetUser.name} 的「單位額外特休」天數 (目前為 ${extraLeaveDays} 天)：\n*若要取消/刪除配額，請直接輸入 0。`, extraLeaveDays);
 if (newDays !== null && !isNaN(newDays) && newDays.trim() !== '') {
 onUpdateAnyProfile(targetUser.docId, { extraLeaveDays: Number(newDays) });}
+};
+const handleSetOvertimePayQuotaAll = async () => {
+if (!isAdminOrLeader) { alert("權限不足，無法執行此操作。"); return; }
+const defaultQuota = 24;
+const input = prompt(`請輸入 ${selectedYear} 年度「加班(請款)」全員統一額度（小時）：`, String(defaultQuota));
+if (input === null) return;
+const quota = Number(input);
+if (!isFinite(quota) || quota < 0) { alert('請輸入 0 以上的有效數字。'); return; }
+const targets = (viewableUsers || []).filter(u => u && u.docId);
+if (!targets.length) { alert('找不到可設定的成員資料。'); return; }
+if (!confirm(`確定將 ${selectedYear} 年度加班(請款)額度統一設為 ${quota} 小時？\n共 ${targets.length} 位成員。`)) return;
+try {
+await Promise.all(targets.map(u => {
+const byYear = { ...(u.overtimePayQuotaByYear || {}) };
+byYear[String(selectedYear)] = quota;
+return Promise.resolve(onUpdateAnyProfile(u.docId, { overtimePayQuotaByYear: byYear }));
+}));
+alert(`已完成：${selectedYear} 年度全員加班(請款)額度 ${quota} 小時。`);
+} catch (e) {
+alert('批次設定失敗: ' + (e?.message || String(e)));
+}
 };
 // 新增：發放榮譽假功能
 const handleAddHonorLeave = async () => {
@@ -3922,12 +3977,26 @@ return (
 </div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-purple-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">加<br/>班<br/>補<br/>休</div></div><div className="text-right"><div className="text-3xl font-black text-purple-600">{compensatoryBalance}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>總累積:</span><span className="font-bold">{allTimeCompensatoryEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{allTimeCompensatoryUsed}</span></div></div></div>
 {/* 新增：榮譽假統計卡片 */}
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-indigo-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">加<br/>班<br/>請<br/>款</div></div><div className="text-right"><span className="text-2xl font-black text-indigo-600">{allTimeOvertimePay}</span><span className="text-xs text-gray-500 ml-1">時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>總累積:</span><span className="font-bold">{allTimeOvertimePay}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">0</span></div><div className="flex justify-between text-green-600"><span>可請款:</span><span className="font-bold">{allTimeOvertimePay}</span></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-indigo-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">加<br/>班<br/>請<br/>款</div>{isAdminOrLeader && <button onClick={handleSetOvertimePayQuotaAll} className="text-[10px] px-2 py-1 rounded border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold" title="統一設定全員年度額度">全員設定</button>}</div><div className="text-right"><span className="text-2xl font-black text-indigo-600">{overtimePayAvailable}</span><span className="text-xs text-gray-500 ml-1">時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>年度額度:</span><span className="font-bold">{overtimePayQuota}</span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{overtimePayUsedYear}</span></div><div className="flex justify-between text-green-600"><span>可請款:</span><span className="font-bold">{overtimePayAvailable}</span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-yellow-400 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">榮<br/>譽<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-yellow-600">{honorBalance}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span className="flex items-center gap-1">總獲得: {isAdminOrLeader && <button onClick={handleAddHonorLeave} title="發放榮譽假" className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 p-0.5 rounded flex items-center justify-center"><Plus size={12}/></button>}</span><span className="font-bold">{totalHonorEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{totalHonorUsed}</span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">病<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-emerald-600">{30*8 - usedSick}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{30*8}<span className="text-[10px] text-gray-400 ml-1">(30天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}<span className="text-[10px] text-gray-400 ml-1">({(usedSick/8).toFixed(2)}天)</span></span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">事<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-amber-600">{14*8 - usedPersonal}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{14*8}<span className="text-[10px] text-gray-400 ml-1">(14天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedPersonal}<span className="text-[10px] text-gray-400 ml-1">({(usedPersonal/8).toFixed(2)}天)</span></span></div></div></div>
 {/* 新增：公務出差卡片 */}
-<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">公<br/>務<br/>出<br/>差</div><details className="text-[10px] text-gray-500"><summary className="cursor-pointer select-none hover:text-sky-700">假別說明</summary><div className="mt-1">出差/公出/公假</div></details></div><div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div></div><div className="text-xs space-y-1"><div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div></div></div></div>
+<div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-4">
+  <div className="flex justify-between items-start border-b pb-3 mb-3">
+    <div className="flex items-start gap-3">
+      <div className="font-black text-gray-800 text-sm leading-4 text-center w-7">公<br/>務<br/>出<br/>差</div>
+    </div>
+    <div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div>
+  </div>
+  <div className="text-xs space-y-1">
+    <div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div>
+    <details className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
+      <summary className="cursor-pointer select-none font-bold text-gray-700">假別說明</summary>
+      <div className="mt-2">出差/公出/公假</div>
+    </details>
+  </div>
+</div>
 {/* 新增：其他假別統計摺疊區塊 */}
 <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
 <button onClick={() => setShowOtherLeaves(!showOtherLeaves)} className="w-full px-4 py-3 flex justify-between items-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition">
@@ -3992,7 +4061,7 @@ return (
 )}</td>
 )}</tr>)
 })}
-{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div></div>);}
+{filteredLeaves.length === 0 && <tr><td colSpan={isAdminOrLeader ? 6 : 5} className="p-8 text-center text-gray-400">尚無使用紀錄</td></tr>}</tbody></table></div></div></div>);}
 
 // === 會計統計 ===
 function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
@@ -4965,6 +5034,7 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
 
 
 
