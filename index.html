@@ -2679,6 +2679,26 @@ useEffect(() => {
   if (!isNaN(cnt)) setHours(cnt * 8);
 }, [inputMode, manualRangeType, multiDates, multiSelected]);
 // 職代防呆：職代於同時段已安排出差/請假則禁止選擇（同時檢查假單與行事曆）
+  const hasDeputyConflictLite = (deputyId, start, end) => {
+    if (!deputyId || !start || !end) return false;
+    try {
+      const a1 = new Date(start).getTime();
+      const b1 = new Date(end).getTime();
+      if (!Number.isFinite(a1) || !Number.isFinite(b1)) return false;
+      return (leaves || []).some(l => {
+        if (!l) return false;
+        const isDeputy = (l.requesterId === deputyId) || (l.requesterDocId === deputyId) || (l.requesterUid === deputyId);
+        if (!isDeputy) return false;
+        if (!['pending','deputy_signed','approved'].includes(l.status)) return false;
+        const a2 = new Date(l.start).getTime();
+        const b2 = new Date(l.end || l.start).getTime();
+        if (!Number.isFinite(a2) || !Number.isFinite(b2)) return false;
+        return a1 <= b2 && a2 <= b1;
+      });
+    } catch {
+      return false;
+    }
+  };
   const hasDeputyConflict = (deputyId, start, end) => {
     if(!deputyId || !start || !end) return false;
     if(hasDeputyConflictLite(deputyId, start, end)) return true;
@@ -4940,6 +4960,7 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
 
 
 
