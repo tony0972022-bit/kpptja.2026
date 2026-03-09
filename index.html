@@ -349,6 +349,14 @@ const DEFAULT_ROTATION_RULES = [
 { id: 'project', name: '專案報告', matchTag: '專案報告', order: ['盧怡倫', '高湘怡', '黃國裕', '方姿云', '蔡凱宇', '陳秋媚'] },
 { id: 'large', name: '大宗', matchTag: '大宗', order: ['高湘怡', '黃國裕', '盧怡倫', '陳秋媚', '蔡凱宇', '方姿云'] },
 { id: 'monthly', name: '月報', matchTag: '月報', order: ['陳秋媚', '蔡凱宇', '方姿云', '盧怡倫', '高湘怡'] },];
+const normalizeRotationRules = (rules = []) => {
+  const list = Array.isArray(rules) ? rules : [];
+  return list.map(r => ({
+    ...r,
+    order: Array.isArray(r?.order) ? r.order : [],
+    pausedUsers: Array.isArray(r?.pausedUsers) ? r.pausedUsers : []
+  }));
+};
 const TIME_SLOTS = [
 { id: 'morning', label: '上午', color: 'bg-sky-100 text-sky-900 border-sky-200' },
 { id: 'afternoon', label: '下午', color: 'bg-sky-200 text-sky-950 border-sky-300' },
@@ -488,7 +496,7 @@ const [attendanceRecords, setAttendanceRecords] = useState([]);
 const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
 const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
 const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
-const [rotationRules, setRotationRules] = useState(DEFAULT_ROTATION_RULES);
+const [rotationRules, setRotationRules] = useState(normalizeRotationRules(DEFAULT_ROTATION_RULES));
 const [roleNames, setRoleNames] = useState(DEFAULT_ROLE_NAMES);
 const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
@@ -541,7 +549,13 @@ setLeaveTypes(parsed);}
 } else {
 setLeaveTypes(DEFAULT_LEAVE_TYPES);}
 const savedRotationRules = localStorage.getItem('rotationRules');
-if(savedRotationRules) setRotationRules(JSON.parse(savedRotationRules));
+if(savedRotationRules) {
+  try {
+    setRotationRules(normalizeRotationRules(JSON.parse(savedRotationRules)));
+  } catch(e) {
+    setRotationRules(normalizeRotationRules(DEFAULT_ROTATION_RULES));
+  }
+}
 const savedWT = localStorage.getItem('workTags');
 if (savedWT) setWorkTags(JSON.parse(savedWT));
 const savedAT = localStorage.getItem('areaTags');
@@ -655,8 +669,9 @@ alert("成員設定已更新");
 } catch(e) { alert("更新失敗: " + e.message); }
 };
 const handleUpdateRotationRules = (newRules) => {
-setRotationRules(newRules);
-localStorage.setItem('rotationRules', JSON.stringify(newRules));
+const normalized = normalizeRotationRules(newRules);
+setRotationRules(normalized);
+localStorage.setItem('rotationRules', JSON.stringify(normalized));
 };
 const handleAddTag = (type, val) => {
 if(!val) { alert('請先輸入名稱。'); return; }
@@ -1236,22 +1251,27 @@ return stats;
 const getNextRotationPerson = (matchTag) => {
 const rule = rotationRules.find(r => r.matchTag === matchTag);
 if (!rule || !rule.order?.length) return null;
+const pausedSet = new Set(rule.pausedUsers || []);
+const activeOrder = rule.order.filter(name => !pausedSet.has(name));
 const sortedEvents = [...events].filter(e => e.type === 'tag' && e.item === matchTag).sort((a,b) => new Date(b.date) - new Date(a.date));
+if (activeOrder.length === 0) {
+  return { user: null, lastDate: sortedEvents[0]?.date || null };
+}
 if (sortedEvents.length === 0) {
-  return { user: users.find(u => u.name === rule.order[0]), lastDate: null };
+  return { user: users.find(u => u.name === activeOrder[0]), lastDate: null };
 }
 const lastDate = sortedEvents[0].date;
 const lastGroup = sortedEvents[0].groupId;
 const pplInGroup = events.filter(e => e.groupId === lastGroup && e.type === 'person').map(e=>e.userName);
-const presentIndexes = pplInGroup.map(p => rule.order.indexOf(p)).filter(i => i !== -1);
+const presentIndexes = pplInGroup.map(p => activeOrder.indexOf(p)).filter(i => i !== -1);
 const next = presentIndexes.length > 0
-  ? rule.order[(Math.max(...presentIndexes) + 1) % rule.order.length]
-  : rule.order[0];
+  ? activeOrder[(Math.max(...presentIndexes) + 1) % activeOrder.length]
+  : activeOrder[0];
 return { user: users.find(u => u.name === next), lastDate };
 };
 const rotationData = rotationRules.map(rule => {
 const info = getNextRotationPerson(rule.matchTag);
-return { ...rule, nextPerson: info?.user?.name || rule.order[0], lastDate: info?.lastDate };
+return { ...rule, nextPerson: info?.user?.name || null, lastDate: info?.lastDate || null, pausedUsers: Array.isArray(rule.pausedUsers) ? rule.pausedUsers : [] };
 });
 const handleDayClick = (dObj) => {
 const dStr = getLocalDateString(dObj);
@@ -1284,7 +1304,10 @@ const handleRotationClick = (rule) => {
 setModalData(prev => ({ ...prev, workItem: rule.matchTag}));
 const info = getNextRotationPerson(rule.matchTag);
 if (info?.user) setSelUsers([info.user.uid || info.user.docId]);
-else setSelUsers([]);
+else {
+  setSelUsers([]);
+  alert('此輪序目前已全部暫停，請先到「輪序表」恢復至少一位人員。');
+}
 };
 const handleDeleteGroup = async () => {
 if(!editGroupId) return;
@@ -1852,13 +1875,114 @@ return (
 function RotationModal({ open, onClose, rules, onUpdateRules, rotationData, rotationStats }) {
 const [editMode, setEditMode] = useState(null);
 const [tempOrder, setTempOrder] = useState([]);
+const [tempPaused, setTempPaused] = useState([]);
 const [password, setPassword] = useState('');
 const [showPass, setShowPass] = useState(false);
 if(!open) return null;
-const startEdit = (rule) => { setEditMode(rule.id); setTempOrder([...rule.order]); setPassword(''); setShowPass(false); }
-const moveItem = (index, direction) => { const newOrder = [...tempOrder]; const targetIndex = index + direction; if(targetIndex >= 0 && targetIndex < newOrder.length) { [newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]]; setTempOrder(newOrder); } }
-const saveOrder = () => { if(!showPass) { setShowPass(true); return; } if(password !== '0000') { alert('密碼錯誤'); return; } const newRules = rules.map(r => r.id === editMode ? { ...r, order: tempOrder} : r); onUpdateRules(newRules); setEditMode(null); alert('順序已更新'); }
-return (<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}><div className="bg-white rounded-xl w-full max-w-lg shadow-2xl p-6" onClick={e=>e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg flex items-center gap-2"><RefreshCw/> 智慧輪序參考表</h3><button onClick={onClose}><X/></button></div><div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">{rotationData.map(r => (<div key={r.id} className="bg-gray-50 p-3 rounded-lg border"><div className="flex justify-between font-bold mb-2 items-center"><div className="flex flex-col"><span>{r.name}</span><span className="text-[10px] font-normal text-gray-500">上次: {r.lastDate || '無'}</span></div>{editMode !== r.id ? (<button onClick={()=>startEdit(r)} className="text-gray-400 hover:text-blue-600"><Edit2 size={14}/></button>) : (<div className="flex gap-2">{showPass ? (<input autoFocus className="w-16 text-xs border rounded p-1" placeholder="密碼" type="password" value={password} onChange={e=>setPassword(e.target.value)} />) : null}<button onClick={saveOrder} className="text-green-600 text-xs font-bold">儲存</button><button onClick={()=>setEditMode(null)} className="text-gray-400 text-xs">取消</button></div>)}</div><div className="flex flex-wrap gap-1">{(editMode === r.id ? tempOrder : r.order).map((p, idx) => { const count = rotationStats[r.id] && rotationStats[r.id][p] ? rotationStats[r.id][p] : 0; return (<div key={p} className={`px-2 py-1 text-xs rounded text-center relative group ${p===r.nextPerson && editMode !== r.id ? 'bg-orange-100 text-orange-700 font-bold ring-2 ring-orange-200' : 'bg-white border text-gray-500'}`}>{p}<div className="text-[9px] text-gray-400 mt-0.5">(本年: {count})</div>{editMode === r.id && (<div className="absolute -top-2 -right-1 hidden group-hover:flex bg-white shadow border rounded"><button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500"><ChevronLeft size={10}/></button><button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500"><ChevronRight size={10}/></button></div>)}</div>); })}</div></div>))}</div></div></div>);}
+
+const startEdit = (rule) => {
+  setEditMode(rule.id);
+  setTempOrder([...(rule.order || [])]);
+  setTempPaused([...(rule.pausedUsers || [])]);
+  setPassword('');
+  setShowPass(false);
+};
+
+const moveItem = (index, direction) => {
+  const newOrder = [...tempOrder];
+  const targetIndex = index + direction;
+  if(targetIndex >= 0 && targetIndex < newOrder.length) {
+    [newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]];
+    setTempOrder(newOrder);
+  }
+};
+
+const togglePause = (name) => {
+  setTempPaused(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
+};
+
+const saveOrder = () => {
+  if(!showPass) { setShowPass(true); return; }
+  if(password !== '0000') { alert('密碼錯誤'); return; }
+  const newRules = rules.map(r => r.id === editMode ? { ...r, order: tempOrder, pausedUsers: tempPaused } : r);
+  onUpdateRules(newRules);
+  setEditMode(null);
+  alert('順序與暫停名單已更新');
+};
+
+return (
+  <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+    <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl p-6" onClick={e=>e.stopPropagation()}>
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="font-bold text-lg flex items-center gap-2"><RefreshCw/> 智慧輪序參考表</h3>
+        <button onClick={onClose}><X/></button>
+      </div>
+
+      <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+        {rotationData.map(r => {
+          const displayOrder = (editMode === r.id ? tempOrder : (r.order || []));
+          const pausedList = (editMode === r.id ? tempPaused : (r.pausedUsers || []));
+
+          return (
+            <div key={r.id} className="bg-gray-50 p-3 rounded-lg border">
+              <div className="flex justify-between font-bold mb-2 items-center">
+                <div className="flex flex-col">
+                  <span>{r.name}</span>
+                  <span className="text-[10px] font-normal text-gray-500">上次: {r.lastDate || '無'}</span>
+                  <span className="text-[10px] font-normal text-gray-500">下一位: {r.nextPerson || '（已全暫停）'}</span>
+                </div>
+
+                {editMode !== r.id ? (
+                  <button onClick={()=>startEdit(r)} className="text-gray-400 hover:text-blue-600"><Edit2 size={14}/></button>
+                ) : (
+                  <div className="flex gap-2 items-center">
+                    {showPass ? (
+                      <input autoFocus className="w-16 text-xs border rounded p-1" placeholder="密碼" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+                    ) : null}
+                    <button onClick={saveOrder} className="text-green-600 text-xs font-bold">儲存</button>
+                    <button onClick={()=>setEditMode(null)} className="text-gray-400 text-xs">取消</button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1">
+                {displayOrder.map((p, idx) => {
+                  const count = rotationStats[r.id] && rotationStats[r.id][p] ? rotationStats[r.id][p] : 0;
+                  const isPaused = pausedList.includes(p);
+                  const isNext = (p===r.nextPerson && editMode !== r.id && !isPaused);
+
+                  return (
+                    <div key={p} className={`px-2 py-1 text-xs rounded text-center relative ${isNext ? 'bg-orange-100 text-orange-700 font-bold ring-2 ring-orange-200' : isPaused ? 'bg-gray-200 text-gray-400 border border-gray-300' : 'bg-white border text-gray-500'}`}>
+                      <div className="font-medium">{p}{isPaused ? '（暫停）' : ''}</div>
+                      <div className="text-[9px] text-gray-400 mt-0.5">(本年: {count})</div>
+
+                      {editMode === r.id && (
+                        <div className="mt-1 flex items-center justify-center gap-1">
+                          <button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="左移"><ChevronLeft size={10}/></button>
+                          <button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="右移"><ChevronRight size={10}/></button>
+                          <button onClick={()=>togglePause(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isPaused ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                            {isPaused ? '恢復' : '暫停'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {editMode === r.id && (
+                <div className="mt-2 text-[11px] text-gray-500">
+                  可針對產假/病假人員按「暫停」，輪派時會自動跳過；按「恢復」即可重新納入輪序。
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </div>
+);
+}
 function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView }) {
 const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
 const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
@@ -5181,6 +5305,10 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
 
 
 
