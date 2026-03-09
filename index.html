@@ -439,18 +439,22 @@ const getEffectiveLeaveHours = (l) => {
   }
 };
 // --- Helper Component: User Avatar ---
-// 讓「外框顏色」同時決定「背景顏色」（背景用帶透明度的同色系），降低設定複雜度
-const hexToRgba = (hex, alpha = 0.25) => {
+// 讓「外框顏色」同時決定「背景顏色」（背景改為加白後的淺色，不用透明度，避免濁感）
+const hexToTint = (hex, whiteness = 0.82) => {
   try {
     const h = String(hex || '').replace('#','').trim();
-    if (h.length !== 6) return `rgba(229,231,235,${alpha})`;
+    if (h.length !== 6) return 'rgb(245,247,250)';
     const r = parseInt(h.slice(0,2), 16);
     const g = parseInt(h.slice(2,4), 16);
     const b = parseInt(h.slice(4,6), 16);
-    if ([r,g,b].some(v => Number.isNaN(v))) return `rgba(229,231,235,${alpha})`;
-    return `rgba(${r},${g},${b},${alpha})`;
+    if ([r,g,b].some(v => Number.isNaN(v))) return 'rgb(245,247,250)';
+    const w = Math.max(0, Math.min(1, Number(whiteness)));
+    const rr = Math.round(r + (255 - r) * w);
+    const gg = Math.round(g + (255 - g) * w);
+    const bb = Math.round(b + (255 - b) * w);
+    return `rgb(${rr},${gg},${bb})`;
   } catch {
-    return `rgba(229,231,235,${alpha})`;
+    return 'rgb(245,247,250)';
   }
 };
 
@@ -458,7 +462,7 @@ const UserAvatar = ({ user, size = "w-8 h-8", textSize = "text-xs", className = 
   if (!user) return <div className={`${size} rounded-full bg-gray-200 ${className}`}></div>;
 
   const borderColor = user.borderColor || '#e5e7eb';
-  const bg = hexToRgba(borderColor, 0.22);
+  const bg = hexToTint(borderColor, 0.82);
 
   return (
     <div
@@ -1555,7 +1559,7 @@ const renderGroup = (g) => {
     {areaShort && <span className="ml-1 text-gray-600">[{areaShort}]</span>}
   </div>
 
-  <div className="px-1.5 py-1 rounded bg-white/55 border border-white/70 text-xs text-gray-600 truncate" title={infoLine || ''}>
+  <div className="text-xs text-gray-700 truncate leading-tight" title={infoLine || ''}>
     {infoLine || '—'}
   </div>
 </div>
@@ -2383,7 +2387,7 @@ return (<>
 <td className="p-4 text-sm text-gray-600 max-w-[150px] truncate" title={r.reason}>{r.reason}</td>
 <td className="p-4 text-sm text-gray-500 max-w-[150px] truncate" title={r.note}>{r.note}</td>
 <td className="p-4">
-<span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+<span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold leading-tight whitespace-nowrap ${r.status === '缺公務單' ? 'bg-red-100 text-red-700' : r.status === '異常公出' || ['假別不符', '已駁回', '已撤銷'].includes(r.status) ? 'bg-amber-100 text-amber-700' : ['待職代審查中', '組長審查中'].includes(r.status) ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
 {r.status === '異常公出' ? '異常公出 (請確認日曆人員)' : r.status}</span></td>
 <td className="p-4 text-center">
 {r._groupKey && (
@@ -2394,10 +2398,10 @@ return (<>
 )}
 {canRecall && (
   <div className="flex items-center justify-center gap-2">
-    <button onClick={() => openEditResubmit(r.rawLeave)} className="text-blue-700 hover:text-white border border-blue-200 bg-blue-50 hover:bg-blue-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm" title="修改請假內容並重新送出">
-      <Edit2 size={14}/> 修改後送出
+    <button onClick={() => openEditResubmit(r.rawLeave)} className="text-blue-700 hover:text-white border border-blue-200 bg-blue-50 hover:bg-blue-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="修改請假內容">
+      <Edit2 size={14}/> 修改
     </button>
-    <button onClick={() => handleDeleteLeave(r.rawLeave)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm" title="刪除申請(未核准才可)">
+    <button onClick={() => handleDeleteLeave(r.rawLeave)} className="text-red-600 hover:text-white border border-red-200 bg-red-50 hover:bg-red-500 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1 shadow-sm whitespace-nowrap" title="刪除申請(未核准才可)">
       <Trash2 size={14}/> 刪除
     </button>
   </div>
@@ -2490,6 +2494,8 @@ const [hours, setHours] = useState(0);
 const [inputMode, setInputMode] = useState('slot'); // 'slot' (簡易時段) 或 'manual' (自訂時間)
 const [slotDate, setSlotDate] = useState(getLocalDateString());
 const [slotType, setSlotType] = useState('all_day');
+const [slotStartH, setSlotStartH] = useState('08');
+const [slotStartM, setSlotStartM] = useState('00');
 // 自訂時間：分為「少於一天」與「大於一天」兩種
 const [manualRangeType, setManualRangeType] = useState('lt1'); // 'lt1' 少於一天；'gt1' 大於一天（以天計，1天=8小時）
 // 少於一天：日期 + 起訖時間（下拉選單）
@@ -2543,6 +2549,41 @@ useEffect(() => {
     }
   }
 }, [form.type]);
+useEffect(() => {
+  // 非加班時，自訂時間主打「大於一天」
+  if (inputMode === 'manual' && !isOvertime(form.type) && manualRangeType !== 'gt1') {
+    setManualRangeType('gt1');
+  }
+}, [inputMode, form.type, manualRangeType]);
+
+const getSlotRangeByType = (d, t, startH, startM) => {
+  if (!d) return { start: '', end: '', hours: 0 };
+  if (t === 'morning') return { start: `${d}T08:00`, end: `${d}T12:00`, hours: 4 };
+  if (t === 'afternoon') return { start: `${d}T13:00`, end: `${d}T17:00`, hours: 4 };
+  // all_day: 固定有效工時 8 小時，起始可調整；跨到午休會自動略過 12:00-13:00
+  let cur = Number(startH) * 60 + Number(startM);
+  let remain = 8 * 60;
+  while (remain > 0) {
+    if (cur < 12 * 60) {
+      const toLunch = Math.min(remain, 12 * 60 - cur);
+      cur += toLunch;
+      remain -= toLunch;
+      if (cur === 12 * 60) cur = 13 * 60;
+    } else if (cur >= 12 * 60 && cur < 13 * 60) {
+      cur = 13 * 60;
+    } else {
+      cur += remain;
+      remain = 0;
+    }
+  }
+  const endH = String(Math.floor(cur / 60) % 24).padStart(2, '0');
+  const endM = String(cur % 60).padStart(2, '0');
+  return {
+    start: `${d}T${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`,
+    end: `${d}T${endH}:${endM}`,
+    hours: 8,
+  };
+};
 const pendingExternalTasks = useMemo(() => {
 const groups = {};
 events.forEach(e => {
@@ -2855,21 +2896,13 @@ let finalHours = hours;
 // 依據輸入模式準備資料
 if (inputMode === 'slot') {
 if (!slotDate) { alert("請選擇日期"); return; }
-if (slotType === 'morning') {
-finalStart = `${slotDate}T08:00`;
-finalEnd = `${slotDate}T12:00`;
-finalHours = 4;
-} else if (slotType === 'afternoon') {
-finalStart = `${slotDate}T13:00`;
-finalEnd = `${slotDate}T17:00`;
-finalHours = 4;
-} else { // all_day
-finalStart = `${slotDate}T08:00`;
-finalEnd = `${slotDate}T17:00`;
-finalHours = 8;}
+const slotRange = getSlotRangeByType(slotDate, slotType, slotStartH, slotStartM);
+finalStart = slotRange.start;
+finalEnd = slotRange.end;
+finalHours = slotRange.hours;
 } else {
   // 自訂時間：依「少於一天 / 大於一天」準備資料
-  if (manualRangeType === 'lt1') {
+  if (manualRangeType === 'lt1' && isOvertime(form.type)) {
     if (!shortDate) { alert("請選擇日期"); return; }
     const ss = `${shortDate}T${String(shortStartH).padStart(2,'0')}:${String(shortStartM).padStart(2,'0')}`;
     const ee = `${shortDate}T${String(shortEndH).padStart(2,'0')}:${String(shortEndM).padStart(2,'0')}`;
@@ -3030,9 +3063,11 @@ return (
             </div>
           ) : (
             <div className="bg-white/70 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900">
-              <div className="font-bold mb-2">目前沒有可送出的日曆行程。</div>
-              <div className="text-indigo-800/90">
-                此區需先至「排班日曆」排定行程後，才會在此顯示可送出的差勤申請。
+              <div className="font-bold mb-2">目前沒有可送出的行程。</div>
+              <div className="text-indigo-800/90 space-y-0.5">
+                <div>請先完成下列步驟：</div>
+                <div>1. 到「排班日曆」排定行程</div>
+                <div>2. 回到此區送出差勤單</div>
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <button
@@ -3043,7 +3078,7 @@ return (
                   前往排班日曆
                 </button>
                 <div className="text-xs text-indigo-700/80">
-                  （加班申請請點右上角「加班申請」）
+                  加班請按右上角「加班申請」。
                 </div>
               </div>
             </div>
@@ -3123,7 +3158,7 @@ return (
             <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl space-y-4">
               <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
                 <button type="button" onClick={() => { if (!isOvertimePayType) setInputMode('slot'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>簡易時段</button>
-                <button type="button" onClick={() => setInputMode('manual')} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>自訂時間</button>
+                <button type="button" onClick={() => { setInputMode('manual'); if (!isOvertime(form.type)) setManualRangeType('gt1'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>自訂時間</button>
               </div>
 
               {isOvertimePayType && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">加班(請款)限制：僅可申請 17:00-19:00，且每日每次固定為 2 小時。</div>}
@@ -3154,15 +3189,31 @@ return (
                       ))}
                     </div>
                   </div>
+                  {slotType === 'all_day' && (
+                    <div className="md:col-span-2">
+                      <label className="text-xs font-bold text-gray-600 block mb-1">起始時間（固定 8 小時）</label>
+                      <div className="grid grid-cols-2 gap-2 md:w-[260px]">
+                        <select className="w-full border p-2 rounded-lg bg-white" value={slotStartH} onChange={e=>setSlotStartH(e.target.value)}>
+                          {Array.from({length:7}).map((_,i)=>{ const v=String(i+7).padStart(2,'0'); return <option key={v} value={v}>{v}</option>; })}
+                        </select>
+                        <select className="w-full border p-2 rounded-lg bg-white" value={slotStartM} onChange={e=>setSlotStartM(e.target.value)}>
+                          {['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </div>
+                      <div className="text-[11px] text-gray-500 mt-1">系統會自動扣除午休 12:00-13:00，並以 8 小時計算。</div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
   <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
-    <button
-      type="button"
-      onClick={() => setManualRangeType('lt1')}
-      className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${manualRangeType === 'lt1' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-    >少於一天</button>
+    {isOvertime(form.type) && (
+      <button
+        type="button"
+        onClick={() => setManualRangeType('lt1')}
+        className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${manualRangeType === 'lt1' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+      >少於一天</button>
+    )}
     <button
       type="button"
       onClick={() => { if (!isOvertimePayType) setManualRangeType('gt1'); }}
@@ -3170,7 +3221,9 @@ return (
     >大於一天</button>
   </div>
 
-  {manualRangeType === 'lt1' ? (
+  {!isOvertime(form.type) && <div className="text-[11px] text-gray-500">一般請假若為當日 8 小時，請改用「簡易時段」的彈性起始時間。</div>}
+
+  {manualRangeType === 'lt1' && isOvertime(form.type) ? (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label className="text-xs font-bold text-gray-600 block mb-1">日期</label>
@@ -3272,7 +3325,7 @@ return (
     <div className="text-xs text-gray-600">
       {(() => {
         try {
-          if (manualRangeType === 'lt1') {
+          if (manualRangeType === 'lt1' && isOvertime(form.type)) {
             if (!shortDate) return '—';
             return `${shortDate} ${shortStartH}:${shortStartM} ～ ${shortDate} ${shortEndH}:${shortEndM}（共 ${fmtDaysHoursText(hours)}）`;
           }
@@ -3317,13 +3370,10 @@ return (
                     if (inputMode === "slot") {
                       const d = slotDate;
                       if (!d) return "請選擇日期";
-                      const t = slotType;
-                      const start = (t === "morning") ? `${d} 08:00` : (t === "afternoon") ? `${d} 13:00` : `${d} 08:00`;
-                      const end   = (t === "morning") ? `${d} 12:00` : (t === "afternoon") ? `${d} 17:00` : `${d} 17:00`;
-                      const hrs   = (t === "all_day") ? 8 : 4;
-                      return `預覽：${start} ～ ${end}（${fmtDaysHoursText(hrs)}）`;
+                      const r = getSlotRangeByType(d, slotType, slotStartH, slotStartM);
+                      return `預覽：${String(r.start||'').replace('T',' ')} ～ ${String(r.end||'').replace('T',' ')}（${fmtDaysHoursText(r.hours)}）`;
                     }
-                    if (manualRangeType === "lt1") {
+                    if (manualRangeType === "lt1" && isOvertime(form.type)) {
                       if (!shortDate) return "請選擇日期";
                       const s = `${shortDate} ${shortStartH}:${shortStartM}`;
                       const e = `${shortDate} ${shortEndH}:${shortEndM}`;
@@ -5103,6 +5153,17 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
+
+
+
+
+
 
 
 
