@@ -1786,9 +1786,17 @@ scheduleData.forEach((d) => {
   const dayIdBase = d.date;
   const primaryLeave = d.leave || null;
   const allLeaves = Array.isArray(d.leaves) ? d.leaves : (primaryLeave ? [primaryLeave] : []);
+  const hasWorkRows = Array.isArray(d.work) && d.work.length > 0;
+  const hasLeaveRows = allLeaves.length > 0;
+  const workItems = hasWorkRows ? d.work.map(w => (w.tag?.item || '')).filter(Boolean) : [];
+  const workAreas = hasWorkRows ? d.work.map(w => Array.isArray(w.tag?.area) ? w.tag.area.join(', ') : (w.tag?.area || '')).filter(Boolean) : [];
+  const workNotes = hasWorkRows ? d.work.map(w => (w.tag?.note || '')).filter(Boolean) : [];
+  const autoWorkContent = workItems.join(' / ');
+  const autoWorkArea = workAreas.join(' / ');
+  const autoWorkNote = workNotes.join(' / ');
 
   // 1) 先放入排班（不遺漏任何排班）
-  if (Array.isArray(d.work) && d.work.length > 0) {
+  if (hasWorkRows && !hasLeaveRows) {
     d.work.forEach((w, idx) => {
       rows.push({
         id: `${dayIdBase}-work-${idx}`,
@@ -1823,10 +1831,10 @@ scheduleData.forEach((d) => {
       slot,
       leaveType: lv.type || '-',
       leaveHours: lv.hours || '-',
-      content: '',
-      area: '',
+      content: autoWorkContent,
+      area: autoWorkArea,
       reason: lv.reason || '-',
-      note: lv.note ? `${lv.note}` : timeNote,
+      note: lv.note ? `${lv.note}` : (autoWorkNote || timeNote),
       status: getStatusLabel(lv.status),
       rawTag: null,
       rawLeave: lv
