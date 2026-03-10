@@ -3902,7 +3902,7 @@ const handleLeaderBulkApprove = async () => {
 2. 職代人員：${leave.deputySignedByName || '—'}｜同意時間：${fmtDT(leave.deputySignedAt)}
 3. 組長：${approvedByName||'—'}｜同意時間：${fmtDT(approvedAt)}
 
-（系統自動通知）`
+（寄件人：KKPT職再差勤系統）`
           });
         }
       } catch (mailErr) { console.warn("mail notify (approved bulk) failed:", mailErr); }
@@ -3952,7 +3952,7 @@ try {
 2. 職代人員：${leave.deputySignedByName || '—'}｜同意時間：${fmtDT(leave.deputySignedAt)}
 3. 組長：${(currentUser.name||'—')}｜同意時間：${fmtDT(new Date())}
 
-（系統自動通知）`
+（寄件人：KKPT職再差勤系統）`
     });
   }
 } catch (mailErr) { console.warn("mail notify (approved) failed:", mailErr); }
@@ -3972,7 +3972,7 @@ try {
 起訖：${fmtISO(leave.start)} ～ ${fmtISO(leave.end)}
 
 如需調整內容，請重新送出或洽主管。
-（系統自動通知）`
+（寄件人：KKPT職再差勤系統）`
     });
   }
 } catch (mailErr) { console.warn("mail notify (rejected) failed:", mailErr); }
@@ -5541,6 +5541,7 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
 
 
 
