@@ -3252,17 +3252,66 @@ const executeConfirmedSubmit = async () => {
     showSubmitError('送出失敗：找不到申請人識別資料，請重新登入後再試。');
     return;
   }
+
+  const notifyDeputyReview = async (payload) => {
+    try {
+      if (!payload || payload.status !== 'pending') return;
+      if (!payload.deputyId) return;
+      if (isOvertime(payload.type)) return;
+      const deputyUser = findUserByAnyKey(users, payload.deputyId);
+      const deputyEmail = String(deputyUser?.email || '').toLowerCase();
+      if (!deputyEmail) return;
+
+      const deputyName = String(deputyUser?.name || '職代人');
+      const requesterName = String(payload.requesterName || '申請人');
+      const leaveType = String(payload.type || '差勤');
+      const sDate = String(payload.start || '').split('T')[0] || '';
+      const eDate = String(payload.end || payload.start || '').split('T')[0] || '';
+      const dateText = (sDate && eDate) ? (sDate === eDate ? sDate : `${sDate}~${eDate}`) : (sDate || eDate || '-');
+      const sTime = String(payload.start || '').split('T')[1]?.slice(0,5) || '';
+      const eTime = String(payload.end || '').split('T')[1]?.slice(0,5) || '';
+      const timeText = (sTime && eTime) ? `${sTime}~${eTime}` : (sTime || eTime || '整天');
+      const hoursText = Number(payload.hours || 0);
+      const reasonText = String(payload.reason || payload.note || '').trim() || '-';
+
+      await sendMail({
+        targetEmail: deputyEmail,
+        subject: `【職代審查】${deputyName}，您有一筆差勤待審：${requesterName} ${leaveType} ${dateText}`,
+        body: `${requesterName} ${leaveType} ${dateText}
+
+${deputyName} 您好：
+
+有一筆差勤申請待您審查，資訊如下：
+申請人：${requesterName}
+假別：${leaveType}
+日期：${dateText}
+時間：${timeText}
+時數：${hoursText} 小時
+事由：${reasonText}
+
+請至系統「差單審核」完成審查。
+（寄件人：KKPT職再差勤系統）`
+      });
+    } catch (mailErr) {
+      console.warn('mail notify (deputy review) failed:', mailErr);
+    }
+  };
+
   setIsSubmitting(true);
   try {
     // 若來自第一區塊(行事曆行程)且已存在同一 sourceGroupId 的申請，改為更新避免分裂成兩單
     const existing = safePayload?.sourceGroupId
       ? leaves.find(l => l.sourceGroupId === safePayload.sourceGroupId && (l.requesterId === safePayload.requesterId) && l.status !== 'withdrawn')
       : null;
+
     if (existing?.id) {
       await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', existing.id), { ...safePayload, updatedAt: new Date() });
     } else {
       await crud.createLeave(safePayload);
     }
+
+    await notifyDeputyReview(safePayload);
+
     setConfirmOpen(false);
     setConfirmData(null);
     setPendingSubmit(null);
@@ -3278,6 +3327,7 @@ const executeConfirmedSubmit = async () => {
     } else {
       setSubmitSuccess('');
     }
+
     const msg = isOvertime(safePayload.type) ? "加班申請已送出！" : "申請已送出！";
     alert(msg);
   } catch (e) {
@@ -3838,7 +3888,7 @@ const handleLeaderBulkApprove = async () => {
         if (requesterEmail) {
           await sendMail({
             targetEmail: requesterEmail,
-            subject: "【差勤排班】你的差單已核准",
+            subject: "【差勤核准】你的差單已核准",
             body: `你好 ${leave.requesterName||''}：
 
 你的差單已核准。
@@ -3888,7 +3938,7 @@ try {
   if (requesterEmail) {
     await sendMail({
       targetEmail: requesterEmail,
-      subject: "【差勤排班】你的差單已核准",
+      subject: "【差勤核准】你的差單已核准",
       body: `你好 ${leave.requesterName||''}：
 
 你的差單已核准。
@@ -3914,7 +3964,7 @@ try {
   if (requesterEmail) {
     await sendMail({
       targetEmail: requesterEmail,
-      subject: "【差勤排班】你的差單未通過（退件）",
+      subject: "【差勤退回】你的差單未通過（退件）",
       body: `你好 ${leave.requesterName||''}：
 
 你的差單已被退件。
@@ -5491,6 +5541,10 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
 
 
 
