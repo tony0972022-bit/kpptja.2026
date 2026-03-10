@@ -381,6 +381,15 @@ const DEFAULT_AREA_COLORS = {
 "銀髮": "bg-sky-100 text-sky-800",
 "分署": "bg-gray-100 text-gray-800"
 };
+const DEFAULT_WORK_COLORS = {
+"審查": "bg-indigo-50 text-indigo-900",
+"訪視": "bg-emerald-50 text-emerald-900",
+"成效": "bg-sky-50 text-sky-900",
+"試用": "bg-teal-50 text-teal-900",
+"專案報告": "bg-amber-50 text-amber-900",
+"大宗": "bg-orange-50 text-orange-900",
+"月報": "bg-amber-50 text-amber-900"
+};
 const DEFAULT_SPECIAL_HOLIDAYS = {
 "2026-02-27": "228補假",
 "2026-04-02": "兒童節補假",
@@ -508,6 +517,7 @@ const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
 const [unassignedToast, setUnassignedToast] = useState({ open: false, count: 0, items: [] });
 const [settings, setSettings] = useState({
 areaColors: DEFAULT_AREA_COLORS,
+workColors: DEFAULT_WORK_COLORS,
 customHolidays: DEFAULT_SPECIAL_HOLIDAYS,
 sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID
 });
@@ -528,6 +538,8 @@ const savedRoleNames = localStorage.getItem('roleNames');
 if (savedRoleNames) setRoleNames(JSON.parse(savedRoleNames));
 const savedAreaColors = localStorage.getItem('areaColors');
 if(savedAreaColors) setSettings(prev => ({ ...prev, areaColors: JSON.parse(savedAreaColors)}));
+const savedWorkColors = localStorage.getItem('workColors');
+if(savedWorkColors) setSettings(prev => ({ ...prev, workColors: JSON.parse(savedWorkColors)}));
 const savedHolidays = localStorage.getItem('customHolidays');
 if(savedHolidays) {
 try {
@@ -636,17 +648,20 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const remote = snap.data() || {};
     const merged = {
       areaColors: { ...DEFAULT_AREA_COLORS, ...(remote.areaColors || {}) },
+      workColors: { ...DEFAULT_WORK_COLORS, ...(remote.workColors || {}) },
       customHolidays: { ...DEFAULT_SPECIAL_HOLIDAYS, ...(remote.customHolidays || {}) },
       sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID
     };
     setSettings(merged);
     localStorage.setItem('areaColors', JSON.stringify(merged.areaColors));
+    localStorage.setItem('workColors', JSON.stringify(merged.workColors));
     localStorage.setItem('customHolidays', JSON.stringify(merged.customHolidays));
     localStorage.setItem('sharedGoogleCalendarId', merged.sharedGoogleCalendarId);
     const missing = Object.keys(DEFAULT_SPECIAL_HOLIDAYS).some(k => !(k in (remote.customHolidays || {})));
-    if (missing || !remote.sharedGoogleCalendarId) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId }, { merge: true }); } catch(e) {} }
+    const missingWork = Object.keys(DEFAULT_WORK_COLORS).some(k => !(k in (remote.workColors || {})));
+    if (missing || missingWork || !remote.sharedGoogleCalendarId) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId }, { merge: true }); } catch(e) {} }
   } else {
-    const init = { areaColors: DEFAULT_AREA_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID };
+    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID };
     try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
   }
 });
@@ -663,6 +678,7 @@ if(auth) await signOut(auth);
 const handleUpdateSettings = (s) => {
 setSettings(s);
 if(s.areaColors) localStorage.setItem('areaColors', JSON.stringify(s.areaColors));
+if(s.workColors) localStorage.setItem('workColors', JSON.stringify(s.workColors));
 if(s.customHolidays) localStorage.setItem('customHolidays', JSON.stringify(s.customHolidays));
 if(s.sharedGoogleCalendarId) localStorage.setItem('sharedGoogleCalendarId', String(s.sharedGoogleCalendarId).trim());
 if (db && userData && (userData.role === 'admin')) {
@@ -670,6 +686,7 @@ if (db && userData && (userData.role === 'admin')) {
     doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global'),
     {
       areaColors: s.areaColors || DEFAULT_AREA_COLORS,
+      workColors: s.workColors || DEFAULT_WORK_COLORS,
       customHolidays: s.customHolidays || DEFAULT_SPECIAL_HOLIDAYS,
       sharedGoogleCalendarId: String(s.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID
     },
@@ -699,10 +716,12 @@ localStorage.setItem('rotationRules', JSON.stringify(normalized));
 const handleAddTag = (type, val) => {
 if(!val) { alert('請先輸入名稱。'); return; }
 if(type==='work') {
+if (workTags.includes(val)) { alert('此項目已存在'); return; }
 const t = [...workTags, val];
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
 } else {
+if (areaTags.includes(val)) { alert('此轄區已存在'); return; }
 const t = [...areaTags, val];
 setAreaTags(t);
 localStorage.setItem('areaTags', JSON.stringify(t));}
@@ -713,6 +732,12 @@ if(type==='work') {
 const t = workTags.filter(item => item !== val);
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+if (settings.workColors && settings.workColors[val]) {
+  const newWorkColors = { ...settings.workColors };
+  delete newWorkColors[val];
+  setSettings(prev => ({ ...prev, workColors: newWorkColors }));
+  localStorage.setItem('workColors', JSON.stringify(newWorkColors));
+}
 } else {
 const t = areaTags.filter(item => item !== val);
 setAreaTags(t);
@@ -736,7 +761,15 @@ localStorage.setItem('areaColors', JSON.stringify(newColors));}
 if (workTags.includes(newVal)) { alert("此項目已存在"); return; }
 const t = workTags.map(item => item === oldVal ? newVal : item);
 setWorkTags(t);
-localStorage.setItem('workTags', JSON.stringify(t));}
+localStorage.setItem('workTags', JSON.stringify(t));
+if (settings.workColors && settings.workColors[oldVal]) {
+const newWorkColors = { ...settings.workColors };
+newWorkColors[newVal] = newWorkColors[oldVal];
+delete newWorkColors[oldVal];
+setSettings(prev => ({ ...prev, workColors: newWorkColors }));
+localStorage.setItem('workColors', JSON.stringify(newWorkColors));
+}
+}
 };
 const handleManageLeaveTypes = (action, val) => {
 if(action === 'add' && val) {
@@ -1228,6 +1261,8 @@ const modalHoursHint = useMemo(() => {
 }, [modalData.date, modalStartTime, modalEndTime]);
 const getWorkBgClass = (tagName, hasPeople) => {
   if (!hasPeople) return "bg-yellow-200"; // 待派員
+  const direct = String(settings?.workColors?.[String(tagName || "")] || "").trim();
+  if (direct) return direct;
   const n = String(tagName || "");
   if (n.includes("審查")) return "bg-indigo-50";
   if (n.includes("訪視")) return "bg-emerald-50";
@@ -1812,7 +1847,7 @@ const toGoogleCalendarPayload = (group) => {
 
   return {
     summary,
-    description: lines.join('\n'),
+    description: lines.filter(x => !String(x || '').startsWith('[')).join('\n'),
     colorId,
     location: areaList.length ? areaList.join('、') : undefined,
     start: { dateTime: `${dateStr}T${startTime}:00`, timeZone: 'Asia/Taipei' },
@@ -1861,7 +1896,7 @@ const toGoogleLeavePayload = (leave) => {
 
   return {
     summary: `${leaveType}｜${requesterName}`,
-    description: lines.join('\n'),
+    description: lines.filter(x => !String(x || '').startsWith('[')).join('\n'),
     colorId,
     start: { dateTime: toGoogleDateTime(startText, '08:00'), timeZone: 'Asia/Taipei' },
     end: { dateTime: toGoogleDateTime(endText, '17:00'), timeZone: 'Asia/Taipei' },
@@ -1957,79 +1992,112 @@ const isSyncItemOwnedByCurrentUser = (item) => {
   return false;
 };
 
-const handleSyncGoogleCalendar = async (targetType = 'personal') => {
+const handleSyncGoogleCalendar = async (targetType = 'both') => {
   if (isSyncingGoogle) return;
   if (!auth?.currentUser) {
     alert('請先登入 Google 帳號後再同步。');
     return;
   }
 
-  const isPersonal = targetType === 'personal';
-  const calendarId = String(isPersonal ? personalCalendarId : sharedCalendarId).trim();
-  if (!isPersonal && String(user?.role || '') !== 'admin') {
-    alert('僅管理員可同步共用日曆。');
-    return;
-  }
-  if (!calendarId) {
-    alert(isPersonal ? '請先到個人設定填寫「個人 Google 日曆 ID」(可填 primary)。' : '請先由管理員到系統設定填寫「共用 Google 日曆 ID」。');
-    return;
-  }
-  const targetLabel = isPersonal
-    ? (calendarId === 'primary' ? '個人 Google 日曆 (primary)' : `個人 Google 日曆 (${calendarId})`)
-    : `共用 Google 日曆 (${calendarId})`;
-
   const allTargets = monthSyncItems;
-  const targets = isPersonal ? allTargets.filter(isSyncItemOwnedByCurrentUser) : allTargets;
-  const groupCount = targets.filter(x => x.kind === 'group').length;
-  const leaveCount = targets.filter(x => x.kind === 'leave').length;
-  if (!targets.length) {
-    alert(isPersonal ? '此月份沒有可同步的「你的」排班/事假資料。' : '此月份沒有可同步的排班/事假資料。');
+  const ownedTargets = allTargets.filter(isSyncItemOwnedByCurrentUser);
+
+  const jobs = [];
+  const wantsPersonal = targetType === 'personal' || targetType === 'both';
+  const wantsShared = targetType === 'shared' || targetType === 'both';
+
+  if (wantsPersonal) {
+    const pid = String(personalCalendarId || '').trim();
+    if (!pid) {
+      alert('請先到個人設定填寫「個人 Google 日曆 ID」(可填 primary)。');
+      return;
+    }
+    jobs.push({ key: 'personal', label: '個人 Google 日曆', calendarId: pid, targets: ownedTargets });
+  }
+
+  if (wantsShared) {
+    const sid = String(sharedCalendarId || '').trim();
+    if (!sid) {
+      if (targetType === 'shared') {
+        alert('請先由管理員到系統設定填寫「共用 Google 日曆 ID」。');
+        return;
+      }
+    } else {
+      jobs.push({ key: 'shared', label: '共用 Google 日曆', calendarId: sid, targets: allTargets });
+    }
+  }
+
+  if (!jobs.length) {
+    alert('找不到可同步目標，請先確認日曆 ID 設定。');
+    return;
+  }
+
+  const hasAnyData = jobs.some(j => (j.targets || []).length > 0);
+  if (!hasAnyData) {
+    alert('此月份沒有可同步的排班/事假資料。');
     return;
   }
 
   const win = getMonthWindow(date);
-  const ok = confirm(`將同步 ${win.label} 月資料到：${targetLabel}\n排班 ${groupCount} 筆 + 事假 ${leaveCount} 筆\n是否繼續？`);
+  const previewLines = jobs.map(j => {
+    const gc = (j.targets || []).filter(x => x.kind === 'group').length;
+    const lc = (j.targets || []).filter(x => x.kind === 'leave').length;
+    return `${j.label}：排班 ${gc} 筆 + 事假 ${lc} 筆`;
+  });
+  const ok = confirm(`將同步 ${win.label} 月資料到 Google 日曆：\n${previewLines.join('\n')}\n是否繼續？`);
   if (!ok) return;
 
   setIsSyncingGoogle(true);
   try {
     const token = await getGoogleCalendarToken();
-    const existingEvents = await fetchGoogleMonthEvents(token, calendarId, win.startIso, win.endIso);
-    const existingMap = new Map();
-    (existingEvents || []).forEach(ev => {
-      const key = extractSyncedKey(ev);
-      if (key && ev?.id && !existingMap.has(key)) existingMap.set(key, ev.id);
-    });
+    const resultLines = [];
 
-    let created = 0;
-    let updated = 0;
-    let skipped = 0;
-    let createdGroup = 0;
-    let updatedGroup = 0;
-    let createdLeave = 0;
-    let updatedLeave = 0;
-
-    for (const item of targets) {
-      let payload = null;
-      if (item.kind === 'group') payload = toGoogleCalendarPayload(item.group);
-      if (item.kind === 'leave') payload = toGoogleLeavePayload(item.leave);
-      if (!payload) { skipped += 1; continue; }
-
-      const existingId = existingMap.get(String(item.syncKey || ''));
-      await upsertGoogleEvent(token, calendarId, existingId, payload);
-
-      if (existingId) {
-        updated += 1;
-        if (item.kind === 'group') updatedGroup += 1;
-        if (item.kind === 'leave') updatedLeave += 1;
-      } else {
-        created += 1;
-        if (item.kind === 'group') createdGroup += 1;
-        if (item.kind === 'leave') createdLeave += 1;
+    for (const job of jobs) {
+      const targets = Array.isArray(job.targets) ? job.targets : [];
+      if (!targets.length) {
+        resultLines.push(`${job.label}：無可同步資料`);
+        continue;
       }
+
+      const existingEvents = await fetchGoogleMonthEvents(token, job.calendarId, win.startIso, win.endIso);
+      const existingMap = new Map();
+      (existingEvents || []).forEach(ev => {
+        const key = extractSyncedKey(ev);
+        if (key && ev?.id && !existingMap.has(key)) existingMap.set(key, ev.id);
+      });
+
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      let createdGroup = 0;
+      let updatedGroup = 0;
+      let createdLeave = 0;
+      let updatedLeave = 0;
+
+      for (const item of targets) {
+        let payload = null;
+        if (item.kind === 'group') payload = toGoogleCalendarPayload(item.group);
+        if (item.kind === 'leave') payload = toGoogleLeavePayload(item.leave);
+        if (!payload) { skipped += 1; continue; }
+
+        const existingId = existingMap.get(String(item.syncKey || ''));
+        await upsertGoogleEvent(token, job.calendarId, existingId, payload);
+
+        if (existingId) {
+          updated += 1;
+          if (item.kind === 'group') updatedGroup += 1;
+          if (item.kind === 'leave') updatedLeave += 1;
+        } else {
+          created += 1;
+          if (item.kind === 'group') createdGroup += 1;
+          if (item.kind === 'leave') createdLeave += 1;
+        }
+      }
+
+      resultLines.push(`${job.label}：排班 新增 ${createdGroup} / 更新 ${updatedGroup}，事假 新增 ${createdLeave} / 更新 ${updatedLeave}${skipped ? `，略過 ${skipped}` : ''}，總計 新增 ${created} / 更新 ${updated}`);
     }
 
-    alert(`Google 日曆同步完成\n排班：新增 ${createdGroup} / 更新 ${updatedGroup}\n事假：新增 ${createdLeave} / 更新 ${updatedLeave}${skipped ? `\n略過 ${skipped} 筆` : ''}\n總計：新增 ${created} / 更新 ${updated}\n同步目標：${targetLabel}`);
+    alert(`Google 日曆同步完成\n${resultLines.join('\n')}`);
   } catch (e) {
     console.error(e);
     alert(`Google 日曆同步失敗：${e?.message || e || '請稍後再試'}`);
@@ -2225,9 +2293,8 @@ return (
 </div>
 <div className="flex items-center gap-2">
 <button onClick={openImportantNew} className="text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 hover:bg-amber-50 text-amber-700 font-bold"><Bell size={14}/> 重要事項</button>
-              <button onClick={()=>handleSyncGoogleCalendar('personal')} disabled={isSyncingGoogle} className={`text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 font-bold ${isSyncingGoogle ? 'text-gray-400 cursor-not-allowed' : 'hover:bg-green-50 text-green-700'}`}><RefreshCw size={14} className={isSyncingGoogle ? 'animate-spin' : ''} /> {isSyncingGoogle ? '同步中...' : '同步我的日曆'}</button>
-              {String(user?.role || '') === 'admin' && (<button onClick={()=>handleSyncGoogleCalendar('shared')} disabled={isSyncingGoogle} className={'text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 font-bold ' + (isSyncingGoogle ? 'text-gray-400 cursor-not-allowed' : 'hover:bg-emerald-50 text-emerald-700')}><RefreshCw size={14} className={isSyncingGoogle ? 'animate-spin' : ''} /> {isSyncingGoogle ? '同步中...' : '同步共用日曆'}</button>)}
-              <span className="hidden md:inline text-[11px] text-gray-500">個人：{personalCalendarId === 'primary' ? 'primary' : personalCalendarId}{String(user?.role || '') === 'admin' ? '｜共用：' + sharedCalendarId : ''}</span>
+              <button onClick={()=>handleSyncGoogleCalendar('both')} disabled={isSyncingGoogle} className={`text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 font-bold ${isSyncingGoogle ? 'text-gray-400 cursor-not-allowed' : 'hover:bg-green-50 text-green-700'}`}><RefreshCw size={14} className={isSyncingGoogle ? 'animate-spin' : ''} /> {isSyncingGoogle ? '同步中...' : '同步Google日曆'}</button>
+              <span className="hidden md:inline text-[11px] text-gray-500">一次同步個人與共用 Google 日曆。</span>
 <button onClick={()=>setRotationModalOpen(true)} className="text-xs bg-white px-3 py-1.5 rounded border shadow-sm flex items-center gap-1 hover:bg-blue-50 text-blue-600 font-bold"><RefreshCw size={14}/> 輪序表</button>
 </div>
 </div>
@@ -5746,10 +5813,12 @@ return (
 }
 function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
 const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
+const [workC, setWorkC] = useState(settings.workColors || DEFAULT_WORK_COLORS);
 const [customHolidays, setCustomHolidays] = useState(settings.customHolidays || {});
 const [newLeave, setNewLeave] = useState({ name: '', category: 'personal', desc: '' });
 const [editLeaveId, setEditLeaveId] = useState(null);
 const [editAreaId, setEditAreaId] = useState(null);
+const [editWorkId, setEditWorkId] = useState(null);
 const [newArea, setNewArea] = useState('');
 const [newWork, setNewWork] = useState('');
 const [newHolidayDate, setNewHolidayDate] = useState('');
@@ -5760,6 +5829,21 @@ const [sharedGoogleCalendarIdInput, setSharedGoogleCalendarIdInput] = useState(S
 const isAdmin = String(user?.role || '') === 'admin';
 const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
 const handleColorChange = (area, colorClass) => { setAreaC({ ...areaC, [area]: colorClass}); };
+const handleWorkColorChange = (work, colorClass) => { setWorkC({ ...workC, [work]: colorClass}); };
+const handleWorkColorCycle = (work) => {
+  const list = Array.isArray(colors) ? colors : [];
+  if (list.length === 0) return;
+  const current = String(workC?.[work] || list[0].c || '');
+  const idx = list.findIndex(x => x.c === current);
+  const next = list[(idx + 1 + list.length) % list.length]?.c || list[0].c;
+  setWorkC(prev => ({ ...prev, [work]: next }));
+};
+useEffect(() => {
+  setAreaC(settings.areaColors || DEFAULT_AREA_COLORS);
+  setWorkC(settings.workColors || DEFAULT_WORK_COLORS);
+  setCustomHolidays(settings.customHolidays || {});
+  setSharedGoogleCalendarIdInput(String(settings.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID));
+}, [settings]);
 const handleAddAreaWithColor = () => {
 if(!newArea) { alert("請先輸入轄區名稱。"); return; }
 if(editAreaId) {
@@ -5768,6 +5852,28 @@ setEditAreaId(null);
 } else {
 tags.handleAddTag('area', newArea);}
 setNewArea('');
+};
+const handleAddOrUpdateWork = () => {
+if(!newWork) { alert('請先輸入工作項目名稱。'); return; }
+if(editWorkId) {
+tags.handleUpdateTag('work', editWorkId, newWork);
+if (workC && workC[editWorkId]) {
+const next = { ...workC };
+next[newWork] = next[editWorkId];
+delete next[editWorkId];
+setWorkC(next);
+}
+setEditWorkId(null);
+} else {
+tags.handleAddTag('work', newWork);
+setWorkC(prev => prev && prev[newWork] ? prev : { ...prev, [newWork]: 'bg-blue-100 text-blue-800' });
+}
+setNewWork('');
+};
+const startEditWork = (work) => {
+setEditWorkId(work);
+setNewWork(work);
+window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 const startEditArea = (area) => {
 setEditAreaId(area);
@@ -5788,7 +5894,7 @@ const newHolidays = { ...customHolidays};
 delete newHolidays[date];
 setCustomHolidays(newHolidays);
 };
-const handleSaveSettings = () => { onUpdateRoleNames(localRoleNames); onSave({ ...settings, areaColors: areaC, customHolidays, sharedGoogleCalendarId: String(sharedGoogleCalendarIdInput || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID}); setIsSettingsSaved(true); setTimeout(() => setIsSettingsSaved(false), 2000); };
+const handleSaveSettings = () => { onUpdateRoleNames(localRoleNames); onSave({ ...settings, areaColors: areaC, workColors: workC, customHolidays, sharedGoogleCalendarId: String(sharedGoogleCalendarIdInput || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID}); setIsSettingsSaved(true); setTimeout(() => setIsSettingsSaved(false), 2000); };
 return (
 <div className="max-w-3xl mx-auto space-y-8">
 {isAdmin && (
@@ -5796,23 +5902,49 @@ return (
   <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Settings/> Google 日曆同步設定</h2>
   <label className="block text-xs font-bold text-gray-500 mb-1">共用 Google 日曆 ID (管理員)</label>
   <input className="border rounded p-2 w-full text-sm" value={sharedGoogleCalendarIdInput} onChange={e=>setSharedGoogleCalendarIdInput(e.target.value)} placeholder="輸入共用 Calendar ID" />
-  <p className="text-xs text-gray-400 mt-2">此 ID 會提供給全員「同步共用日曆」按鈕使用。</p>
+  <p className="text-xs text-gray-400 mt-2">此 ID 會提供給全員「同步Google日曆」時的共用日曆同步使用。</p>
 </div>
 )}
 <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({ ...localRoleNames, staff: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({ ...localRoleNames, leader: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({ ...localRoleNames, admin: e.target.value})} /></div></div><p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p></div>
 <div className="bg-white p-6 rounded shadow-sm">
-<h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Briefcase/> 工作項目設定</h2>
-<div className="border rounded-lg p-4 mb-6 bg-gray-50">
-<h3 className="text-sm font-bold text-gray-700 mb-3">新增工作項目</h3>
+<h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Briefcase/> 工作項目設定 (名稱/顏色/編輯)</h2>
+<div className={`border rounded-lg p-4 mb-6 transition-colors ${editWorkId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
+<h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between">
+<span>{editWorkId ? '修改工作項目' : '新增工作項目'}</span>
+{editWorkId && <button onClick={()=>{setEditWorkId(null); setNewWork('');}} className='text-xs text-gray-500 hover:text-gray-800 underline'>取消編輯</button>}
+</h3>
 <div className="flex gap-2">
 <input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="輸入工作項目..." value={newWork} onChange={e=>setNewWork(e.target.value)} />
-<button onClick={()=>{tags.handleAddTag('work', newWork); setNewWork('')}} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition">新增項目</button></div></div>
-<div className="flex flex-wrap gap-2">
-{tags.workTags.map(tag => (
-<div key={tag} className="bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-full text-sm flex items-center gap-2 shadow-sm">
-<span className="font-bold">{tag}</span>
-<button onClick={()=>tags.handleDeleteTag('work', tag)} className="text-gray-400 hover:text-red-500"><X size={14}/></button></div>
-))}</div></div>
+<button onClick={handleAddOrUpdateWork} className={`${editWorkId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>{editWorkId ? '儲存修改' : '新增項目'}</button>
+</div>
+</div>
+<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+{tags.workTags.map(work => (
+<div key={work} className={`relative group flex items-center bg-white border rounded shadow-sm hover:border-blue-300 transition ${editWorkId === work ? 'ring-2 ring-yellow-400' : ''}`}>
+<div className="relative group/btn w-full">
+<div className={`w-full text-left px-3 py-2 rounded-l flex justify-between items-center ${workC[work] || 'bg-gray-100 text-gray-800'}`}>
+<span className="font-bold">{work}</span>
+<button
+  type="button"
+  onClick={(e)=>{ e.stopPropagation(); handleWorkColorCycle(work); }}
+  className={`w-4 h-4 rounded-full border border-black/20 ${String(workC[work] || 'bg-gray-100').split(' ')[0]}`}
+  title="點一下切換顏色"
+></button>
+</div>
+<div className="absolute top-full left-0 z-10 bg-white shadow-lg border p-2 rounded hidden group-hover/btn:flex group-focus-within/btn:flex gap-1 flex-wrap w-48 mt-1">
+{colors.map(co => (
+<div key={co.c} onClick={()=>handleWorkColorChange(work, co.c)} className={`w-6 h-6 rounded cursor-pointer border ${co.c.split(' ')[0]}`} title={co.l}></div>
+))}
+</div>
+</div>
+<div className="flex px-1 gap-1 border-l opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-gray-50 rounded-r h-full items-center">
+<button onClick={()=>startEditWork(work)} className='text-gray-400 hover:text-blue-600 p-1.5'><Edit size={14}/></button>
+<button onClick={()=>tags.handleDeleteTag('work', work)} className='text-gray-400 hover:text-red-600 p-1.5'><Trash2 size={14}/></button>
+</div>
+</div>
+))}
+</div>
+</div>
 <div className="bg-white p-6 rounded shadow-sm">
 <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Palette/> 轄區設定 (新增/顏色/編輯)</h2>
 <div className={`border rounded-lg p-4 mb-6 transition-colors ${editAreaId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
@@ -6119,6 +6251,12 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
 
 
 
