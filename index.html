@@ -1665,6 +1665,21 @@ const monthBusinessLeavesForSync = useMemo(() => {
     .sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
 }, [leaves, date]);
 
+const monthImportantItemsForSync = useMemo(() => {
+  const win = getMonthWindow(date);
+  const monthStartTs = win.start.getTime();
+  const monthEndTs = win.end.getTime();
+  return (importantItems || [])
+    .filter(it => {
+      if (!it) return false;
+      const d = new Date(`${String(it.date || '').trim()}T00:00:00`);
+      if (!Number.isFinite(d.getTime())) return false;
+      const ts = d.getTime();
+      return ts >= monthStartTs && ts < monthEndTs;
+    })
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+}, [importantItems, date]);
+
 const monthSyncItems = useMemo(() => {
   const groupItems = (monthGroupsForSync || []).map(group => ({
     kind: 'group',
@@ -1681,9 +1696,17 @@ const monthSyncItems = useMemo(() => {
     };
   });
 
-  return [...groupItems, ...leaveItems];
-}, [monthGroupsForSync, monthBusinessLeavesForSync]);
+  const importantSyncItems = (monthImportantItemsForSync || []).map(important => {
+    const importantId = String(important?.id || `${important?.date || ''}:${getImportantTitle(important)}`);
+    return {
+      kind: 'important',
+      syncKey: `important:${importantId}`,
+      important
+    };
+  });
 
+  return [...groupItems, ...leaveItems, ...importantSyncItems];
+}, [monthGroupsForSync, monthBusinessLeavesForSync, monthImportantItemsForSync]);
 const getGoogleCalendarToken = async () => {
   if (!auth || !auth.currentUser) throw new Error('請先登入 Google 帳號後再同步。');
 
@@ -1815,6 +1838,34 @@ const pickGoogleColorIdForLeave = (leave) => {
   return '6';
 };
 
+const getImportantOwnerIdsForSync = (it) => {
+  const raw = Array.isArray(it?.ownerIds)
+    ? it.ownerIds
+    : (Array.isArray(it?.owners)
+      ? it.owners
+      : (it?.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : []));
+  return [...new Set(raw.map(x => String(x || '').trim()).filter(Boolean))];
+};
+
+const getImportantOwnerLabelForSync = (it) => {
+  const ownerIds = getImportantOwnerIdsForSync(it);
+  if (ownerIds.includes('ALL')) return '全體';
+  if (!ownerIds.length) return '-';
+  return ownerIds
+    .map(id => {
+      const found = (users || []).find(u => u.docId === id || u.uid === id || u.email === id || u.name === id);
+      return String(found?.name || id);
+    })
+    .filter(Boolean)
+    .join('、') || '-';
+};
+
+const getNextDateText = (dateText) => {
+  const d = new Date(`${String(dateText || '').trim()}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return '';
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const toGoogleDateTime = (isoLike, fallbackTime = '08:00') => {
   const txt = String(isoLike || '').trim();
   if (!txt) return '';
@@ -1922,6 +1973,46 @@ const toGoogleLeavePayload = (leave) => {
   };
 };
 
+const toGoogleImportantPayload = (important) => {
+  if (!important) return null;
+  const dateText = String(important.date || '').trim();
+  if (!dateText) return null;
+  const nextDate = getNextDateText(dateText);
+  if (!nextDate) return null;
+
+  const importantId = String(important.id || '').trim();
+  const title = getImportantTitle(important);
+  const ownerLabel = getImportantOwnerLabelForSync(important);
+  const ownerShort = getImportantOwnerShort(important);
+  const detailText = String(important.text || '').trim() || '-';
+  const syncKey = `important:${importantId || `${dateText}:${title}`}`;
+
+  const lines = [
+    '來源：KPPT職再差勤系統',
+    `標題：${title}`,
+    `日期：${dateText}`,
+    `主責：${ownerLabel}`,
+    `內容：${detailText}`,
+    `[KPPT-SYNC:${syncKey}]`
+  ];
+
+  return {
+    summary: `🔔 ${title}${ownerShort && ownerShort !== '-' ? ` (${ownerShort})` : ''}`,
+    description: lines.filter(x => !String(x || '').startsWith('[')).join('\n'),
+    colorId: '5',
+    start: { date: dateText },
+    end: { date: nextDate },
+    extendedProperties: {
+      private: {
+        kpptSource: GCAL_SYNC_SOURCE,
+        kpptSyncKey: syncKey,
+        kpptImportantId: importantId,
+        kpptDate: dateText,
+        kpptKind: 'important'
+      }
+    }
+  };
+};
 const extractSyncedKey = (gEvent) => {
   const extSyncKey = String(gEvent?.extendedProperties?.private?.kpptSyncKey || '').trim();
   if (extSyncKey) return extSyncKey;
@@ -1984,24 +2075,36 @@ const upsertGoogleEvent = async (token, calendarId, existingEventId, payload) =>
 };
 
 const isSyncItemOwnedByCurrentUser = (item) => {
-  const uidSet = new Set([String(user?.uid || ''), String(user?.docId || '')].filter(Boolean));
   const myName = String(user?.name || '').trim();
+  const myEmail = String(user?.email || '').trim();
+  const myKeys = new Set([
+    String(user?.uid || '').trim(),
+    String(user?.docId || '').trim(),
+    myName,
+    myEmail
+  ].filter(Boolean));
   if (item?.kind === 'group') {
     const people = Array.isArray(item?.group?.people) ? item.group.people : [];
     return people.some(p => {
       const pid = String(p?.userId || '').trim();
       const pname = String(p?.userName || '').trim();
-      return (pid && uidSet.has(pid)) || (myName && pname === myName);
+      return (pid && myKeys.has(pid)) || (pname && myKeys.has(pname));
     });
   }
   if (item?.kind === 'leave') {
     const rid = String(item?.leave?.requesterId || '').trim();
     const rname = String(item?.leave?.requesterName || '').trim();
-    return (rid && uidSet.has(rid)) || (myName && rname === myName);
+    const remail = String(item?.leave?.requesterEmail || '').trim();
+    return (rid && myKeys.has(rid)) || (rname && myKeys.has(rname)) || (remail && myKeys.has(remail));
+  }
+  if (item?.kind === 'important') {
+    const ownerIds = getImportantOwnerIdsForSync(item?.important);
+    if (!ownerIds.length) return true;
+    if (ownerIds.includes('ALL')) return true;
+    return ownerIds.some(x => myKeys.has(String(x || '').trim()));
   }
   return false;
 };
-
 const handleSyncGoogleCalendar = async (targetType = 'both') => {
   if (isSyncingGoogle) return;
   if (!auth?.currentUser) {
@@ -2044,7 +2147,7 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
 
   const hasAnyData = jobs.some(j => (j.targets || []).length > 0);
   if (!hasAnyData) {
-    alert('此月份沒有可同步的排班/事假資料。');
+    alert('此月份沒有可同步的排班/事假/公告資料。');
     return;
   }
 
@@ -2052,7 +2155,8 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
   const previewLines = jobs.map(j => {
     const gc = (j.targets || []).filter(x => x.kind === 'group').length;
     const lc = (j.targets || []).filter(x => x.kind === 'leave').length;
-    return `${j.label}：排班 ${gc} 筆 + 事假 ${lc} 筆`;
+    const ic = (j.targets || []).filter(x => x.kind === 'important').length;
+    return `${j.label}：排班 ${gc} 筆 + 事假 ${lc} 筆 + 公告 ${ic} 筆`;
   });
   const ok = confirm(`將同步 ${win.label} 月資料到 Google 日曆：\n${previewLines.join('\n')}\n是否繼續？`);
   if (!ok) return;
@@ -2083,11 +2187,14 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
       let updatedGroup = 0;
       let createdLeave = 0;
       let updatedLeave = 0;
+      let createdImportant = 0;
+      let updatedImportant = 0;
 
       for (const item of targets) {
         let payload = null;
         if (item.kind === 'group') payload = toGoogleCalendarPayload(item.group);
         if (item.kind === 'leave') payload = toGoogleLeavePayload(item.leave);
+        if (item.kind === 'important') payload = toGoogleImportantPayload(item.important);
         if (!payload) { skipped += 1; continue; }
 
         const existingId = existingMap.get(String(item.syncKey || ''));
@@ -2097,14 +2204,16 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
           updated += 1;
           if (item.kind === 'group') updatedGroup += 1;
           if (item.kind === 'leave') updatedLeave += 1;
+          if (item.kind === 'important') updatedImportant += 1;
         } else {
           created += 1;
           if (item.kind === 'group') createdGroup += 1;
           if (item.kind === 'leave') createdLeave += 1;
+          if (item.kind === 'important') createdImportant += 1;
         }
       }
 
-      resultLines.push(`${job.label}：排班 新增 ${createdGroup} / 更新 ${updatedGroup}，事假 新增 ${createdLeave} / 更新 ${updatedLeave}${skipped ? `，略過 ${skipped}` : ''}，總計 新增 ${created} / 更新 ${updated}`);
+      resultLines.push(`${job.label}：排班 新增 ${createdGroup} / 更新 ${updatedGroup}，事假 新增 ${createdLeave} / 更新 ${updatedLeave}，公告 新增 ${createdImportant} / 更新 ${updatedImportant}${skipped ? `，略過 ${skipped}` : ''}，總計 新增 ${created} / 更新 ${updated}`);
     }
 
     alert(`Google 日曆同步完成\n${resultLines.join('\n')}`);
@@ -2168,6 +2277,10 @@ const renderGroup = (g) => {
   const slotType = g.slot || 'all_day';
   const hasPeople = (g.people || []).length > 0;
   const bgClass = getWorkBgClass(tagName, hasPeople);
+  const startTime = String(g.tag?.startTime || '').slice(0,5);
+  const endTime = String(g.tag?.endTime || '').slice(0,5);
+  const timeRange = (startTime && endTime) ? `${startTime}-${endTime}` : '';
+  const isPresetRange = ['08:00-12:00', '13:00-17:00', '08:00-17:00'].includes(timeRange);
 
   const allAreasTitle = areas.join('、');
 
@@ -2182,7 +2295,7 @@ const renderGroup = (g) => {
   const morePeople = Math.max(0, sortedPeople.length - shownPeople.length);
   const allPeopleTitle = sortedPeople.map(p => p.userName).filter(Boolean).join('、');
   const areaShort = areas.length > 0 ? `${areas[0]}${areas.length > 1 ? ` +${areas.length-1}` : ''}` : '';
-  const infoLine = note || ((g.tag?.startTime && g.tag?.endTime) ? `${g.tag.startTime}-${g.tag.endTime}` : '');
+  const infoLine = (!isPresetRange && timeRange) ? `${timeRange}${note ? ` ${note}` : ''}` : note;
   return (
     <div
       key={groupId}
@@ -2909,7 +3022,7 @@ const displayRows = useMemo(() => {
     });
   });
 
-  return rows.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')) || String(a.name||'').localeCompare(String(b.name||'')));
+  return rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')) || String(a.name||'').localeCompare(String(b.name||'')));
 }, [filteredRows]);
 
 const isAllSelected = displayRows.length > 0 && selectedIds.length === displayRows.length;
@@ -2922,7 +3035,7 @@ const deputyLeaves = useMemo(() => {
 return leaves.filter(l =>
 (l.deputyId === user.uid || l.deputyId === user.docId) &&
 l.start.startsWith(monthMode === 'year' ? month.slice(0,4) : month)
-).sort((a, b) => new Date(a.start) - new Date(b.start));
+).sort((a, b) => new Date(b.start) - new Date(a.start));
 }, [leaves, user.uid, user.docId, month]);
 
 const downloadBatchICS = () => {
@@ -4468,8 +4581,8 @@ link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
 link.download = "全團隊請假紀錄.csv";
 link.click();
 };
-const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending');
-const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed') : [];
+const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0));
+const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)) : [];
 // --- Bulk approval selection (leader) ---
 useEffect(() => {
   // keep selections that still exist
@@ -4867,7 +4980,7 @@ const filteredLeaves = leaves.filter(l =>
 l.status === 'approved' &&
 l.start.startsWith(String(selectedYear)) &&
 (selectedMonth === 'all' ? true : l.start.startsWith(`${selectedYear}-${selectedMonth}`))
-).sort((a,b) => new Date(a.start) - new Date(b.start));
+).sort((a,b) => new Date(b.start) - new Date(a.start));
 const usageFilteredLeaves = usageTypeFilter==='all'?filteredLeaves:filteredLeaves.filter(l=>l.type===usageTypeFilter);
 
 let usedAnnual = 0;
@@ -6280,6 +6393,17 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
+
+
+
+
+
+
+
 
 
 
