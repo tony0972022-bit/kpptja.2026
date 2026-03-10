@@ -2053,6 +2053,41 @@ const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
 const [monthMode, setMonthMode] = useState('year'); // 'month' or 'year' (預設全年)
 const [leaveFilter, setLeaveFilter] = useState('all');
 const [selectedIds, setSelectedIds] = useState([]);
+const getLeaveHoursOnDate = (lv, dateStr) => {
+  try {
+    if (!lv || !dateStr) return 0;
+    const total = Number(lv?.hours || 0);
+    if (!Number.isFinite(total) || total <= 0) return 0;
+
+    const s = String(lv?.start || '').split('T')[0];
+    const e = String(lv?.end || lv?.start || '').split('T')[0];
+    if (!s || !e) return 0;
+    if (dateStr < s || dateStr > e) return 0;
+    if (s === e) return Math.round(total * 10) / 10;
+
+    const workDates = [];
+    let cur = new Date(s + 'T00:00');
+    const end = new Date(e + 'T00:00');
+    let guard = 0;
+    while (cur <= end && guard < 800) {
+      const ds = getLocalDateString(cur);
+      const day = cur.getDay();
+      const isWeekend = (day === 0 || day === 6);
+      const isHoliday = !!(globalThis.HOLIDAYS && globalThis.HOLIDAYS[ds]);
+      if (!isWeekend && !isHoliday) workDates.push(ds);
+      cur.setDate(cur.getDate() + 1);
+      guard++;
+    }
+
+    if (!workDates.length) return 0;
+    if (!workDates.includes(dateStr)) return 0;
+    const perDay = total / workDates.length;
+    return Math.round(perDay * 10) / 10;
+  } catch {
+    return 0;
+  }
+};
+
 const scheduleData = useMemo(() => {
 const data = [];
 const yearStr = month.split('-')[0];
@@ -2064,8 +2099,7 @@ const myWork = events.filter(e => e.date === dateStr && e.type === 'person' && e
 // 修正：嚴格限制為「我自己的假單」，同日可同時存在多張（例如：整天出差 + 17:00 後加班）
 const myLeaves = leaves.filter(l =>
   (l.requesterId === user.uid || l.requesterId === user.docId || l.requesterName === user.name) &&
-  dateStr >= (l.start||'').split('T')[0] &&
-  dateStr <= (l.end||'').split('T')[0]
+  getLeaveHoursOnDate(l, dateStr) > 0
 );
 const myLeave = myLeaves[0] || null;
 let status = '正常';
@@ -2142,7 +2176,7 @@ scheduleData.forEach((d) => {
       date: d.date,
       slot,
       leaveType: lv.type || '-',
-      leaveHours: lv.hours || '-',
+      leaveHours: getLeaveHoursOnDate(lv, d.date) || '-',
       content: autoWorkContent,
       area: autoWorkArea,
       reason: lv.reason || '-',
@@ -2234,7 +2268,7 @@ const displayRows = useMemo(() => {
       const e1 = x.rawLeave?.end || x.rawLeave?.start;
       if (String(s1||'') < String(minS||'')) minS = s1;
       if (String(e1||'') > String(maxE||'')) maxE = e1;
-      totalHours += Number(x.rawLeave?.hours || 0) || 0;
+      totalHours += Number(x.leaveHours || 0) || 0;
     });
     const base = sorted[0];
     rows.push({
@@ -5457,6 +5491,8 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
 
 
 
