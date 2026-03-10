@@ -1210,7 +1210,7 @@ const [editGroupId, setEditGroupId] = useState(null);
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [modalError, setModalError] = useState('');
 const [importantModalOpen, setImportantModalOpen] = useState(false);
-const [importantForm, setImportantForm] = useState({ id: null, date: '', ownerIds: [], owner: '', text: '' });
+const [importantForm, setImportantForm] = useState({ id: null, date: '', ownerIds: [], owner: '', title: '', text: '' });
 const IMPORTANT_VISIBLE_DAYS = 14;
 const [showAllImportant, setShowAllImportant] = useState(false);
 const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
@@ -1273,7 +1273,7 @@ const getWorkBgClass = (tagName, hasPeople) => {
   if (n.includes("大宗")) return "bg-orange-50";
   return "bg-blue-50";
 };
-useEffect(()=>{try{if((importantItems||[]).length===0&&!localStorage.getItem('important_seed_v1')){localStorage.setItem('important_seed_v1','1');crud.createImportantItem({date:'2026-03-05',owner:'方姿云',text:'第一期成果報告（工作項目：分配等等）',createdAt:new Date()});}}catch(e){}},[importantItems,crud]);
+useEffect(()=>{try{if((importantItems||[]).length===0&&!localStorage.getItem('important_seed_v1')){localStorage.setItem('important_seed_v1','1');crud.createImportantItem({date:'2026-03-05',owner:'方姿云',title:'第一期成果報告',text:'第一期成果報告（工作項目：分配等等）',createdAt:new Date()});}}catch(e){}},[importantItems,crud]);
 const upcomingImportant = useMemo(() => {
   const now = new Date();
   const end = new Date(now); end.setMonth(end.getMonth()+2);
@@ -1293,19 +1293,29 @@ const importantWithDays = useMemo(() => {
 const nearImportant = useMemo(() => importantWithDays.filter(it => it._daysLeft <= IMPORTANT_VISIBLE_DAYS), [importantWithDays]);
 const farImportant = useMemo(() => importantWithDays.filter(it => it._daysLeft > IMPORTANT_VISIBLE_DAYS), [importantWithDays]);
 const importantListForDisplay = showAllImportant ? importantWithDays : nearImportant;
-const openImportantNew = () => { setImportantForm({ id:null, date:getLocalDateString(new Date()), owner:'', text:'' }); setImportantModalOpen(true); };
-const openImportantEdit = (it) => { const ids = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : [])); setImportantForm({ id: it.id, date: it.date || '', ownerIds: ids, owner: it.owner || '', text: it.text || '' }); setImportantModalOpen(true); };
+const getImportantTitle = (it) => String(it?.title || it?.text || '未命名事項').trim() || '未命名事項';
+const getImportantOwnerShort = (it) => {
+  const ownerIds = Array.isArray(it?.ownerIds) ? it.ownerIds : (Array.isArray(it?.owners) ? it.owners : (it?.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : []));
+  if (ownerIds.includes('ALL')) return '全';
+  const first = ownerIds[0];
+  if (!first) return '-';
+  const found = (users || []).find(u => u.docId === first || u.uid === first || u.name === first);
+  const src = String(found?.initials || found?.name || first || '');
+  return src ? src.slice(-1) : '-';
+};
+const openImportantNew = () => { setImportantForm({ id:null, date:getLocalDateString(new Date()), ownerIds: [], owner:'', title:'', text:'' }); setImportantModalOpen(true); };
+const openImportantEdit = (it) => { const ids = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : [])); setImportantForm({ id: it.id, date: it.date || '', ownerIds: ids, owner: it.owner || '', title: it.title || '', text: it.text || '' }); setImportantModalOpen(true); };
 const saveImportant = async () => {
-  if(!importantForm.date || !importantForm.text) return alert('請填寫日期與內容');
+  if(!importantForm.date || !importantForm.title) return alert('請填寫日期與標題');
   try {
     const ids = Array.isArray(importantForm.ownerIds) ? importantForm.ownerIds : [];
     const ownerNames = ids.map(x => (users||[]).find(u => u.docId === x || u.uid === x)?.name || x).filter(Boolean);
     const ownerStr = ownerNames.join('、');
-    const payload = { date: importantForm.date, ownerIds: ids, owners: ids, owner: ownerStr, text: importantForm.text, updatedAt: new Date() };
+    const payload = { date: importantForm.date, ownerIds: ids, owners: ids, owner: ownerStr, title: importantForm.title, text: importantForm.text, updatedAt: new Date() };
     if(importantForm.id) await crud.updateImportantItem(importantForm.id, payload);
     else await crud.createImportantItem({ ...payload, createdAt: new Date() });
     setImportantModalOpen(false);
-    setImportantForm({ id: null, date: '', ownerIds: [], owner: '', text: '' });
+    setImportantForm({ id: null, date: '', ownerIds: [], owner: '', title: '', text: '' });
   } catch (e) { alert("儲存失敗: " + e.message); }
 };
 const deleteImportant = async (id) => {
@@ -2134,6 +2144,7 @@ const dayOfWeek = dObj.getDay();
 const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 const holidayName = TAIWAN_HOLIDAYS_2026[dStr] || settings?.customHolidays?.[dStr];
 const isHoliday = !!holidayName;
+const dayImportant = (importantItems || []).filter(it => String(it?.date || '') === dStr);
 const groups = {};
 dayEvs.forEach(e => {
 if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [], slot: e.slot || 'all_day' };
@@ -2275,6 +2286,18 @@ const renderLeaves = () => {
 };
 return (<div key={dStr} className={`border-b border-r border-gray-200 p-1.5 md:p-2 min-h-[120px] md:min-h-[14vh] relative transition-colors flex flex-col group hover:bg-gray-50`} onClick={() => handleDayClick(dObj)}><div className="w-full flex justify-between items-start mb-2"><div className="flex flex-col items-center w-full"><span className={`text-sm md:text-base font-bold px-3 py-0.5 w-full text-center rounded-md ${isToday ? 'bg-yellow-300 text-black shadow-sm' : (isWeekend || isHoliday ? 'text-red-500' : 'text-gray-700')}`}>{dObj.getDate()} {isHoliday && <span className="ml-1 text-[10px] md:text-xs bg-red-500 text-white px-1.5 py-0.5 rounded align-middle">{holidayName}</span>}</span></div><div className="absolute top-2 right-2"><Edit2 size={16} className="text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"/></div></div>
 <div className="flex-1 flex flex-col gap-1 overflow-hidden" onClick={e=>e.stopPropagation()}>
+{dayImportant.length > 0 && (
+<div className="space-y-1 mb-1">
+{dayImportant.slice(0, 3).map(it => (
+  <button key={it.id} onClick={()=>openImportantEdit(it)} className="w-full text-left text-[11px] border border-amber-200 bg-amber-50 text-amber-800 px-2 py-1 rounded-md flex items-center gap-1.5 hover:bg-amber-100">
+    <Bell size={11} className="shrink-0"/>
+    <span className="truncate">{getImportantTitle(it)}</span>
+    <span className="shrink-0 text-[10px] font-bold text-amber-700">({getImportantOwnerShort(it)})</span>
+  </button>
+))}
+{dayImportant.length > 3 && <div className="text-[10px] text-gray-500 px-2">+{dayImportant.length - 3} 項</div>}
+</div>
+)}
 {groupList.length===0 ? <div className="text-xs text-gray-400 px-2 py-1">（尚無排班）</div> : groupList.map(g => renderGroup(g))}
 <div className="mt-auto flex flex-col-reverse w-full pt-2">{renderLeaves()}</div></div></div>);
 };
@@ -2320,8 +2343,8 @@ const md = (it.date || '').slice(5).replace('-', '/');
 const urgencyCls = daysLeft <= 7 ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : daysLeft <= 14 ? 'bg-orange-50 hover:bg-orange-100 text-orange-800 border-orange-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200';
 const rawOwners = Array.isArray(it.ownerIds) ? it.ownerIds : (Array.isArray(it.owners) ? it.owners : (it.owner ? String(it.owner).split(/[、,\s]+/).filter(Boolean) : []));
 const ownersForShow = rawOwners.includes('ALL') ? ['ALL'] : rawOwners;
-const ownerUsers = ownersForShow.map(x => users.find(u => u.docId === x || u.uid === x || u.name === x) || { initials: String(x).slice(-1), color: 'bg-gray-200', usePhoto: false });
-const textShort = (it.text || '').length > 10 ? (it.text || '').slice(0,10) + '...' : (it.text || '');
+const ownerUsers = ownersForShow.map(x => x === 'ALL' ? { initials: '全', color: 'bg-slate-200', usePhoto: false } : (users.find(u => u.docId === x || u.uid === x || u.name === x) || { initials: String(x).slice(-1), color: 'bg-gray-200', usePhoto: false }));
+const titleShort = getImportantTitle(it).length > 14 ? getImportantTitle(it).slice(0,14) + '...' : getImportantTitle(it);
 return (
 <button key={it.id} onClick={()=>openImportantEdit(it)} className={`px-2 py-1 rounded-full border text-xs flex items-center gap-2 ${urgencyCls}`}>
 <span className="font-bold">{md || it.date}</span>
@@ -2331,7 +2354,7 @@ return (
 ))}
 {ownerUsers.length>4 && <span className="w-6 h-6 rounded-full bg-white/60 border border-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-700">+{ownerUsers.length-4}</span>}
 </div>
-<span className="truncate max-w-[220px]">{textShort}</span>
+<span className="truncate max-w-[220px]">{titleShort}</span>
 <span className="font-bold">D-{Math.max(daysLeft,0)}</span>
 </button>
 );
@@ -2469,13 +2492,18 @@ return (
             })}
           </div>
         </div>
-        <div className="flex items-end gap-2">
-          <button onClick={saveImportant} className="flex-1 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded font-bold text-sm shadow">儲存</button>
-          {importantForm.id && <button onClick={()=>{deleteImportant(importantForm.id); setImportantModalOpen(false);}} className="bg-red-50 hover:bg-red-100 text-red-700 px-4 py-2 rounded font-bold text-sm border border-red-200">刪除</button>}
-        </div>
-      </div>
-      <div>
-        <div className="text-xs font-bold text-gray-500 mb-1">內容</div>
+        <div>
+  <div className="text-xs font-bold text-gray-500 mb-1">標題</div>
+  <input className="w-full border p-2 rounded text-sm" placeholder="請輸入重要事項標題" value={importantForm.title || ''} onChange={e=>setImportantForm({ ...importantForm, title:e.target.value })}/>
+  <div className="text-[11px] text-gray-400 mt-1">日曆格會顯示：鈴鐺 + 標題 + (主責)</div>
+</div>
+</div>
+<div className="flex items-end gap-2">
+  <button onClick={saveImportant} className="flex-1 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded font-bold text-sm shadow">儲存</button>
+  {importantForm.id && <button onClick={()=>{deleteImportant(importantForm.id); setImportantModalOpen(false);}} className="bg-red-50 hover:bg-red-100 text-red-700 px-4 py-2 rounded font-bold text-sm border border-red-200">刪除</button>}
+</div>
+<div>
+  <div className="text-xs font-bold text-gray-500 mb-1">內容</div>
         <textarea className="w-full border p-2 rounded text-sm min-h-[90px]" placeholder="請輸入重要事項內容" value={importantForm.text} onChange={e=>setImportantForm({ ...importantForm, text:e.target.value})}/>
       </div>
 
@@ -2492,12 +2520,13 @@ return (
                   <span>{(it.date||'').slice(5).replace('-','/')}</span>
                   <div className="flex -space-x-1">
                     {(Array.isArray(it.ownerIds)?it.ownerIds:(Array.isArray(it.owners)?it.owners:(it.owner?String(it.owner).split(/[、,\s]+/).filter(Boolean):[]))).map((x,idx)=>{
-                      const ou = users.find(u=>u.docId===x||u.uid===x||u.name===x) || { initials: String(x).slice(-1), color:'bg-gray-200', usePhoto:false };
+                      const ou = x==='ALL' ? { initials:'全', color:'bg-slate-200', usePhoto:false } : (users.find(u=>u.docId===x||u.uid===x||u.name===x) || { initials: String(x).slice(-1), color:'bg-gray-200', usePhoto:false });
                       return <UserAvatar key={idx} user={ou} size="w-6 h-6" textSize="text-xs" className="shadow-sm border-white border-[1.5px]" />;
                     })}
                   </div>
                 </div>
-                <div className="text-xs text-gray-600 break-words">{it.text}</div>
+                <div className="text-sm font-bold text-gray-800 break-words">{getImportantTitle(it)} <span className="text-amber-700">({getImportantOwnerShort(it)})</span></div>
+                <div className="text-xs text-gray-500 break-words">{it.text || ''}</div>
               </div>
               <div className="shrink-0 flex gap-2">
                 <button onClick={()=>openImportantEdit(it)} className="px-3 py-1.5 rounded border text-xs font-bold hover:bg-gray-50 flex items-center gap-1"><Edit2 size={14}/> 修改</button>
