@@ -1652,7 +1652,9 @@ const monthBusinessLeavesForSync = useMemo(() => {
     .filter(l => {
       if (!l) return false;
       const typeText = String(l.type || '').trim();
-      if (!typeText.includes('事假')) return false;
+      if (!typeText) return false;
+      // 排班日曆粉紅假單區本來就不顯示出差/公出（改由上方排班卡呈現），同步時同樣排除避免重複
+      if (typeText.includes('出差') || typeText.includes('公出')) return false;
       const status = String(l.status || '');
       if (!allowed.has(status)) return false;
 
@@ -1933,8 +1935,7 @@ const toGoogleLeavePayload = (leave) => {
   if (!startText || !endText) return null;
 
   const syncKey = `leave:${leaveId || `${leave.requesterName || ''}:${startText}:${endText}`}`;
-  const leaveType = String(leave.type || '事假').trim() || '事假';
-  if (!leaveType.includes('事假')) return null;
+  const leaveType = String(leave.type || '假單').trim() || '假單';
 
   const requesterName = String(leave.requesterName || '未命名');
   const reason = String(leave.reason || leave.note || '').trim() || '-';
@@ -2147,7 +2148,7 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
 
   const hasAnyData = jobs.some(j => (j.targets || []).length > 0);
   if (!hasAnyData) {
-    alert('此月份沒有可同步的排班/事假/公告資料。');
+    alert('此月份沒有可同步的排班/假單/公告資料。');
     return;
   }
 
@@ -2156,7 +2157,7 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
     const gc = (j.targets || []).filter(x => x.kind === 'group').length;
     const lc = (j.targets || []).filter(x => x.kind === 'leave').length;
     const ic = (j.targets || []).filter(x => x.kind === 'important').length;
-    return `${j.label}：排班 ${gc} 筆 + 事假 ${lc} 筆 + 公告 ${ic} 筆`;
+    return `${j.label}：排班 ${gc} 筆 + 假單 ${lc} 筆 + 公告 ${ic} 筆`;
   });
   const ok = confirm(`將同步 ${win.label} 月資料到 Google 日曆：\n${previewLines.join('\n')}\n是否繼續？`);
   if (!ok) return;
@@ -2213,7 +2214,7 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
         }
       }
 
-      resultLines.push(`${job.label}：排班 新增 ${createdGroup} / 更新 ${updatedGroup}，事假 新增 ${createdLeave} / 更新 ${updatedLeave}，公告 新增 ${createdImportant} / 更新 ${updatedImportant}${skipped ? `，略過 ${skipped}` : ''}，總計 新增 ${created} / 更新 ${updated}`);
+      resultLines.push(`${job.label}：排班 新增 ${createdGroup} / 更新 ${updatedGroup}，假單 新增 ${createdLeave} / 更新 ${updatedLeave}，公告 新增 ${createdImportant} / 更新 ${updatedImportant}${skipped ? `，略過 ${skipped}` : ''}，總計 新增 ${created} / 更新 ${updated}`);
     }
 
     alert(`Google 日曆同步完成\n${resultLines.join('\n')}`);
@@ -2296,13 +2297,14 @@ const renderGroup = (g) => {
   const allPeopleTitle = sortedPeople.map(p => p.userName).filter(Boolean).join('、');
   const areaShort = areas.length > 0 ? `${areas[0]}${areas.length > 1 ? ` +${areas.length-1}` : ''}` : '';
   const infoLine = (!isPresetRange && timeRange) ? `${timeRange}${note ? ` ${note}` : ''}` : note;
+  const hasInfoLine = String(infoLine || '').trim().length > 0;
   return (
     <div
       key={groupId}
       onClick={(e) => handleEventClick(e, groupEvents)}
       className={`group/item relative mb-1 rounded-md cursor-pointer hover:shadow-sm hover:-translate-y-px transition-all ${bgClass}`}
     >
-      <div className="px-2 py-1.5 text-xs flex flex-col gap-1">
+      <div className={`px-2 ${hasInfoLine ? 'py-1.5 gap-1' : 'py-1 gap-0.5'} text-xs flex flex-col`}>
   <div className="flex items-center justify-between gap-2">
     <div className="flex items-center gap-1 overflow-hidden" title={allPeopleTitle}>
       <div className="flex items-center gap-1 flex-nowrap">
@@ -2341,9 +2343,11 @@ const renderGroup = (g) => {
     {areaShort && <span className="ml-1 text-gray-600">[{areaShort}]</span>}
   </div>
 
-  <div className="text-xs text-gray-700 truncate leading-tight" title={infoLine || ''}>
-    {infoLine || '—'}
-  </div>
+  {hasInfoLine && (
+    <div className="text-xs text-gray-700 truncate leading-tight" title={infoLine}>
+      {infoLine}
+    </div>
+  )}
 </div>
       
 
@@ -6393,6 +6397,10 @@ const handleGoogleLogin = async () => { if (!auth) { alert("Firebase 尚未連�
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
+
+
+
+
 
 
 
