@@ -3659,6 +3659,7 @@ const computedHours = (() => {
   return (Number.isFinite(stored) && stored > 0) ? Math.round(stored * 10) / 10 : 0;
 })();
 pending.push({ id: g.tag.groupId, date: d, slot: g.tag.slot, item: g.tag.item, area: areaStr, suggestedStart: startTime, suggestedEnd: endTime, hours: computedHours, reason: `[${g.tag.item}] ${areaStr ? areaStr : ''} ${g.tag.note ? '- ' + g.tag.note : ''}`.trim() });
+}
 });
 return pending.sort((a,b) => a.date.localeCompare(b.date));
 }, [events, leaves, user]);
