@@ -1675,14 +1675,8 @@ if (conflicts.length > 0) {
   alert(msg);
   return;
 }
-if (linkedApprovedLeaves.length > 0) {
-  const msg = `這筆排班已綁定 ${linkedApprovedLeaves.length} 筆主管已核准的差單，為避免破壞既有簽核紀錄，請不要直接在日曆改人員或時間。\n\n建議做法：先在差單流程辦理改派/重送，再回來調整日曆。`;
-  setModalError(msg);
-  alert(msg);
-  return;
-}
-if (hasLinkedLeaveChanges && linkedPendingLeaves.length > 0) {
-  const ok = confirm(`這筆排班已綁定 ${linkedPendingLeaves.length} 筆待審差單。\n\n若繼續儲存，系統會同步更新這些差單的人員/時間，並把流程退回待職代審查。\n\n是否繼續？`);
+if (hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
+  const ok = confirm(`這筆排班目前綁定差單如下：\n- 待審差單：${linkedPendingLeaves.length} 筆\n- 已核准差單：${linkedApprovedLeaves.length} 筆\n\n若繼續儲存：\n1. 待審差單會同步更新人員/時間，並退回待職代審查\n2. 已核准差單會直接刪除\n\n是否繼續？`);
   if (!ok) return;
 }
 setIsSubmitting(true);
@@ -1725,6 +1719,16 @@ if (editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0) {
     });
   }
 }
+if (editGroupId && hasLinkedLeaveChanges && linkedApprovedLeaves.length > 0) {
+  for (const leave of linkedApprovedLeaves) {
+    try {
+      await crud.deleteLeave(leave.id);
+    } catch (e) {
+      console.warn('delete approved linked leave failed', leave?.id, e);
+      throw e;
+    }
+  }
+}
 if (!editGroupId) {
   advanceRotationCursor(modalData.workItem, selUsers, modalData.date);
 }
@@ -1732,9 +1736,9 @@ setModalOpen(false);
 setModalError('');
 const unsyncedCount = leaveAssignments.filter(x => !x.assignedUser).length;
 if (editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0 && unsyncedCount > 0) {
-  alert(`行程修改完成，但有 ${unsyncedCount} 筆既有差單找不到可對應的新排班人員，未自動改派。`);
-} else if (editGroupId && hasLinkedLeaveChanges && linkedPendingLeaves.length > 0) {
-  alert('行程修改完成，相關待審差單已同步更新並退回待職代審查。');
+  alert(`行程修改完成，但有 ${unsyncedCount} 筆既有待審差單找不到可對應的新排班人員，未自動改派。${linkedApprovedLeaves.length > 0 ? `\n另外已刪除 ${linkedApprovedLeaves.length} 筆已核准差單。` : ''}`);
+} else if (editGroupId && hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
+  alert(`行程修改完成。${linkedPendingLeaves.length > 0 ? '\n相關待審差單已同步更新並退回待職代審查。' : ''}${linkedApprovedLeaves.length > 0 ? `\n已刪除 ${linkedApprovedLeaves.length} 筆已核准差單。` : ''}`);
 } else {
   alert(editGroupId ? '行程修改完成' : '行程新增完成');
 }
@@ -4788,7 +4792,6 @@ const [allFilterStatus, setAllFilterStatus] = useState('all');
 // 撤簽 與 修改 Modal 控制狀態
 const [recallModal, setRecallModal] = useState({ open: false, leave: null, reason: '' });
 const [adminEditModal, setAdminEditModal] = useState({ open: false, leave: null, hours: '', status: '' });
-const [reassignModal, setReassignModal] = useState({ open: false, leave: null, requesterId: '', deputyId: '' });
 const exportCSV = () => {
 let csv = "\uFEFF申請人,假別,職代,開始日期,開始時間,結束日期,結束時間,時數,狀態,備註(撤簽原因)\n";
 filteredAllLeaves.forEach(l => {
@@ -4997,191 +5000,6 @@ const byMonth=l=>{const k=mk(l); if(!k) return false; if(allFilterStartMonth && 
 return [...leaves].filter(l=>byUser(l)&&byMonth(l)&&byType(l)&&byStatus(l)).sort((a,b)=>new Date(b.timestamp||b.start)-new Date(a.timestamp||a.start));
 },[leaves,users,allFilterUser,allFilterStartMonth,allFilterEndMonth,allFilterType,allFilterStatus]);
 
-const getUserKeys = (user) => {
-  if (!user) return [];
-  return Array.from(new Set([
-    String(user.docId || '').trim().toLowerCase(),
-    String(user.uid || '').trim().toLowerCase(),
-    String(user.email || '').trim().toLowerCase()
-  ].filter(Boolean)));
-};
-const personMatchesUser = (targetUser, leave) => {
-  if (!targetUser || !leave) return false;
-  const keys = getUserKeys(targetUser);
-  if (!keys.length) return false;
-  return keys.includes(String(leave.requesterId || '').toLowerCase())
-    || keys.includes(String(leave.requesterUid || '').toLowerCase())
-    || keys.includes(String(leave.requesterDocId || '').toLowerCase())
-    || keys.includes(String(leave.requesterEmail || '').toLowerCase());
-};
-const eventMatchesUser = (targetUser, ev) => {
-  if (!targetUser || !ev) return false;
-  const keys = getUserKeys(targetUser);
-  const eventKeys = [
-    String(ev.userId || '').toLowerCase(),
-    String(ev.userDocId || '').toLowerCase(),
-    String(ev.userEmail || '').toLowerCase()
-  ].filter(Boolean);
-  return eventKeys.some(k => keys.includes(k));
-};
-const getEventWindow = (ev) => {
-  const date = String(ev?.date || '').slice(0, 10);
-  if (!date) return { start: '', end: '' };
-  if (ev?.startTime && ev?.endTime) return { start: `${date}T${ev.startTime}`, end: `${date}T${ev.endTime}` };
-  const preset = getSlotPreset(ev?.slot || 'all_day');
-  return { start: `${date}T${preset.start}`, end: `${date}T${preset.end}` };
-};
-const getRequesterConflict = (targetUser, start, end, currentLeave) => {
-  if (!targetUser || !start || !end) return null;
-  const hitLeave = leaves.find(l => {
-    if (!l || l.id === currentLeave?.id) return false;
-    if (!['pending', 'deputy_signed', 'approved'].includes(String(l.status || ''))) return false;
-    if (!personMatchesUser(targetUser, l)) return false;
-    return hasTimeOverlap(start, end, l.start, l.end || l.start);
-  });
-  if (hitLeave) {
-    return {
-      title: `假單：${hitLeave.type || '未分類'}`,
-      timeText: `${fmtDateRange(hitLeave.start, hitLeave.end)} ${fmtTimeRange(hitLeave.start, hitLeave.end)}`.trim()
-    };
-  }
-  const hitEvent = (events || []).find(ev => {
-    if (!ev || ev.type !== 'person') return false;
-    if (currentLeave?.sourceGroupId && ev.groupId === currentLeave.sourceGroupId) return false;
-    if (!eventMatchesUser(targetUser, ev)) return false;
-    const range = getEventWindow(ev);
-    if (!range.start || !range.end) return false;
-    return hasTimeOverlap(start, end, range.start, range.end);
-  });
-  if (hitEvent) {
-    const range = getEventWindow(hitEvent);
-    return {
-      title: `排班：${hitEvent.userName || targetUser.name || '未指定人員'}`,
-      timeText: `${fmtDateRange(range.start, range.end)} ${fmtTimeRange(range.start, range.end)}`.trim()
-    };
-  }
-  return null;
-};
-const getDeputyConflictForApproval = (deputyId, start, end, currentLeaveId) => {
-  if(!deputyId || !start || !end) return null;
-  const did = String(deputyId || '').toLowerCase();
-  const hitLeave = leaves.find(l => {
-    if(!l || l.id === currentLeaveId) return false;
-    if(!['pending', 'deputy_signed', 'approved'].includes(String(l.status || ''))) return false;
-    const rid = String(l.requesterId || '').toLowerCase();
-    const ruid = String(l.requesterUid || '').toLowerCase();
-    const rdoc = String(l.requesterDocId || '').toLowerCase();
-    const remail = String(l.requesterEmail || '').toLowerCase();
-    const isDeputy = [rid, ruid, rdoc, remail].includes(did);
-    if(!isDeputy) return false;
-    return hasTimeOverlap(start, end, l.start, l.end || l.start);
-  });
-  if (hitLeave) {
-    return {
-      title: `假單：${hitLeave.type || '未分類'}`,
-      timeText: `${fmtDateRange(hitLeave.start, hitLeave.end)} ${fmtTimeRange(hitLeave.start, hitLeave.end)}`.trim()
-    };
-  }
-  const hitEvent = (events || []).find(ev => {
-    if (!ev || ev.type !== 'person') return false;
-    const pid = String(ev.userId || ev.userDocId || ev.userEmail || '').toLowerCase();
-    if (pid !== did) return false;
-    const range = getEventWindow(ev);
-    if (!range.start || !range.end) return false;
-    return hasTimeOverlap(start, end, range.start, range.end);
-  });
-  if (hitEvent) {
-    const range = getEventWindow(hitEvent);
-    return {
-      title: `排班：${hitEvent.userName || getUserNameByKey(users, deputyId, '未指定人員')}`,
-      timeText: `${fmtDateRange(range.start, range.end)} ${fmtTimeRange(range.start, range.end)}`.trim()
-    };
-  }
-  return null;
-};
-const openReassignModal = (leave) => {
-  setReassignModal({
-    open: true,
-    leave,
-    requesterId: String(leave?.requesterDocId || leave?.requesterUid || leave?.requesterId || leave?.requesterEmail || '').toLowerCase(),
-    deputyId: String(leave?.deputyId || '').toLowerCase()
-  });
-};
-const closeReassignModal = () => setReassignModal({ open: false, leave: null, requesterId: '', deputyId: '' });
-const confirmReassign = async () => {
-  const leave = reassignModal.leave;
-  if (!leave) return;
-  const requester = findUserByAnyKey(users, reassignModal.requesterId);
-  if (!requester) { alert('找不到要改派的人員，請重新選擇。'); return; }
-  const isOt = isOvertime(leave.type);
-  const requesterKey = String(reassignModal.requesterId || '').toLowerCase();
-  const deputyKey = String(reassignModal.deputyId || '').toLowerCase();
-  if (!isOt && !deputyKey) { alert('請選擇新的職務代理人。'); return; }
-  if (!isOt && getUserKeys(requester).includes(deputyKey)) { alert('執行人員與職務代理人不能是同一人。'); return; }
-  const requesterConflict = getRequesterConflict(requester, leave.start, leave.end, leave);
-  if (requesterConflict) {
-    alert(`改派失敗，新人員該時段已有衝突。\n衝突資料：${requesterConflict.title}\n衝突時段：${requesterConflict.timeText}`);
-    return;
-  }
-  if (!isOt) {
-    const deputyConflict = getDeputyConflictForApproval(deputyKey, leave.start, leave.end, leave.id);
-    if (deputyConflict) {
-      alert(`改派失敗，職務代理人時段衝突。\n衝突資料：${deputyConflict.title}\n衝突時段：${deputyConflict.timeText}`);
-      return;
-    }
-  }
-
-  setProcessingId(`reassign_${leave.id}`);
-  try {
-    const previousRequester = leave.requesterName || '';
-    const previousDeputy = leave.deputyId ? getUserNameByKey(users, leave.deputyId, '未知') : '-';
-    const nextDeputyName = isOt ? '' : (getUserNameByKey(users, deputyKey, '') || '');
-    await crud.updateLeave(leave.id, {
-      requesterId: requester.docId || requester.uid || requester.email || '',
-      requesterUid: requester.uid || null,
-      requesterDocId: requester.docId || null,
-      requesterEmail: String(requester.email || '').toLowerCase(),
-      requesterName: requester.name || '',
-      deputyId: isOt ? '' : deputyKey,
-      status: isOt ? 'deputy_signed' : 'pending',
-      deputySignedAt: isOt ? new Date() : null,
-      deputySignedBy: isOt ? 'EXEMPT' : null,
-      deputySignedByName: isOt ? '免職代' : null,
-      approverId: null,
-      approvedAt: null,
-      approvedByName: null,
-      approvalDate: null,
-      reassignedAt: new Date(),
-      reassignedByName: currentUser.name || currentUser.displayName || '',
-      previousRequesterName: previousRequester,
-      previousDeputyName: previousDeputy,
-      reassignSummary: `${previousRequester}${previousDeputy ? ` / 職代 ${previousDeputy}` : ''} -> ${requester.name || ''}${!isOt && nextDeputyName ? ` / 職代 ${nextDeputyName}` : ''}`
-    });
-
-    if (leave.sourceGroupId && db) {
-      const updates = (events || []).filter(ev => ev && ev.type === 'person' && ev.groupId === leave.sourceGroupId);
-      await Promise.all(updates.map(ev => updateDoc(
-        doc(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events', ev.id),
-        {
-          userId: requester.uid || requester.docId || requester.email || '',
-          userDocId: requester.docId || null,
-          userEmail: String(requester.email || '').toLowerCase(),
-          userName: requester.name || '',
-          userAvatar: requester.initials || ev.userAvatar || '',
-          userColor: requester.color || ev.userColor || ''
-        }
-      )));
-    }
-
-    closeReassignModal();
-    alert(leave.sourceGroupId ? '改派完成，已同步更新日曆與差單。' : '改派完成。');
-  } catch (e) {
-    alert('改派失敗: ' + (e?.message || String(e)));
-  } finally {
-    setProcessingId(null);
-  }
-};
-
 const fmtDateRange=(start,end)=>{
   const s1=(start||'').split('T'); const e1=(end||'').split('T');
   const d1=s1[0]||''; const d2=e1[0]||'';
@@ -5220,7 +5038,7 @@ return (
 <div className="max-w-6xl mx-auto space-y-8">
 <div className="flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle/> 差單審核</h2></div>
 <div className="bg-white rounded shadow overflow-hidden border-t-4 border-blue-500"><div className="bg-blue-50 px-4 py-3 border-b border-blue-100 font-bold text-blue-800 flex items-center gap-2"><User size={18}/> 第一關：待我簽核 (我是職代)</div>{pendingMyDeputy.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待辦事項，您目前沒有需要代理的案件。</div> : <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm text-left"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3">申請者</th><th className="p-3">假別</th><th className="p-3">事由</th><th className="p-3">備註</th><th className="p-3">日期</th><th className="p-3">時間</th><th className="p-3">申請天/時數</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingMyDeputy.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3 font-bold text-blue-600">{l.type}</td><td className="p-3 whitespace-nowrap">{(() => { const reasonText = getReasonText(l); const expanded = expandedReasonIds.includes(l.id); return reasonText.length > 15 ? <button type="button" onClick={()=>toggleReasonExpand(l.id)} className="text-left text-sm text-blue-700 hover:text-blue-900 underline decoration-dotted underline-offset-2 whitespace-nowrap" title={expanded ? '點擊收合' : reasonText}>{expanded ? reasonText : (reasonText.slice(0,15) + '...')}</button> : <span className="whitespace-nowrap">{reasonText}</span>; })()}</td><td className="p-3 text-gray-600">{fmtText(l.note||"")}</td><td className="p-3 whitespace-nowrap">{fmtDateRange(l.start,l.end)}</td><td className="p-3 text-sm text-gray-500 whitespace-nowrap">{fmtTimeRange(l.start,l.end)}</td><td className="p-3 font-medium whitespace-nowrap">{fmtDaysHours(l.hours)}</td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2 whitespace-nowrap"><button onClick={()=>handleDeputyAgree(l)} disabled={processingId === l.id} className={`text-white font-bold text-xs bg-blue-500 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 簽核同意</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-sm bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '退回'}</button></td></tr>))}</tbody></table></div>}</div>
- {(currentUser.role === 'leader' || currentUser.role === 'admin') && <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>{pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <><div className="p-3 flex items-center justify-between gap-3 bg-white border-b"><label className="inline-flex items-center gap-2 text-sm text-gray-700 select-none"><input type="checkbox" className="h-4 w-4" checked={pendingLeader.length>0 && selectedLeaderIds.length===pendingLeader.length} onChange={toggleLeaderSelectAll}/>全選</label><div className="flex items-center gap-2"><div className="text-xs text-gray-500">已選 {selectedLeaderIds.length} 筆</div><button onClick={handleLeaderBulkApprove} disabled={selectedLeaderIds.length===0 || !!processingId} className={`px-3 py-2 rounded text-white text-sm ${selectedLeaderIds.length===0 || processingId ? "bg-gray-400 cursor-not-allowed" : "bg-orange-600 hover:bg-orange-700"}`}>批量核准</button></div></div><div className="overflow-x-auto"><table className="w-full min-w-[1180px] text-sm text-left whitespace-nowrap"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3 w-10"></th><th className="p-3">申請者</th><th className="p-3">假別</th><th className="p-3">事由</th><th className="p-3">備註</th><th className="p-3">日期</th><th className="p-3">時間</th><th className="p-3">申請天/時數</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3"><input type="checkbox" className="h-4 w-4" checked={selectedLeaderIds.includes(l.id)} onChange={()=>toggleLeaderSelect(l.id)} /></td><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3 font-bold text-gray-800">{l.type}</td><td className="p-3 whitespace-nowrap">{(() => { const reasonText = getReasonText(l); const expanded = expandedReasonIds.includes(l.id); return reasonText.length > 15 ? <button type="button" onClick={()=>toggleReasonExpand(l.id)} className="text-left text-sm text-blue-700 hover:text-blue-900 underline decoration-dotted underline-offset-2 whitespace-nowrap" title={expanded ? '點擊收合' : reasonText}>{expanded ? reasonText : (reasonText.slice(0,15) + '...')}</button> : <span className="whitespace-nowrap">{reasonText}</span>; })()}</td><td className="p-3 text-gray-600">{fmtText(l.note||"")}</td><td className="p-3 whitespace-nowrap">{fmtDateRange(l.start,l.end)}</td><td className="p-3 text-sm text-gray-500 whitespace-nowrap">{fmtTimeRange(l.start,l.end)}</td><td className="p-3 font-medium whitespace-nowrap">{fmtDaysHours(l.hours)}</td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2 whitespace-nowrap"><button onClick={()=>openReassignModal(l)} disabled={!!processingId} className={`text-amber-700 font-bold text-sm bg-amber-50 px-3 py-1.5 rounded ${processingId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber-100'}`}>改派</button><button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-sm bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-sm bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button></td></tr>))}</tbody></table></div></>}</div>}
+ {(currentUser.role === 'leader' || currentUser.role === 'admin') && <div className="bg-white rounded shadow overflow-hidden border-t-4 border-orange-500"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 font-bold text-orange-800 flex items-center gap-2"><CheckCircle size={18}/> 第二關：待最終核准 (組長權限)</div>{pendingLeader.length===0 ? <div className="p-8 text-center text-gray-400 text-sm">無待審核項目</div> : <><div className="p-3 flex items-center justify-between gap-3 bg-white border-b"><label className="inline-flex items-center gap-2 text-sm text-gray-700 select-none"><input type="checkbox" className="h-4 w-4" checked={pendingLeader.length>0 && selectedLeaderIds.length===pendingLeader.length} onChange={toggleLeaderSelectAll}/>全選</label><div className="flex items-center gap-2"><div className="text-xs text-gray-500">已選 {selectedLeaderIds.length} 筆</div><button onClick={handleLeaderBulkApprove} disabled={selectedLeaderIds.length===0 || !!processingId} className={`px-3 py-2 rounded text-white text-sm ${selectedLeaderIds.length===0 || processingId ? "bg-gray-400 cursor-not-allowed" : "bg-orange-600 hover:bg-orange-700"}`}>批量核准</button></div></div><div className="overflow-x-auto"><table className="w-full min-w-[1180px] text-sm text-left whitespace-nowrap"><thead className="bg-gray-50 border-b text-gray-500"><tr><th className="p-3 w-10"></th><th className="p-3">申請者</th><th className="p-3">假別</th><th className="p-3">事由</th><th className="p-3">備註</th><th className="p-3">日期</th><th className="p-3">時間</th><th className="p-3">申請天/時數</th><th className="p-3">進度狀態</th><th className="p-3">操作</th></tr></thead><tbody>{pendingLeader.map(l => (<tr key={l.id} className="border-b last:border-0 hover:bg-gray-50"><td className="p-3"><input type="checkbox" className="h-4 w-4" checked={selectedLeaderIds.includes(l.id)} onChange={()=>toggleLeaderSelect(l.id)} /></td><td className="p-3 font-bold text-gray-700">{l.requesterName}</td><td className="p-3 font-bold text-gray-800">{l.type}</td><td className="p-3 whitespace-nowrap">{(() => { const reasonText = getReasonText(l); const expanded = expandedReasonIds.includes(l.id); return reasonText.length > 15 ? <button type="button" onClick={()=>toggleReasonExpand(l.id)} className="text-left text-sm text-blue-700 hover:text-blue-900 underline decoration-dotted underline-offset-2 whitespace-nowrap" title={expanded ? '點擊收合' : reasonText}>{expanded ? reasonText : (reasonText.slice(0,15) + '...')}</button> : <span className="whitespace-nowrap">{reasonText}</span>; })()}</td><td className="p-3 text-gray-600">{fmtText(l.note||"")}</td><td className="p-3 whitespace-nowrap">{fmtDateRange(l.start,l.end)}</td><td className="p-3 text-sm text-gray-500 whitespace-nowrap">{fmtTimeRange(l.start,l.end)}</td><td className="p-3 font-medium whitespace-nowrap">{fmtDaysHours(l.hours)}</td><td className="p-3"><StatusStep status={l.status}/></td><td className="p-3 flex gap-2 whitespace-nowrap"><button onClick={()=>handleLeaderApprove(l)} disabled={processingId === l.id} className={`text-white font-bold text-sm bg-green-600 px-3 py-1.5 rounded shadow-sm flex items-center gap-1 ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}>{processingId === l.id ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle size={12}/>} 最終核准</button><button onClick={()=>handleReject(l)} disabled={processingId === l.id} className={`text-red-600 font-bold text-sm bg-red-50 px-3 py-1.5 rounded ${processingId === l.id ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-100'}`}>{processingId === l.id ? '...' : '駁回'}</button></td></tr>))}</tbody></table></div></>}</div>}
 <div className="bg-white rounded shadow overflow-hidden border border-gray-200 mt-8">
 <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 border-b">
 <button onClick={() => setShowAllLeaves(!showAllLeaves)} className="flex-1 px-4 py-3 hover:bg-gray-100 flex justify-between items-center transition font-bold text-gray-700 text-left">
@@ -5312,44 +5130,6 @@ l.status === 'withdrawn' ? '已撤銷' : '審核中'}</span>
 })}</tbody></table>
 )}</div>
  )}</div>
-{reassignModal.open && reassignModal.leave && (
-<div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={closeReassignModal}>
-<div className="bg-white rounded-xl w-full max-w-lg shadow-2xl p-6" onClick={e => e.stopPropagation()}>
-<h3 className="font-bold text-lg mb-2 text-amber-700 flex items-center gap-2"><RefreshCw size={18}/> 改派人員</h3>
-<div className="text-xs text-gray-500 leading-relaxed mb-4">這裡會同步更新差單；如果這筆差單是從日曆排班送出，也會一起更新同一個排班群組的人員。</div>
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-<div>
-<label className="text-xs font-bold text-gray-600 block mb-1">目前差單</label>
-<div className="rounded-lg border bg-gray-50 px-3 py-2 text-sm text-gray-700">
-<div className="font-bold">{reassignModal.leave.requesterName} / {reassignModal.leave.type}</div>
-<div className="text-xs text-gray-500 mt-1">{fmtDateRange(reassignModal.leave.start, reassignModal.leave.end)} {fmtTimeRange(reassignModal.leave.start, reassignModal.leave.end)}</div>
-</div>
-</div>
-<div>
-<label className="text-xs font-bold text-gray-600 block mb-1">新執行人員</label>
-<select className="w-full border p-2 rounded bg-gray-50 focus:bg-white outline-none" value={reassignModal.requesterId} onChange={e=>setReassignModal({ ...reassignModal, requesterId: e.target.value })}>
-<option value="">請選擇人員</option>
-{users.map(u => <option key={`reassign-user-${u.docId || u.uid || u.email}`} value={String(u.docId || u.uid || u.email || '').toLowerCase()}>{u.name}</option>)}
-</select>
-</div>
-</div>
-{!isOvertime(reassignModal.leave.type) && (
-<div className="mb-6">
-<label className="text-xs font-bold text-gray-600 block mb-1">新職務代理人</label>
-<select className="w-full border p-2 rounded bg-gray-50 focus:bg-white outline-none" value={reassignModal.deputyId} onChange={e=>setReassignModal({ ...reassignModal, deputyId: e.target.value })}>
-<option value="">請選擇職代</option>
-{users.filter(u => String(u.docId || u.uid || u.email || '').toLowerCase() !== String(reassignModal.requesterId || '').toLowerCase()).map(u => <option key={`reassign-deputy-${u.docId || u.uid || u.email}`} value={String(u.docId || u.uid || u.email || '').toLowerCase()}>{u.name}</option>)}
-</select>
-</div>
-)}
-<div className="flex gap-2">
-<button onClick={closeReassignModal} className="flex-1 py-2 bg-gray-100 text-gray-600 font-bold rounded-lg hover:bg-gray-200 transition">取消</button>
-<button onClick={confirmReassign} disabled={!!processingId} className="flex-1 py-2 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition flex justify-center items-center gap-2">
-{processingId ? <Loader2 size={16} className="animate-spin"/> : '確認改派'}</button>
-</div>
-</div>
-</div>
-)}
 {/* 撤銷確認 Modal */}
 {recallModal.open && (
 <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setRecallModal({open: false, leave: null, reason: ''})}>
