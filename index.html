@@ -545,9 +545,18 @@ const [loading, setLoading] = useState(true);
 const [connectSeconds, setConnectSeconds] = useState(0);
 const [db, setDb] = useState(null);
 const [auth, setAuth] = useState(null);
+const persistGlobalSettings = (patch) => {
+if (!(db && userData && userData.role === 'admin')) return;
+setDoc(
+  doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global'),
+  patch,
+  { merge: true }
+).catch(e => alert('同步系統設定失敗: ' + (e?.message || e)));
+};
 const handleUpdateRoleNames = (newNames) => {
 setRoleNames(newNames);
 localStorage.setItem('roleNames', JSON.stringify(newNames));
+persistGlobalSettings({ roleNames: newNames });
 };
 useEffect(() => {
 const savedTheme = localStorage.getItem('sidebarTheme');
@@ -672,16 +681,36 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
       customHolidays: { ...DEFAULT_SPECIAL_HOLIDAYS, ...(remote.customHolidays || {}) },
       sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID
     };
+    const remoteRoleNames = { ...DEFAULT_ROLE_NAMES, ...(remote.roleNames || {}) };
+    const remoteRotationRules = normalizeRotationRules(remote.rotationRules || DEFAULT_ROTATION_RULES);
+    const remoteWorkTags = Array.isArray(remote.workTags) && remote.workTags.length > 0 ? remote.workTags : DEFAULT_WORK_TAGS;
+    const remoteAreaTags = Array.isArray(remote.areaTags) && remote.areaTags.length > 0 ? remote.areaTags : DEFAULT_AREA_TAGS;
+    const remoteLeaveTypes = Array.isArray(remote.leaveTypes) && remote.leaveTypes.length > 0 ? remote.leaveTypes : DEFAULT_LEAVE_TYPES;
     setSettings(merged);
+    setRoleNames(remoteRoleNames);
+    setRotationRules(remoteRotationRules);
+    setWorkTags(remoteWorkTags);
+    setAreaTags(remoteAreaTags);
+    setLeaveTypes(remoteLeaveTypes);
     localStorage.setItem('areaColors', JSON.stringify(merged.areaColors));
     localStorage.setItem('workColors', JSON.stringify(merged.workColors));
     localStorage.setItem('customHolidays', JSON.stringify(merged.customHolidays));
     localStorage.setItem('sharedGoogleCalendarId', merged.sharedGoogleCalendarId);
+    localStorage.setItem('roleNames', JSON.stringify(remoteRoleNames));
+    localStorage.setItem('rotationRules', JSON.stringify(remoteRotationRules));
+    localStorage.setItem('workTags', JSON.stringify(remoteWorkTags));
+    localStorage.setItem('areaTags', JSON.stringify(remoteAreaTags));
+    localStorage.setItem('leaveTypes', JSON.stringify(remoteLeaveTypes));
     const missing = Object.keys(DEFAULT_SPECIAL_HOLIDAYS).some(k => !(k in (remote.customHolidays || {})));
     const missingWork = Object.keys(DEFAULT_WORK_COLORS).some(k => !(k in (remote.workColors || {})));
-    if (missing || missingWork || !remote.sharedGoogleCalendarId) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId }, { merge: true }); } catch(e) {} }
+    const missingRoleNames = Object.keys(DEFAULT_ROLE_NAMES).some(k => !(k in (remote.roleNames || {})));
+    const missingRotationRules = !Array.isArray(remote.rotationRules) || remote.rotationRules.length === 0;
+    const missingWorkTags = !Array.isArray(remote.workTags) || remote.workTags.length === 0;
+    const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
+    const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
+    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
   } else {
-    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID };
+    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
     try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
   }
 });
@@ -732,6 +761,7 @@ const handleUpdateRotationRules = (newRules) => {
 const normalized = normalizeRotationRules(newRules);
 setRotationRules(normalized);
 localStorage.setItem('rotationRules', JSON.stringify(normalized));
+persistGlobalSettings({ rotationRules: normalized });
 };
 const handleAddTag = (type, val) => {
 if(!val) { alert('請先輸入名稱。'); return; }
@@ -740,11 +770,13 @@ if (workTags.includes(val)) { alert('此項目已存在'); return; }
 const t = [...workTags, val];
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+persistGlobalSettings({ workTags: t });
 } else {
 if (areaTags.includes(val)) { alert('此轄區已存在'); return; }
 const t = [...areaTags, val];
 setAreaTags(t);
-localStorage.setItem('areaTags', JSON.stringify(t));}
+localStorage.setItem('areaTags', JSON.stringify(t));
+persistGlobalSettings({ areaTags: t });}
 };
 const handleDeleteTag = (type, val) => {
 if(!confirm("確定要刪除此項目嗎？")) return;
@@ -757,11 +789,14 @@ if (settings.workColors && settings.workColors[val]) {
   delete newWorkColors[val];
   setSettings(prev => ({ ...prev, workColors: newWorkColors }));
   localStorage.setItem('workColors', JSON.stringify(newWorkColors));
+  persistGlobalSettings({ workColors: newWorkColors });
 }
+persistGlobalSettings({ workTags: t });
 } else {
 const t = areaTags.filter(item => item !== val);
 setAreaTags(t);
-localStorage.setItem('areaTags', JSON.stringify(t));}
+localStorage.setItem('areaTags', JSON.stringify(t));
+persistGlobalSettings({ areaTags: t });}
 };
 const handleUpdateTag = (type, oldVal, newVal) => {
 if(!newVal) { alert('名稱不可為空白。'); return; }
@@ -776,7 +811,9 @@ const newColors = { ...settings.areaColors };
 newColors[newVal] = newColors[oldVal];
 delete newColors[oldVal];
 setSettings(prev => ({ ...prev, areaColors: newColors}));
-localStorage.setItem('areaColors', JSON.stringify(newColors));}
+localStorage.setItem('areaColors', JSON.stringify(newColors));
+persistGlobalSettings({ areaColors: newColors });}
+persistGlobalSettings({ areaTags: t });
 } else if(type === 'work') {
 if (workTags.includes(newVal)) { alert("此項目已存在"); return; }
 const t = workTags.map(item => item === oldVal ? newVal : item);
@@ -788,7 +825,9 @@ newWorkColors[newVal] = newWorkColors[oldVal];
 delete newWorkColors[oldVal];
 setSettings(prev => ({ ...prev, workColors: newWorkColors }));
 localStorage.setItem('workColors', JSON.stringify(newWorkColors));
+persistGlobalSettings({ workColors: newWorkColors });
 }
+persistGlobalSettings({ workTags: t });
 }
 };
 const handleManageLeaveTypes = (action, val) => {
@@ -796,15 +835,18 @@ if(action === 'add' && val) {
 const newTypes = [...leaveTypes, { id: `l_${Date.now()}`, ...val }];
 setLeaveTypes(newTypes);
 localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
+persistGlobalSettings({ leaveTypes: newTypes });
 } else if (action === 'delete') {
 if(!confirm("確定要刪除此假別嗎？")) return;
 const newTypes = leaveTypes.filter(t => t.id !== val);
 setLeaveTypes(newTypes);
 localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
+persistGlobalSettings({ leaveTypes: newTypes });
 } else if (action === 'update' && val) {
 const newTypes = leaveTypes.map(t => t.id === val.id ? val : t);
 setLeaveTypes(newTypes);
-localStorage.setItem('leaveTypes', JSON.stringify(newTypes));}}
+localStorage.setItem('leaveTypes', JSON.stringify(newTypes));
+persistGlobalSettings({ leaveTypes: newTypes });}}
 const toggleSidebarTheme = () => {
 const newTheme = sidebarTheme === 'light' ? 'dark' : 'light';
 setSidebarTheme(newTheme);
