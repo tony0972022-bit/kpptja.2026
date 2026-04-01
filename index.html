@@ -392,7 +392,6 @@ const DEFAULT_WORK_COLORS = {
 };
 const DEFAULT_SPECIAL_HOLIDAYS = {
 "2026-02-27": "228補假",
-"2026-04-02": "兒童節補假",
 "2026-04-06": "清明節補假",
 "2026-05-01": "勞動節",
 "2026-09-25": "中秋節",
@@ -678,7 +677,7 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const merged = {
       areaColors: { ...DEFAULT_AREA_COLORS, ...(remote.areaColors || {}) },
       workColors: { ...DEFAULT_WORK_COLORS, ...(remote.workColors || {}) },
-      customHolidays: { ...DEFAULT_SPECIAL_HOLIDAYS, ...(remote.customHolidays || {}) },
+      customHolidays: (remote.customHolidays !== null && remote.customHolidays !== undefined) ? remote.customHolidays : { ...DEFAULT_SPECIAL_HOLIDAYS },
       sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID
     };
     const remoteRoleNames = { ...DEFAULT_ROLE_NAMES, ...(remote.roleNames || {}) };
@@ -701,7 +700,7 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     localStorage.setItem('workTags', JSON.stringify(remoteWorkTags));
     localStorage.setItem('areaTags', JSON.stringify(remoteAreaTags));
     localStorage.setItem('leaveTypes', JSON.stringify(remoteLeaveTypes));
-    const missing = Object.keys(DEFAULT_SPECIAL_HOLIDAYS).some(k => !(k in (remote.customHolidays || {})));
+    const missing = !('customHolidays' in remote); // Only seed once on first-time setup; admin manages holidays explicitly
     const missingWork = Object.keys(DEFAULT_WORK_COLORS).some(k => !(k in (remote.workColors || {})));
     const missingRoleNames = Object.keys(DEFAULT_ROLE_NAMES).some(k => !(k in (remote.roleNames || {})));
     const missingRotationRules = !Array.isArray(remote.rotationRules) || remote.rotationRules.length === 0;
@@ -1105,15 +1104,31 @@ const d = new Date(start);
 d.setDate(start.getDate() + i);
 if (d.getDay() === 0 || d.getDay() === 6) continue;
 const dStr = getLocalDateString(d);
-const externalPeople = { morning: [], afternoon: [], all_day: [] };
-calendarEvents.filter(e => e.date === dStr && e.type === 'person').forEach(p => {
-const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
-if (tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item)) {
-const s = p.slot || 'all_day';
-if(externalPeople[s] && !externalPeople[s].includes(p.userName)) {
-externalPeople[s].push(p.userName);}}
+// 依 groupId 分組，收集工作項、時間、人員
+const groupMap = {};
+calendarEvents.filter(e => e.date === dStr).forEach(e => {
+  if (!groupMap[e.groupId]) groupMap[e.groupId] = { tag: null, people: [] };
+  if (e.type === 'tag') groupMap[e.groupId].tag = e;
+  else if (e.type === 'person') groupMap[e.groupId].people.push(e);
 });
-week.push({ day: weekDays[d.getDay()], date: dStr, external: externalPeople });}
+const externalGroups = Object.values(groupMap)
+  .filter(g => g.tag && EXTERNAL_WORK_TAGS.includes(g.tag.item))
+  .map(g => {
+    const slot = g.tag.slot || 'all_day';
+    const startTime = g.tag.startTime || (slot === 'morning' ? '08:00' : slot === 'afternoon' ? '13:00' : '08:00');
+    const endTime = g.tag.endTime || (slot === 'morning' ? '12:00' : slot === 'afternoon' ? '17:00' : '17:00');
+    const areas = Array.isArray(g.tag.area) ? g.tag.area : (g.tag.area ? [g.tag.area] : []);
+    return {
+      workItem: g.tag.item,
+      slot,
+      startTime,
+      endTime,
+      areas,
+      people: [...new Set(g.people.map(p => p.userName))],
+    };
+  })
+  .sort((a, b) => a.startTime.localeCompare(b.startTime));
+week.push({ day: weekDays[d.getDay()], date: dStr, externalGroups });}
 return week;
 };
 const weekData = getWeekData();
@@ -1244,18 +1259,37 @@ return (
 <option value={1}>本週</option><option value={2}>未來 2 週</option><option value={4}>未來 4 週</option></select></div>
 <div className="overflow-x-auto max-h-[400px]">
 <table className="w-full text-xs text-left">
-<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2">上午</th><th className="p-2">下午</th><th className="p-2">整天</th></tr></thead>
+<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2">外勤內容</th></tr></thead>
 <tbody>
 {weekData.map((d, idx) => {
 const isMonday = d.day === '週一';
 return (
 <React.Fragment key={idx}>
-{isMonday && idx !== 0 && <tr><td colSpan="4" className="bg-gray-100/50 py-1"></td></tr>}
-<tr className={`border-b last:border-0 hover:bg-gray-50 transition ${isMonday ? 'border-t-2 border-t-gray-200' : ''}`}>
+{isMonday && idx !== 0 && <tr><td colSpan="2" className="bg-gray-100/50 py-1"></td></tr>}
+<tr className={`border-b last:border-0 hover:bg-gray-50 transition align-top ${isMonday ? 'border-t-2 border-t-gray-200' : ''}`}>
 <td className="p-2 font-bold text-gray-600 whitespace-nowrap">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td>
-<td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.morning.length > 0 ? d.external.morning.map((n,i)=><span key={i} className="bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td>
-<td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.afternoon.length > 0 ? d.external.afternoon.map((n,i)=><span key={i} className="bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td>
-<td className="p-2"><div className="flex gap-1 flex-wrap">{d.external.all_day.length > 0 ? d.external.all_day.map((n,i)=><span key={i} className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">{n}</span>) : '-'}</div></td></tr></React.Fragment>
+<td className="p-2">
+  {d.externalGroups.length === 0 ? <span className="text-gray-300">—</span> : (
+    <div className="flex flex-col gap-1.5">
+      {d.externalGroups.map((g, gi) => {
+        const slotColor = g.slot === 'morning' ? 'bg-yellow-50 border-yellow-200' : g.slot === 'afternoon' ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200';
+        const timeLabel = `${g.startTime}-${g.endTime}`;
+        const areaLabel = g.areas.length > 0 ? ` ／${g.areas.join('·')}` : '';
+        return (
+          <div key={gi} className={`flex items-start gap-1.5 border rounded px-2 py-1 ${slotColor}`}>
+            <div className="shrink-0">
+              <span className="font-bold text-gray-700">{g.workItem}</span>
+              <span className="text-gray-400 ml-1 text-[10px]">{timeLabel}{areaLabel}</span>
+            </div>
+            <div className="flex gap-1 flex-wrap ml-1">
+              {g.people.map((n, pi) => <span key={pi} className="bg-white border border-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap font-medium">{n}</span>)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+</td></tr></React.Fragment>
 )})}</tbody></table></div></div></div>);}
 function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
 const [date, setDate] = useState(new Date());
@@ -1271,6 +1305,7 @@ const [selUsers, setSelUsers] = useState([]);
 const [editGroupId, setEditGroupId] = useState(null);
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [modalError, setModalError] = useState('');
+const [modalWarning, setModalWarning] = useState('');
 const [importantModalOpen, setImportantModalOpen] = useState(false);
 const [importantForm, setImportantForm] = useState({ id: null, date: '', ownerIds: [], owner: '', title: '', text: '' });
 const IMPORTANT_VISIBLE_DAYS = 14;
@@ -1426,6 +1461,7 @@ applySlotPreset('morning');
 setSelAreas([]); // 初始化清空
 setSelUsers([]);
 setModalError('');
+setModalWarning('');
 setEditGroupId(null);
 setModalOpen(true);
 };
@@ -1443,6 +1479,7 @@ setModalEndTime(tagEv.endTime || preset.end);
 setSelAreas(Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []));
 setSelUsers(personEvs.map(p => p.userId));
 setModalError('');
+setModalWarning('');
 setEditGroupId(tagEv.groupId);
 setModalOpen(true);}
 };
@@ -1546,8 +1583,9 @@ try {
   alert('刪除失敗：' + (e?.message || e));
 }}
 
-const handleModalSave = async () => {
+const handleModalSave = async (syncLinkedLeaves = false) => {
 setModalError('');
+setModalWarning('');
 if(!modalData.date) { const msg = "請選擇日期"; setModalError(msg); alert(msg); return; }
 if(!modalData.workItem) { const msg = "請選擇工作項目"; setModalError(msg); alert(msg); return; }
 if(!modalStartTime || !modalEndTime) { const msg = "請輸入起訖時間"; setModalError(msg); alert(msg); return; }
@@ -1624,6 +1662,14 @@ const hasLinkedLeaveChanges = leaveAssignments.some(({ leave, assignedUser }) =>
   const timeChanged = String(leave.start || '') !== slotStart || String(leave.end || '') !== slotEnd || Number(leave.hours || 0) !== Math.round(effectiveHours * 10) / 10;
   return requesterChanged || timeChanged;
 });
+if (syncLinkedLeaves && linkedPendingLeaves.length === 0 && linkedApprovedLeaves.length === 0) {
+  alert('這筆排班目前沒有綁定差單，請直接按「確認修改」即可。');
+  return;
+}
+if (syncLinkedLeaves && !hasLinkedLeaveChanges) {
+  alert('目前的人員與時段沒有變更，不需要執行改派。');
+  return;
+}
 const hasLeaveConflictFor = (u) => {
   if (!u) return false;
   const uid = String(u.uid || u.docId || '');
@@ -1633,6 +1679,7 @@ const hasLeaveConflictFor = (u) => {
   return (leaves || []).some(l => {
     if (!l) return false;
     if (!['pending', 'deputy_signed', 'approved'].includes(String(l.status || ''))) return false;
+    if (syncLinkedLeaves && l.sourceGroupId === editGroupId) return false;
     const rid = String(l.requesterId || l.requesterUid || l.requesterDocId || '');
     const rdoc = String(l.requesterDocId || '');
     const remail = String(l.requesterEmail || '').toLowerCase();
@@ -1670,12 +1717,10 @@ if (targetUser && hasLeaveConflictFor(targetUser)) {
   conflicts.push(`${uName}：該時段已有請假(排休)資料，與排班衝突`);
 }}
 if (conflicts.length > 0) {
-  const msg = `衝突警示：\n${conflicts.join('\n')}`;
-  setModalError(msg);
-  alert(msg);
-  return;
+  // 顯示警告但不擋申請，讓使用者自行判斷是否繼續
+  setModalWarning(`⚠️ 人員衝突提醒（仍可繼續儲存）：\n${conflicts.join('\n')}`);
 }
-if (hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
+if (syncLinkedLeaves && hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
   const ok = confirm(`這筆排班目前綁定差單如下：\n- 待審差單：${linkedPendingLeaves.length} 筆\n- 已核准差單：${linkedApprovedLeaves.length} 筆\n\n若繼續儲存：\n1. 待審差單會同步更新人員/時間，並退回待職代審查\n2. 已核准差單會直接刪除\n\n是否繼續？`);
   if (!ok) return;
 }
@@ -1688,7 +1733,7 @@ await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: mod
 for(const uid of selUsers) {
 const u = users.find(x=>x.uid === uid || x.docId === uid);
 if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });}
-if (editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0) {
+if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0) {
   for (const { leave, assignedUser } of leaveAssignments) {
     if (!assignedUser) continue;
     const isOt = isOvertime(leave.type);
@@ -1719,7 +1764,7 @@ if (editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0) {
     });
   }
 }
-if (editGroupId && hasLinkedLeaveChanges && linkedApprovedLeaves.length > 0) {
+if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && linkedApprovedLeaves.length > 0) {
   for (const leave of linkedApprovedLeaves) {
     try {
       await crud.deleteLeave(leave.id);
@@ -1734,10 +1779,11 @@ if (!editGroupId) {
 }
 setModalOpen(false);
 setModalError('');
+setModalWarning('');
 const unsyncedCount = leaveAssignments.filter(x => !x.assignedUser).length;
-if (editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0 && unsyncedCount > 0) {
+if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0 && unsyncedCount > 0) {
   alert(`行程修改完成，但有 ${unsyncedCount} 筆既有待審差單找不到可對應的新排班人員，未自動改派。${linkedApprovedLeaves.length > 0 ? `\n另外已刪除 ${linkedApprovedLeaves.length} 筆已核准差單。` : ''}`);
-} else if (editGroupId && hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
+} else if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
   alert(`行程修改完成。${linkedPendingLeaves.length > 0 ? '\n相關待審差單已同步更新並退回待職代審查。' : ''}${linkedApprovedLeaves.length > 0 ? `\n已刪除 ${linkedApprovedLeaves.length} 筆已核准差單。` : ''}`);
 } else {
   alert(editGroupId ? '行程修改完成' : '行程新增完成');
@@ -2633,13 +2679,13 @@ return (
 <div className="flex-1 grid grid-cols-7 auto-rows-auto bg-white">{renderGrid()}</div></div></div></div>
 <RotationModal open={rotationModalOpen} onClose={()=>setRotationModalOpen(false)} rules={rotationRules} onUpdateRules={onUpdateRotationRules} rotationData={rotationData} rotationStats={rotationStats}/>
 {modalOpen && (
-<div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>{ setModalOpen(false); setModalError(''); }}>
+<div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={()=>{ setModalOpen(false); setModalError(''); setModalWarning(''); }}>
 <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]" onClick={e=>e.stopPropagation()}>
 <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
 <div>
 <h3 className="font-bold text-lg text-gray-800">{editGroupId ? '修改排班' : '新增排班'}</h3>
 <input type="date" className="mt-1 text-sm font-medium text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white hover:border-blue-400 focus:border-blue-500 outline-none transition-colors" value={modalData.date} onChange={e=>setModalData({ ...modalData, date:e.target.value})}/></div>
-<button onClick={()=>{ setModalOpen(false); setModalError(''); }} className="text-gray-400 hover:text-gray-600"><X size={20}/></button></div>
+<button onClick={()=>{ setModalOpen(false); setModalError(''); setModalWarning(''); }} className="text-gray-400 hover:text-gray-600"><X size={20}/></button></div>
 <div className="p-4 overflow-y-auto space-y-5">
 <div>
 <label className="text-xs font-bold text-gray-500 uppercase mb-2 block flex items-center gap-1"><RefreshCw size={12}/> 快速輪值 (自動帶入)</label>
@@ -2693,8 +2739,10 @@ return (
 <span className="text-[10px] mt-1 text-gray-700 font-medium">{u.name}</span></div>);
 })}</div></div></div>
 {modalError && <div className="mx-4 mb-3 -mt-1 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 whitespace-pre-line">{modalError}</div>}
+{modalWarning && <div className="mx-4 mb-3 -mt-1 text-sm bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-3 py-2 whitespace-pre-line flex items-start gap-2"><AlertTriangle size={16} className="mt-0.5 shrink-0"/><span>{modalWarning}</span></div>}
 <div className="p-4 border-t bg-gray-50 rounded-b-xl flex gap-3">
 {editGroupId && (<button onClick={handleDeleteGroup} disabled={isSubmitting} className={`flex-1 bg-red-100 text-red-700 py-3 rounded-lg font-bold hover:bg-red-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>刪除行程</button>)}
+{editGroupId && (<button onClick={()=>handleModalSave(true)} disabled={isSubmitting} className={`flex-1 bg-amber-100 text-amber-800 py-3 rounded-lg font-bold hover:bg-amber-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>改派人員</button>)}
 <button onClick={handleModalSave} disabled={isSubmitting} className={`flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900'}`}>
 {isSubmitting ? <><RefreshCw className="animate-spin" size={18}/> 處理中...</> : <><CheckCircle size={18}/> {editGroupId ? '確認修改' : '儲存行程'}</>}</button></div></div></div>
 )}
@@ -5558,13 +5606,45 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   
   });
 
+  // Helper: split leave hours across months by calendar days (handles cross-month leaves)
+  const splitLeaveMonths = (l, year) => {
+    const hours = Number(l.hours || 0);
+    if (!hours) return {};
+    const startStr = String(l.start || '').slice(0, 10);
+    const endStr = String(l.end || l.start || '').slice(0, 10);
+    if (!startStr) return {};
+    if (!endStr || startStr === endStr) {
+      const m = startStr.slice(5, 7);
+      return { [m]: hours };
+    }
+    const startD = new Date(startStr + 'T00:00');
+    const endD = new Date(endStr + 'T00:00');
+    if (endD <= startD) return { [startStr.slice(5, 7)]: hours };
+    // Count calendar days per month within the target year
+    const daysByMonth = {};
+    let totalDays = 0;
+    const cur = new Date(startD);
+    while (cur <= endD) {
+      totalDays++;
+      if (cur.getFullYear() === year) {
+        const m = String(cur.getMonth() + 1).padStart(2, '0');
+        daysByMonth[m] = (daysByMonth[m] || 0) + 1;
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (!totalDays) return {};
+    const result = {};
+    Object.entries(daysByMonth).forEach(([m, d]) => { result[m] = hours * (d / totalDays); });
+    return result;
+  };
+
   const sumHoursBy = (matchFn) => {
     const out = {};
     months.forEach(m => out[m] = 0);
     scopedLeaves.forEach(l => {
-      const m = String(l.start || '').slice(5, 7);
-      if (!out[m]) out[m] = 0;
-      if (matchFn(l.type, l)) out[m] += Number(l.hours || 0);
+      if (!matchFn(l.type, l)) return;
+      const splits = splitLeaveMonths(l, selectedYear);
+      Object.entries(splits).forEach(([m, h]) => { if (m in out) out[m] += h; });
     });
     return out;
   };
@@ -5613,9 +5693,9 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
       const out = {};
       months.forEach(mm => out[mm] = 0);
       userLeaves.forEach(l => {
-        const mm = String(l.start || '').slice(5, 7);
-        if (!out[mm]) out[mm] = 0;
-        if (matchFn(l.type, l)) out[mm] += Number(l.hours || 0);
+        if (!matchFn(l.type, l)) return;
+        const splits = splitLeaveMonths(l, selectedYear);
+        Object.entries(splits).forEach(([mm, h]) => { if (mm in out) out[mm] += h; });
       });
       // 轉整數
       months.forEach(mm => out[mm] = toInt(out[mm]));
@@ -5633,14 +5713,14 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     const otherByMonth = {};
     months.forEach(mm => otherByMonth[mm] = 0);
     userLeaves.forEach(l => {
-      const mm = String(l.start || '').slice(5, 7);
       const type = String(l.type || '');
       const isPersonal = (leaveTypes || []).some(t => t.category === 'personal' && t.name === type);
       if (!isPersonal) return;
       // 排除已被 BASE_ROWS 分類者
       const hit = baseMatchers.some(fn => fn(type, l));
       if (hit) return;
-      otherByMonth[mm] += Number(l.hours || 0);
+      const splits = splitLeaveMonths(l, selectedYear);
+      Object.entries(splits).forEach(([mm, h]) => { if (mm in otherByMonth) otherByMonth[mm] += h; });
     });
     months.forEach(mm => otherByMonth[mm] = toInt(otherByMonth[mm]));
     const otherTotal = months.reduce((a, mm) => a + (otherByMonth[mm] || 0), 0);
@@ -5694,24 +5774,19 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
         const honorBalance = Math.max(0, honorEarned - honorUsed);
         const baseAnnualHoursExport = toInt(((seniority.days||0)*8) + (extraLeaveDays*8) + honorBalance);
 
-        const userInfoLines = [
-          esc(u.name || u.displayName || u.email || '—'),
-          join ? esc(`${join}到職`) : '未設定到職日',
-          `年資：${esc(seniority.entitlementText || seniority.text)}`,
-          `特休：${toInt((seniority.days||0)*8)} (勞基法${seniority.days||0}天) / ${toInt(extraLeaveDays*8)} (單位${extraLeaveDays}天)`,
-          `榮譽假：${toInt(honorEarned)} (小時)`,
-          `額外加班：可補休 ${toInt(extraCompEarned)} (小時) / ${toInt(extraCompEarned/8)} (天)`,
-          `本年度可休總計為：${toInt(baseAnnualHoursExport + extraCompEarned)} (小時) / ${toInt((baseAnnualHoursExport + extraCompEarned)/8)} (天)  ( ${toInt(baseAnnualHoursExport)}小時/${toInt(baseAnnualHoursExport/8)}天 + 額外加班 ${toInt(extraCompEarned)}小時/${toInt(extraCompEarned/8)}天 )`
-        ];
-        const userCell = userInfoLines.join('<br/>');
+        // 名字 + 到職日（同一欄，不用合併儲存格）
+        const nameHireLine = esc(u.name || u.displayName || u.email || '—') + (join ? ` (${esc(join)}到職)` : '');
 
         rows.forEach((r, idx) => {
           const isOvertimeGroup = (r.key === '加班(補休)' || r.key === '補休');
           const bg = isOvertimeGroup ? 'background:#FFF2CC;' : '';
           html += `<tr style="${bg}">`;
 
+          // 第一列顯示姓名+到職日，其餘列留空（不用 rowspan 避免合併欄位）
           if (idx === 0) {
-            html += `<td rowspan="${rows.length}" style="vertical-align:top;white-space:nowrap;">${userCell}</td>`;
+            html += `<td style="white-space:nowrap;vertical-align:middle;">${nameHireLine}</td>`;
+          } else {
+            html += `<td></td>`;
           }
           html += `<td style="text-align:left;white-space:nowrap;">${esc(r.label)}</td>`;
           months.forEach(mm => {
@@ -5983,7 +6058,7 @@ batch.delete(ref);
 try { await batch.commit(); alert('打卡紀錄已儲存！'); } catch (e) { alert('儲存失敗: ' + e.message); }
 };
 const downloadExcel = () => {
-let csvContent = "\uFEFF日期,星期,簽到,簽退,加班\n";
+let csvContent = "\uFEFF日期,星期,簽到,簽退,加班,備註\n";
 const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
 for (let i = 1; i <= daysInMonth; i++) {
 const dateStr = `${selectedMonth}-${String(i).padStart(2, '0')}`;
@@ -6023,20 +6098,32 @@ let aEnd = rec.end || '';
 if (morningState === 'official') {
 mStart = '出差'; mEnd = '出差';
 } else if (morningState === 'personal') {
-  mStart = '休息'; mEnd = '休息';
+  mStart = '休假'; mEnd = '休假';
 } else if (morningState === 'holiday') {
   mStart = '例假日'; mEnd = '例假日';
 }
 if (afternoonState === 'official') {
 aStart = '出差'; aEnd = '出差';
 } else if (afternoonState === 'personal') {
-  aStart = '休息'; aEnd = '休息';
+  aStart = '休假'; aEnd = '休假';
 } else if (afternoonState === 'holiday') {
   aStart = '例假日'; aEnd = '例假日';
 }
+// 備註：列出當日休假假別、時段、時數
+const csvRemarkParts = [];
+dayLeaves.forEach(dl => {
+  if (isRedDay) return;
+  const isOfficialDl = (leaveTypes || []).filter(t => t.category === 'official').map(t => t.name).includes(dl.type);
+  if (isOfficialDl) return;
+  const isAllDayDl = Number(dl.hours) >= 8;
+  const isMorningDl = dl.start.includes('T08') || dl.start.includes('T09');
+  const periodLabelDl = isAllDayDl ? '整天' : (isMorningDl ? '上午' : '下午');
+  csvRemarkParts.push(`${dl.type} ${periodLabelDl} ${dl.hours}小時`);
+});
+const csvRemark = csvRemarkParts.join(' / ');
 // 1個日期分兩列寫入，第一列為上午，第二列為下午 (達成四格排版)
-csvContent += `${dateStr},${dayName},${mStart},${mEnd},${overtimeText}\n`;
-csvContent += `,,${aStart},${aEnd},\n`;}
+csvContent += `${dateStr},${dayName},${mStart},${mEnd},${overtimeText},${csvRemark}\n`;
+csvContent += `,,${aStart},${aEnd},,\n`;}
 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
 const link = document.createElement("a");
 link.href = URL.createObjectURL(blob);
@@ -6070,6 +6157,7 @@ return (
 <th className="p-3 w-32">上班時間</th>
 <th className="p-3 w-32">下班時間</th>
 <th className="p-3 w-52">加班</th>
+<th className="p-3 w-48">備註</th>
 <th className="p-3"></th> {/* 吸收剩餘空間的空白欄 */}</tr></thead>
 <tbody>
 {[...Array(daysInMonth)].map((_, i) => {
@@ -6111,10 +6199,22 @@ const effectiveStart = isTimePointOverlapped(rec.start || "", overtimeRanges) ? 
 const effectiveEnd = isTimePointOverlapped(rec.end || "", overtimeRanges) ? "" : (rec.end || "");
 const renderInput = (type, val, field) => {
 if (type === 'official') return <span className="font-bold text-blue-600 px-2 block w-full max-w-[120px]">{field==='start' ? morningOfficialLabel : afternoonOfficialLabel}</span>;
-if (type === 'personal') return <span className="font-bold text-red-400 px-2 block w-full max-w-[120px]">休息</span>;
+if (type === 'personal') return <span className="font-bold text-red-400 px-2 block w-full max-w-[120px]">休假</span>;
 if (type === 'holiday') return <span className="font-bold text-gray-500 px-2 block w-full max-w-[120px]">例假日</span>;
 return <input type="time" className="border rounded p-1 w-full max-w-[120px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={val || ''} onChange={(e) => handleTimeChange(dateStr, field, e.target.value)} />;
 };
+// 備註：列出當日休假假別、時段、時數
+const remarkParts = [];
+dayLeaves.forEach(dl => {
+  if (isRedDay) return;
+  const isOfficialLeave = officialTypes.includes(dl.type);
+  if (isOfficialLeave) return; // 公務假別不列備註
+  const isAllDay = Number(dl.hours) >= 8;
+  const isMorning = dl.start.includes('T08') || dl.start.includes('T09');
+  const periodLabel = isAllDay ? '整天' : (isMorning ? '上午' : '下午');
+  remarkParts.push(`${dl.type} ${periodLabel} ${dl.hours}小時`);
+});
+const remarkText = remarkParts.join(' / ');
 return (
 <tr key={dateStr} className={`border-b ${isRedDay ? 'bg-red-50/30' : 'hover:bg-blue-50'}`}>
 <td className="p-3 font-medium whitespace-nowrap">
@@ -6127,6 +6227,7 @@ return (
 <td className="p-2">
 {renderInput(afternoonState, effectiveEnd, 'end')}</td>
 <td className="p-2 text-xs text-gray-700 whitespace-nowrap">{overtimeText}</td>
+<td className="p-2 text-xs text-red-500 whitespace-nowrap">{remarkText}</td>
 <td className="p-2"></td></tr>);
 })}</tbody></table></div>
 <div className="p-4 border-t bg-gray-50 flex justify-end">
