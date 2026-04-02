@@ -1288,7 +1288,7 @@ return (
 <option value={1}>本週</option><option value={2}>未來 2 週</option><option value={4}>未來 4 週</option></select></div>
 <div className="overflow-x-auto max-h-[400px]">
 <table className="w-full text-xs text-left">
-<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2">外勤內容</th><th className="p-2 w-36 border-l border-gray-200">休假人員</th></tr></thead>
+<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2 w-64">外勤內容</th><th className="p-2 w-36 border-l border-gray-200">休假人員</th></tr></thead>
 <tbody>
 {weekData.map((d, idx) => {
 const isMonday = d.day === '週一';
@@ -2792,7 +2792,7 @@ return (
 <div className="p-4 border-t bg-gray-50 rounded-b-xl flex gap-3">
 {editGroupId && (<button onClick={handleDeleteGroup} disabled={isSubmitting} className={`flex-1 bg-red-100 text-red-700 py-3 rounded-lg font-bold hover:bg-red-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>刪除行程</button>)}
 {editGroupId && (<button onClick={()=>handleModalSave(true)} disabled={isSubmitting} className={`flex-1 bg-amber-100 text-amber-800 py-3 rounded-lg font-bold hover:bg-amber-200 transition ${isSubmitting?'opacity-50 cursor-not-allowed':''}`}>改派人員</button>)}
-<button onClick={handleModalSave} disabled={isSubmitting} className={`flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900'}`}>
+<button onClick={() => handleModalSave(false)} disabled={isSubmitting} className={`flex-1 bg-slate-800 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2 ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-900'}`}>
 {isSubmitting ? <><RefreshCw className="animate-spin" size={18}/> 處理中...</> : <><CheckCircle size={18}/> {editGroupId ? '確認修改' : '儲存行程'}</>}</button></div></div></div>
 )}
 {importantModalOpen && (
@@ -3485,7 +3485,7 @@ return (
             <label className="text-xs font-bold text-gray-600">職代</label>
             <select className="w-full mt-1 border rounded-lg px-3 py-2 bg-gray-50" value={editForm.deputyId} onChange={(e)=>setEditForm(f=>({ ...f, deputyId:e.target.value }))}>
               <option value="">（可不填）</option>
-              {(users||[]).filter(u=> (u.uid||u.docId) !== (user.uid||user.docId)).map(u => (
+              {[...(users||[])].sort((a,b)=>(a?.joinDate||'9999').localeCompare(b?.joinDate||'9999')).filter(u=> (u.uid||u.docId) !== (user.uid||user.docId)).map(u => (
                 <option key={u.docId || u.uid} value={u.docId || u.uid}>{u.name}</option>
               ))}
             </select>
@@ -5149,7 +5149,7 @@ return (
 <div className="p-0 overflow-x-auto">
 <div className="p-3 bg-white border-b border-gray-200 flex flex-col md:flex-row gap-2 md:items-end md:justify-between">
 <div className="flex flex-col md:flex-row gap-2 flex-wrap">
-<div><div className="text-[11px] font-bold text-gray-500 mb-1">人員</div><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterUser} onChange={e=>setAllFilterUser(e.target.value)}><option value="all">全體</option>{users.map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
+<div><div className="text-[11px] font-bold text-gray-500 mb-1">人員</div><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterUser} onChange={e=>setAllFilterUser(e.target.value)}><option value="all">全體</option>{[...(users||[])].sort((a,b)=>(a?.joinDate||'9999').localeCompare(b?.joinDate||'9999')).map(u=><option key={u.docId} value={u.docId}>{u.name}</option>)}</select></div>
 <div><div className="text-[11px] font-bold text-gray-500 mb-1">月份區間</div><div className="flex gap-2"><input type="month" className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterStartMonth} onChange={e=>setAllFilterStartMonth(e.target.value)} /><span className="text-gray-400 self-center">~</span><input type="month" className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterEndMonth} onChange={e=>setAllFilterEndMonth(e.target.value)} /></div></div>
 <div><div className="text-[11px] font-bold text-gray-500 mb-1">假別</div><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterType} onChange={e=>setAllFilterType(e.target.value)}><option value="all">全部</option>{Array.from(new Set(leaves.map(l=>l.type))).map(t=><option key={t} value={t}>{t}</option>)}</select></div>
 <div><div className="text-[11px] font-bold text-gray-500 mb-1">狀態</div><select className="border p-2 rounded text-sm bg-gray-50 outline-none focus:bg-white" value={allFilterStatus} onChange={e=>setAllFilterStatus(e.target.value)}><option value="all">全部</option><option value="approved">已核准</option><option value="pending">待職代審</option><option value="deputy_signed">待組長審</option><option value="rejected">已退回</option><option value="withdrawn">已撤銷</option></select></div>
@@ -5269,8 +5269,8 @@ const [selectedUserId, setSelectedUserId] = useState(currentUser.docId);
 const [showOtherLeaves, setShowOtherLeaves] = useState(false); // 新增：控制其他假別展開
 const [usageTypeFilter,setUsageTypeFilter]=useState('all');
 const isAdminOrLeader = currentUser.role === 'admin' || currentUser.role === 'leader';
-const viewableUsers = users;
-const targetUser = users.find(u => u.docId === selectedUserId) || currentUser;
+const viewableUsers = useMemo(() => [...(users||[])].sort((a,b)=>(a?.joinDate||'9999').localeCompare(b?.joinDate||'9999')), [users]);
+const targetUser = viewableUsers.find(u => u.docId === selectedUserId) || currentUser;
 const getSeniorityStats = () => {
 if (!targetUser.joinDate) return { days: 0, text: '未設定到職日', warning: true };
 const joinDate = new Date(targetUser.joinDate);
@@ -5581,7 +5581,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   const [selectedUserId, setSelectedUserId] = useState('ALL'); // ALL = 全體
   const [showOther, setShowOther] = useState(false);
 
-  const viewableUsers = users || [];
+  const viewableUsers = useMemo(() => [...(users||[])].sort((a,b)=>(a?.joinDate||'9999').localeCompare(b?.joinDate||'9999')), [users]);
   const targetUser = selectedUserId === 'ALL' ? null : (viewableUsers.find(u => u.docId === selectedUserId) || currentUser);
 
   const yearOptions = [...Array(11)].map((_, i) => now.getFullYear() - 5 + i);
@@ -6695,7 +6695,7 @@ return (
     <span className="text-gray-600">人員</span>
     <select value={leaveFilterUser} onChange={e=>setLeaveFilterUser(e.target.value)} className="border rounded px-2 py-1">
       <option value="all">全部</option>
-      {(users||[]).map(u=> <option key={u.docId||u.uid} value={u.docId||u.uid}>{u.name}</option>)}
+      {[...(users||[])].sort((a,b)=>(a?.joinDate||'9999').localeCompare(b?.joinDate||'9999')).map(u=> <option key={u.docId||u.uid} value={u.docId||u.uid}>{u.name}</option>)}
     </select>
   </div>
   <div className="flex items-center gap-2">
