@@ -390,6 +390,9 @@ const DEFAULT_WORK_COLORS = {
 "大宗": "bg-orange-50 text-orange-900",
 "月報": "bg-amber-50 text-amber-900"
 };
+// 已廢除的假日清單（曾存進 Firestore / localStorage，現在強制移除）
+const REVOKED_HOLIDAYS = new Set(["2026-04-02"]);
+
 const DEFAULT_SPECIAL_HOLIDAYS = {
 "2026-02-27": "228補假",
 "2026-04-06": "清明節補假",
@@ -572,7 +575,9 @@ const savedHolidays = localStorage.getItem('customHolidays');
 if(savedHolidays) {
 try {
 const parsed = JSON.parse(savedHolidays);
-setSettings(prev => ({ ...prev, customHolidays: { ...DEFAULT_SPECIAL_HOLIDAYS, ...parsed}}));
+// 直接使用 localStorage 的值，並強制移除已廢除假日（避免舊快取帶回來）
+REVOKED_HOLIDAYS.forEach(d => delete parsed[d]);
+setSettings(prev => ({ ...prev, customHolidays: parsed }));
 } catch(e) {
 setSettings(prev => ({ ...prev, customHolidays: { ...DEFAULT_SPECIAL_HOLIDAYS}}));
 }
@@ -677,7 +682,15 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const merged = {
       areaColors: { ...DEFAULT_AREA_COLORS, ...(remote.areaColors || {}) },
       workColors: { ...DEFAULT_WORK_COLORS, ...(remote.workColors || {}) },
-      customHolidays: (remote.customHolidays !== null && remote.customHolidays !== undefined) ? remote.customHolidays : { ...DEFAULT_SPECIAL_HOLIDAYS },
+      customHolidays: (() => {
+        // 取 Firestore 的值（信任 Firestore，不再合併預設值）
+        const base = (remote.customHolidays !== null && remote.customHolidays !== undefined)
+          ? { ...remote.customHolidays }
+          : { ...DEFAULT_SPECIAL_HOLIDAYS };
+        // 強制移除已廢除的假日（清除 Firestore / 舊版本殘留）
+        REVOKED_HOLIDAYS.forEach(d => delete base[d]);
+        return base;
+      })(),
       sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID
     };
     const remoteRoleNames = { ...DEFAULT_ROLE_NAMES, ...(remote.roleNames || {}) };
@@ -700,7 +713,9 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     localStorage.setItem('workTags', JSON.stringify(remoteWorkTags));
     localStorage.setItem('areaTags', JSON.stringify(remoteAreaTags));
     localStorage.setItem('leaveTypes', JSON.stringify(remoteLeaveTypes));
-    const missing = !('customHolidays' in remote); // Only seed once on first-time setup; admin manages holidays explicitly
+    // 需要寫回 Firestore 的條件：(1) 首次設定（key 不存在），或 (2) Firestore 中仍有廢除假日殘留
+    const hasRevokedInFirestore = remote.customHolidays && [...REVOKED_HOLIDAYS].some(d => d in remote.customHolidays);
+    const missing = !('customHolidays' in remote) || hasRevokedInFirestore;
     const missingWork = Object.keys(DEFAULT_WORK_COLORS).some(k => !(k in (remote.workColors || {})));
     const missingRoleNames = Object.keys(DEFAULT_ROLE_NAMES).some(k => !(k in (remote.roleNames || {})));
     const missingRotationRules = !Array.isArray(remote.rotationRules) || remote.rotationRules.length === 0;
@@ -1128,7 +1143,21 @@ const externalGroups = Object.values(groupMap)
     };
   })
   .sort((a, b) => a.startTime.localeCompare(b.startTime));
-week.push({ day: weekDays[d.getDay()], date: dStr, externalGroups });}
+// 收集當日休假人員（含時段）
+const leavePersonnel = (leaves || [])
+  .filter(l => {
+    if (l.status !== 'approved') return false;
+    if (!personalLeaveTypeNames.includes(l.type)) return false;
+    const startDate = String(l.start || '').slice(0, 10);
+    const endDate = String(l.end || l.start || '').slice(0, 10);
+    return startDate <= dStr && dStr <= endDate;
+  })
+  .map(l => {
+    const hrs = Number(l.hours || 0);
+    const period = hrs >= 8 ? '整天' : (String(l.start || '').includes('T08') || String(l.start || '').includes('T09') ? '上午' : '下午');
+    return { name: l.requesterName, period };
+  });
+week.push({ day: weekDays[d.getDay()], date: dStr, externalGroups, leavePersonnel });}
 return week;
 };
 const weekData = getWeekData();
@@ -1259,15 +1288,22 @@ return (
 <option value={1}>本週</option><option value={2}>未來 2 週</option><option value={4}>未來 4 週</option></select></div>
 <div className="overflow-x-auto max-h-[400px]">
 <table className="w-full text-xs text-left">
-<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2">外勤內容</th></tr></thead>
+<thead className="sticky top-0 bg-white z-10 shadow-sm"><tr className="bg-gray-50 border-b text-gray-500"><th className="p-2 w-20">日期</th><th className="p-2">外勤內容</th><th className="p-2 w-36 border-l border-gray-200">休假人員</th></tr></thead>
 <tbody>
 {weekData.map((d, idx) => {
 const isMonday = d.day === '週一';
+const isToday = d.date === todayStr;
 return (
 <React.Fragment key={idx}>
-{isMonday && idx !== 0 && <tr><td colSpan="2" className="bg-gray-100/50 py-1"></td></tr>}
-<tr className={`border-b last:border-0 hover:bg-gray-50 transition align-top ${isMonday ? 'border-t-2 border-t-gray-200' : ''}`}>
-<td className="p-2 font-bold text-gray-600 whitespace-nowrap">{d.day} <span className="text-[10px] block font-normal">{d.date.slice(5)}</span></td>
+{isMonday && idx !== 0 && <tr><td colSpan="3" className="bg-gray-100/50 py-1"></td></tr>}
+<tr className={`border-b last:border-0 transition align-top ${isToday ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-50'} ${isMonday ? 'border-t-2 border-t-gray-200' : ''}`}>
+<td className="p-2 whitespace-nowrap">
+  <div className={`font-bold whitespace-nowrap ${isToday ? 'text-yellow-700' : 'text-gray-600'}`}>
+    {d.day}
+    {isToday && <span className="ml-1 text-[9px] bg-yellow-400 text-yellow-900 font-black px-1 py-0.5 rounded">今日</span>}
+  </div>
+  <span className={`text-[10px] font-normal ${isToday ? 'text-yellow-600' : 'text-gray-400'}`}>{d.date.slice(5)}</span>
+</td>
 <td className="p-2">
   {d.externalGroups.length === 0 ? <span className="text-gray-300">—</span> : (
     <div className="flex flex-col gap-1.5">
@@ -1289,7 +1325,20 @@ return (
       })}
     </div>
   )}
-</td></tr></React.Fragment>
+</td>
+<td className="p-2 border-l border-gray-100">
+  {d.leavePersonnel.length === 0 ? <span className="text-gray-300">—</span> : (
+    <div className="flex flex-col gap-1">
+      {d.leavePersonnel.map((lp, li) => (
+        <span key={li} className="inline-flex items-center gap-1 bg-green-50 border border-green-200 text-green-800 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap w-fit">
+          {lp.name}
+          <span className="text-green-500 font-bold">{lp.period}</span>
+        </span>
+      ))}
+    </div>
+  )}
+</td>
+</tr></React.Fragment>
 )})}</tbody></table></div></div></div>);}
 function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
 const [date, setDate] = useState(new Date());
