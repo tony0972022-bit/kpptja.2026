@@ -6106,6 +6106,26 @@ batch.delete(ref);
 });
 try { await batch.commit(); alert('打卡紀錄已儲存！'); } catch (e) { alert('儲存失敗: ' + e.message); }
 };
+// helper：計算多日假單中某天的實際時數與時段（第一天/中間/最後一天分別處理）
+const calcDailyLeaveInfo = (dl, dStr) => {
+  const totalHours = Number(dl.hours || 0);
+  const lsStr = String(dl.start || '').slice(0, 10);
+  const leStr = String(dl.end || dl.start || '').slice(0, 10);
+  if (!lsStr) return { hours: totalHours, period: '整天' };
+  if (!leStr || lsStr === leStr) {
+    const isMorn = (dl.start || '').includes('T08') || (dl.start || '').includes('T09');
+    return { hours: totalHours, period: totalHours >= 8 ? '整天' : (isMorn ? '上午' : '下午') };
+  }
+  const startH = parseInt(String(dl.start || '').slice(11, 13)) || 8;
+  const endH = parseInt(String(dl.end || '').slice(11, 13)) || 17;
+  const isFirst = dStr === lsStr;
+  const isLast = dStr === leStr;
+  let h, period;
+  if (isFirst) { h = startH >= 13 ? 4 : 8; period = h >= 8 ? '整天' : '下午'; }
+  else if (isLast) { h = endH <= 12 ? 4 : 8; period = h >= 8 ? '整天' : '上午'; }
+  else { h = 8; period = '整天'; }
+  return { hours: h, period };
+};
 const downloadExcel = () => {
 let csvContent = "\uFEFF日期,星期,簽到,簽退,加班,備註\n";
 const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
@@ -6158,34 +6178,6 @@ aStart = '出差'; aEnd = '出差';
 } else if (afternoonState === 'holiday') {
   aStart = '例假日'; aEnd = '例假日';
 }
-// 備註：列出當日休假假別、時段、時數（連休假單依位置計算當日時數）
-const calcDailyLeaveInfo = (dl, dStr) => {
-  const totalHours = Number(dl.hours || 0);
-  const lsStr = String(dl.start || '').slice(0, 10);
-  const leStr = String(dl.end || dl.start || '').slice(0, 10);
-  if (!lsStr) return { hours: totalHours, period: '整天' };
-  if (!leStr || lsStr === leStr) {
-    // 單日假
-    const isMorn = dl.start.includes('T08') || dl.start.includes('T09');
-    return { hours: totalHours, period: totalHours >= 8 ? '整天' : (isMorn ? '上午' : '下午') };
-  }
-  // 多日假：依當日位置判斷
-  const startH = parseInt(String(dl.start || '').slice(11, 13)) || 8;
-  const endH = parseInt(String(dl.end || '').slice(11, 13)) || 17;
-  const isFirst = dStr === lsStr;
-  const isLast = dStr === leStr;
-  let h, period;
-  if (isFirst) {
-    h = startH >= 13 ? 4 : 8;
-    period = h >= 8 ? '整天' : '下午';
-  } else if (isLast) {
-    h = endH <= 12 ? 4 : 8;
-    period = h >= 8 ? '整天' : '上午';
-  } else {
-    h = 8; period = '整天';
-  }
-  return { hours: h, period };
-};
 const csvRemarkParts = [];
 dayLeaves.forEach(dl => {
   if (isRedDay) return;
