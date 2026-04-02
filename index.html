@@ -6252,16 +6252,29 @@ if (type === 'personal') return <span className="font-bold text-red-400 px-2 blo
 if (type === 'holiday') return <span className="font-bold text-gray-500 px-2 block w-full max-w-[120px]">例假日</span>;
 return <input type="time" className="border rounded p-1 w-full max-w-[120px] bg-white focus:ring-2 focus:ring-blue-300 outline-none" value={val || ''} onChange={(e) => handleTimeChange(dateStr, field, e.target.value)} />;
 };
-// 備註：列出當日休假假別、時段、時數
+// 備註：列出當日休假假別、時段、時數（連休假單需換算每日時數）
 const remarkParts = [];
 dayLeaves.forEach(dl => {
   if (isRedDay) return;
   const isOfficialLeave = officialTypes.includes(dl.type);
   if (isOfficialLeave) return; // 公務假別不列備註
-  const isAllDay = Number(dl.hours) >= 8;
+  const totalHours = Number(dl.hours || 0);
+  // 計算假單跨越天數，推算每日時數
+  const leaveStartStr = String(dl.start || '').slice(0, 10);
+  const leaveEndStr = String(dl.end || dl.start || '').slice(0, 10);
+  let dailyHours = totalHours;
+  if (leaveStartStr && leaveEndStr && leaveStartStr !== leaveEndStr) {
+    const sD = new Date(leaveStartStr + 'T00:00');
+    const eD = new Date(leaveEndStr + 'T00:00');
+    let spanDays = 0;
+    const cur = new Date(sD);
+    while (cur <= eD) { spanDays++; cur.setDate(cur.getDate() + 1); }
+    if (spanDays > 1) dailyHours = totalHours / spanDays;
+  }
+  const isAllDay = dailyHours >= 8;
   const isMorning = dl.start.includes('T08') || dl.start.includes('T09');
   const periodLabel = isAllDay ? '整天' : (isMorning ? '上午' : '下午');
-  remarkParts.push(`${dl.type} ${periodLabel} ${dl.hours}小時`);
+  remarkParts.push(`${dl.type} ${periodLabel} ${dailyHours % 1 === 0 ? dailyHours : dailyHours.toFixed(1)}小時`);
 });
 const remarkText = remarkParts.join(' / ');
 return (
