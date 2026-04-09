@@ -892,7 +892,8 @@ await Promise.all(toDel.map(e => deleteDoc(doc(db, 'artifacts', APP_ID, 'public'
 createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
 updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
 deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id)),
-saveMeetingNote: async (groupId, note) => setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes', groupId), { note, updatedAt: new Date() }, { merge: true })
+saveMeetingNote: async (groupId, note) => setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes', groupId), { note, updatedAt: new Date() }, { merge: true }),
+updateLeaveExtra: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), data)
 };
 const handleSaveMeetingSelectedItems = async (selectedItems) => {
   setMeetingSelectedItems(selectedItems);
@@ -3557,8 +3558,9 @@ return (
 <h2 className="text-xl font-bold flex items-center gap-2"><FileText/> 請假與職代狀況</h2>
 <div className="flex bg-gray-100 p-1 rounded-lg">
 <button onClick={() => setActiveTab('mine')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'mine' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第一區：個人請假狀況</button>
-<button onClick={() => setActiveTab('deputy')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'deputy' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第二區：我是職代</button></div></div>
-<div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+<button onClick={() => setActiveTab('deputy')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'deputy' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>第二區：我是職代</button>
+<button onClick={() => setActiveTab('records')} className={`px-4 py-2 text-sm font-bold rounded-md transition ${activeTab === 'records' ? 'bg-white shadow text-emerald-600' : 'text-gray-500 hover:bg-gray-200'}`}>第三區：個人差勤紀錄</button></div></div>
+{activeTab !== 'records' && <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
 <div className="flex bg-gray-100 p-1 rounded-lg">
   <button
     onClick={()=>{
@@ -3594,7 +3596,7 @@ return (
 <select value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)} className="border p-2 rounded text-sm bg-white flex-1 md:flex-none"><option value="all">所有假別/出勤</option><optgroup label="公務與加班">{leaveTypes.filter(t=>t.category==='official').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup><optgroup label="私假">{leaveTypes.filter(t=>t.category==='personal').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</optgroup></select>
 <button onClick={downloadBatchICS} className="bg-indigo-600 text-white px-3 py-2 rounded flex items-center gap-1 text-sm hover:bg-indigo-700 transition" title="批次加入行事曆"><CalendarPlus size={16}/></button>
 <button onClick={exportCSV} className="bg-green-600 text-white px-3 py-2 rounded flex items-center gap-1 text-sm hover:bg-green-700 transition" title="匯出 Excel"><FileSpreadsheet size={16}/></button></>
-)}</div></div>
+)}</div>}</div>
 {activeTab === 'mine' ? (
 <div className="bg-white rounded-lg shadow-sm overflow-x-auto animate-in fade-in border border-gray-200">
 <table className="w-full text-left">
@@ -3662,7 +3664,7 @@ return (<>
 )
 })}
 {filteredRows.length === 0 && <tr><td colSpan="11" className="p-8 text-center text-gray-400">尚無符合條件的出勤資料</td></tr>}</tbody></table></div>
-) : (
+) : activeTab === 'deputy' ? (
 <div className="bg-white rounded-lg shadow-sm overflow-x-auto animate-in fade-in border border-gray-200">
 <table className="w-full text-left">
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -3710,7 +3712,11 @@ return (
 );
 }) : <tr><td colSpan="12" className="p-8 text-center text-gray-400">目前沒有需要您擔任職代的假單。</td></tr>}
 </tbody></table></div>
-)}</div>);}
+) : null}
+{activeTab === 'records' && (
+  <Block3PersonalRecords user={user} users={users} leaves={leaves} crud={crud} leaveTypes={leaveTypes} />
+)}
+</div>);}
 const PendingLeaveCard = ({ task, leaveTypes, deputies, onSubmit, isSubmitting }) => {
 const officialTypes = leaveTypes.filter(t => t.category === 'official');
 const overtimeTypeName = officialTypes.find(t => (t.name||'').includes('加班'))?.name || '加班';
@@ -4982,6 +4988,316 @@ return (
 );
 
 }
+
+// ── Block3PersonalRecords：個人差勤紀錄區 ──
+function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
+  const [openBlock3, setOpenBlock3] = useState(true);
+  const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
+  // inline edit state: { id: { remark, schoolDone, paymentDone, paymentAmount } }
+  const [editing, setEditing] = useState({});
+  const [saving, setSaving] = useState({});
+
+  // 過濾出自己的假單
+  const myLeaves = useMemo(() => {
+    const myName = user?.name || '';
+    const myEmail = (user?.email || '').toLowerCase();
+    return (leaves || [])
+      .filter(lv => {
+        const nm = lv.requesterName || lv.userName || '';
+        const em = (lv.requesterEmail || lv.userEmail || '').toLowerCase();
+        return nm === myName || em === myEmail;
+      })
+      .filter(lv => String(lv.start || lv.date || '').startsWith(yearFilter))
+      .sort((a, b) => String(b.start || b.date || '').localeCompare(String(a.start || a.date || '')));
+  }, [leaves, user, yearFilter]);
+
+  const yearOptions = useMemo(() => {
+    const cur = new Date().getFullYear();
+    const yrs = new Set([String(cur), String(cur - 1)]);
+    (leaves || []).forEach(lv => { const y = String(lv.start || lv.date || '').slice(0, 4); if (y) yrs.add(y); });
+    return [...yrs].sort((a, b) => b.localeCompare(a));
+  }, [leaves]);
+
+  // 請款總計（只計 paymentDone=true 的）
+  const paymentTotal = useMemo(() =>
+    myLeaves.reduce((sum, lv) => {
+      const amt = parseFloat((editing[lv.id]?.paymentAmount ?? lv.paymentAmount) || 0);
+      return sum + (isNaN(amt) ? 0 : amt);
+    }, 0)
+  , [myLeaves, editing]);
+
+  const getField = (lv, field) =>
+    field in (editing[lv.id] || {}) ? editing[lv.id][field] : (lv[field] ?? '');
+
+  const startEdit = (lv, field, val) => {
+    setEditing(prev => ({ ...prev, [lv.id]: { ...(prev[lv.id] || {}), [field]: val } }));
+  };
+
+  const saveField = async (lv, field) => {
+    const val = editing[lv.id]?.[field];
+    if (val === undefined) return;
+    setSaving(prev => ({ ...prev, [`${lv.id}_${field}`]: true }));
+    try {
+      await crud.updateLeaveExtra(lv.id, { [field]: val });
+    } catch(e) { alert('儲存失敗：' + (e?.message || e)); }
+    finally { setSaving(prev => ({ ...prev, [`${lv.id}_${field}`]: false })); }
+  };
+
+  const toggleBool = async (lv, field) => {
+    const cur = lv[field] ?? false;
+    const next = !cur;
+    setSaving(prev => ({ ...prev, [`${lv.id}_${field}`]: true }));
+    try {
+      await crud.updateLeaveExtra(lv.id, { [field]: next });
+    } catch(e) { alert('儲存失敗：' + (e?.message || e)); }
+    finally { setSaving(prev => ({ ...prev, [`${lv.id}_${field}`]: false })); }
+  };
+
+  const clearPayment = async (lv) => {
+    setSaving(prev => ({ ...prev, [`${lv.id}_paymentAmount`]: true }));
+    try {
+      await crud.updateLeaveExtra(lv.id, { paymentAmount: '' });
+      setEditing(prev => {
+        const n = { ...prev };
+        if (n[lv.id]) { delete n[lv.id].paymentAmount; }
+        return n;
+      });
+    } catch(e) { alert('刪除失敗：' + (e?.message || e)); }
+    finally { setSaving(prev => ({ ...prev, [`${lv.id}_paymentAmount`]: false })); }
+  };
+
+  const fmtDateRange = (lv) => {
+    const s = String(lv.start || lv.date || '').replace('T', ' ').slice(0, 16);
+    const e = String(lv.end || '').replace('T', ' ').slice(0, 16);
+    if (!s) return '—';
+    if (!e || s === e) return s;
+    // same date → show only time range
+    const sd = s.slice(0, 10), ed = e.slice(0, 10);
+    if (sd === ed) return `${sd} ${s.slice(11)}～${e.slice(11)}`;
+    return `${s}～${e.slice(5)}`;
+  };
+
+  const findDeputyName = (lv) => {
+    if (lv.deputyName) return lv.deputyName;
+    if (lv.deputySignedByName) return lv.deputySignedByName;
+    const did = lv.deputyId || '';
+    if (!did) return '—';
+    const u = (users || []).find(u => (u.docId || u.uid || '').toLowerCase() === did.toLowerCase());
+    return u?.name || '—';
+  };
+
+  // Excel 匯出
+  const handleExport = () => {
+    const XLSX = window.XLSX;
+    if (!XLSX) { alert('Excel 匯出套件未載入，請重新整理頁面後再試。'); return; }
+    const rows = myLeaves.map(lv => ({
+      '姓名': user?.name || '',
+      '日期': fmtDateRange(lv).slice(0, 10),
+      '時間': fmtDateRange(lv).slice(11) || '—',
+      '假別': lv.type || '—',
+      '時數': lv.hours != null ? lv.hours : '—',
+      '職代': findDeputyName(lv),
+      '事由': lv.reason || lv.note || '—',
+      '備註': lv.remark || '',
+      '學校完成': lv.schoolDone ? '✓' : '',
+      '請款完成': lv.paymentDone ? '✓' : '',
+      '請款金額': lv.paymentAmount != null && lv.paymentAmount !== '' ? Number(lv.paymentAmount) : '',
+    }));
+    // 加合計列
+    rows.push({
+      '姓名': '', '日期': '', '時間': '', '假別': '', '時數': '', '職代': '', '事由': '',
+      '備註': '', '學校完成': '', '請款完成': '合計',
+      '請款金額': myLeaves.reduce((s, lv) => s + (parseFloat(lv.paymentAmount) || 0), 0),
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [10,12,14,10,6,8,20,16,8,8,10].map(w => ({ wch: w }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `差勤紀錄_${yearFilter}`);
+    XLSX.writeFile(wb, `差勤紀錄_${user?.name||'個人'}_${yearFilter}.xlsx`);
+  };
+
+  const statusBadge = (lv) => {
+    const s = lv.status;
+    if (s === 'approved') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700">核准</span>;
+    if (s === 'rejected') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">退回</span>;
+    if (s === 'pending_deputy') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-700">待職代</span>;
+    return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">待審</span>;
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-emerald-200 overflow-hidden">
+      {/* 標頭 */}
+      <button type="button" onClick={() => setOpenBlock3(v => !v)}
+        className="w-full flex items-center justify-between px-6 py-4 text-left bg-emerald-50 hover:bg-emerald-100 transition">
+        <div className="flex items-center gap-2 font-black text-emerald-900 text-lg">
+          <List size={22}/> 第三區塊：個人差勤紀錄區
+        </div>
+        <ChevronDown className={`transition-transform text-emerald-700 ${openBlock3 ? '' : '-rotate-90'}`} />
+      </button>
+
+      {openBlock3 && (
+        <div className="p-4">
+          {/* 工具列 */}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-gray-500">年份</span>
+              <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-300 outline-none"
+                value={yearFilter} onChange={e => setYearFilter(e.target.value)}>
+                {yearOptions.map(y => <option key={y} value={y}>{y} 年</option>)}
+              </select>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <div className="text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+                請款總計：<span className="text-emerald-700 text-base">${paymentTotal.toLocaleString()}</span>
+              </div>
+              <button onClick={handleExport}
+                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 shadow transition">
+                <Download size={15}/> 匯出 Excel
+              </button>
+            </div>
+          </div>
+
+          {myLeaves.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">
+              <Calendar size={36} className="mx-auto mb-2 opacity-30"/>
+              <p className="font-bold">{yearFilter} 年尚無差勤紀錄</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left min-w-[900px]">
+                <thead className="bg-gray-50 text-gray-600 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold w-16">狀態</th>
+                    <th className="px-3 py-2 font-semibold w-28">日期</th>
+                    <th className="px-3 py-2 font-semibold w-28">時間</th>
+                    <th className="px-3 py-2 font-semibold w-20">假別</th>
+                    <th className="px-3 py-2 font-semibold w-12 text-center">時數</th>
+                    <th className="px-3 py-2 font-semibold w-16">職代</th>
+                    <th className="px-3 py-2 font-semibold max-w-[120px]">事由</th>
+                    <th className="px-3 py-2 font-semibold min-w-[110px]">備註</th>
+                    <th className="px-3 py-2 font-semibold text-center w-16">學校<br/>完成</th>
+                    <th className="px-3 py-2 font-semibold text-center w-16">請款<br/>完成</th>
+                    <th className="px-3 py-2 font-semibold w-28">請款金額</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {myLeaves.map(lv => {
+                    const dateStr = fmtDateRange(lv);
+                    const datePart = dateStr.slice(0, 10);
+                    const timePart = dateStr.includes('～') ? dateStr.slice(11) : dateStr.slice(11) || '整天';
+                    const payAmt = getField(lv, 'paymentAmount');
+                    const remarkVal = getField(lv, 'remark');
+                    const isEditingRemark = editing[lv.id] && 'remark' in editing[lv.id];
+                    const isEditingPay = editing[lv.id] && 'paymentAmount' in editing[lv.id];
+                    return (
+                      <tr key={lv.id} className="hover:bg-gray-50 transition">
+                        <td className="px-3 py-2">{statusBadge(lv)}</td>
+                        <td className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">{datePart}</td>
+                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{timePart}</td>
+                        <td className="px-3 py-2">
+                          <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 rounded text-[11px] font-bold">{lv.type || '—'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-700 font-medium">{lv.hours != null ? lv.hours : '—'}</td>
+                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{findDeputyName(lv)}</td>
+                        <td className="px-3 py-2 text-gray-500 max-w-[120px] truncate" title={lv.reason||lv.note||''}>{lv.reason || lv.note || '—'}</td>
+
+                        {/* 備註：inline edit */}
+                        <td className="px-3 py-2">
+                          {isEditingRemark ? (
+                            <div className="flex flex-col gap-1">
+                              <textarea
+                                className="border border-indigo-300 rounded px-1.5 py-1 text-xs w-full focus:ring-1 focus:ring-indigo-300 outline-none resize-none min-h-[48px]"
+                                value={remarkVal}
+                                onChange={e => startEdit(lv, 'remark', e.target.value)}
+                                autoFocus
+                              />
+                              <div className="flex gap-1">
+                                <button onClick={() => saveField(lv, 'remark')} disabled={saving[`${lv.id}_remark`]}
+                                  className="px-2 py-0.5 text-[10px] bg-indigo-600 text-white rounded font-bold">
+                                  {saving[`${lv.id}_remark`] ? '…' : '儲存'}
+                                </button>
+                                <button onClick={() => setEditing(prev => { const n={...prev}; if(n[lv.id]) delete n[lv.id].remark; return n; })}
+                                  className="px-2 py-0.5 text-[10px] border rounded text-gray-600">取消</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="group flex items-center gap-1 cursor-pointer" onClick={() => startEdit(lv, 'remark', lv.remark || '')}>
+                              <span className={`flex-1 line-clamp-2 ${lv.remark ? 'text-gray-700' : 'text-gray-300'}`}>{lv.remark || '點擊編輯…'}</span>
+                              <Edit size={11} className="text-gray-300 group-hover:text-indigo-500 flex-shrink-0"/>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 學校完成 checkbox */}
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox"
+                            className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                            checked={!!lv.schoolDone}
+                            disabled={!!saving[`${lv.id}_schoolDone`]}
+                            onChange={() => toggleBool(lv, 'schoolDone')}
+                          />
+                        </td>
+
+                        {/* 請款完成 checkbox */}
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox"
+                            className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                            checked={!!lv.paymentDone}
+                            disabled={!!saving[`${lv.id}_paymentDone`]}
+                            onChange={() => toggleBool(lv, 'paymentDone')}
+                          />
+                        </td>
+
+                        {/* 請款金額：inline edit + 清除 */}
+                        <td className="px-3 py-2">
+                          {isEditingPay ? (
+                            <div className="flex flex-col gap-1">
+                              <input type="number" min="0" step="1"
+                                className="border border-indigo-300 rounded px-1.5 py-1 text-xs w-full focus:ring-1 focus:ring-indigo-300 outline-none"
+                                value={payAmt}
+                                onChange={e => startEdit(lv, 'paymentAmount', e.target.value)}
+                                onKeyDown={e => { if(e.key==='Enter') saveField(lv, 'paymentAmount'); if(e.key==='Escape') setEditing(prev => { const n={...prev}; if(n[lv.id]) delete n[lv.id].paymentAmount; return n; }); }}
+                                autoFocus
+                              />
+                              <div className="flex gap-1">
+                                <button onClick={() => saveField(lv, 'paymentAmount')} disabled={saving[`${lv.id}_paymentAmount`]}
+                                  className="px-2 py-0.5 text-[10px] bg-indigo-600 text-white rounded font-bold">
+                                  {saving[`${lv.id}_paymentAmount`] ? '…' : '儲存'}
+                                </button>
+                                <button onClick={() => setEditing(prev => { const n={...prev}; if(n[lv.id]) delete n[lv.id].paymentAmount; return n; })}
+                                  className="px-2 py-0.5 text-[10px] border rounded text-gray-600">取消</button>
+                                <button onClick={() => clearPayment(lv)} disabled={saving[`${lv.id}_paymentAmount`]}
+                                  className="px-2 py-0.5 text-[10px] border border-red-200 text-red-500 rounded hover:bg-red-50">清除</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="group flex items-center gap-1 cursor-pointer" onClick={() => startEdit(lv, 'paymentAmount', lv.paymentAmount ?? '')}>
+                              <span className={`${lv.paymentAmount != null && lv.paymentAmount !== '' ? 'text-emerald-700 font-bold' : 'text-gray-300'}`}>
+                                {lv.paymentAmount != null && lv.paymentAmount !== '' ? `$${Number(lv.paymentAmount).toLocaleString()}` : '點擊輸入…'}
+                              </span>
+                              <Edit size={11} className="text-gray-300 group-hover:text-indigo-500 flex-shrink-0"/>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-emerald-50 font-bold border-t-2 border-emerald-200">
+                    <td colSpan={10} className="px-3 py-2 text-right text-sm text-emerald-800">請款金額合計</td>
+                    <td className="px-3 py-2 text-emerald-700 font-black text-sm">${paymentTotal.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApprovalView({ leaves, currentUser, crud, users, leaveTypes, events, db }) {
 const [processingId, setProcessingId] = useState(null);
 const [selectedLeaderIds, setSelectedLeaderIds] = useState([]);
