@@ -5020,10 +5020,12 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   const [filterMonthFrom, setFilterMonthFrom] = useState('1');
   const [filterMonthTo, setFilterMonthTo] = useState('12');
 
-  // 從 user profile 讀取已儲存的篩選（null=全選）
+  // 從 user profile 讀取已儲存的篩選（null=全選，undefined=尚未設定→預設公出+出差）
+  const DEFAULT_FILTER = ['公出', '出差'];
   const parseBlockFilter = (raw) => {
-    if (!raw || raw === '__all__') return null;
-    return Array.isArray(raw) ? raw : null;
+    if (raw === undefined) return DEFAULT_FILTER;   // 未曾儲存過 → 預設公出+出差
+    if (raw === '__all__' || raw === null) return null; // 明確選全選
+    return Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_FILTER;
   };
   const [filterTypes, setFilterTypes] = useState(() => parseBlockFilter(user?.block3FilterTypes));
   // 若 user profile 非同步載入完成，同步更新一次（僅第一次有值時）
@@ -5038,6 +5040,7 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [savingPref, setSavingPref] = useState(false);
   const [savedPref, setSavedPref] = useState(false); // 顯示「已儲存」提示
+  const isFirstYearMount = useRef(true); // 跳過 yearFilter effect 初次執行
   // inline edit: { id: { remark, schoolDone, paymentDone, paymentAmount } }
   const [editing, setEditing] = useState({});
   const [saving, setSaving] = useState({});
@@ -5062,8 +5065,11 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
     return [...s].sort();
   }, [allMyLeaves, yearFilter]);
 
-  // 切換年份時重置假別篩選
-  useEffect(() => { setFilterTypes(null); }, [yearFilter]);
+  // 切換年份時重置假別篩選（跳過初次 mount，避免蓋掉已儲存設定）
+  useEffect(() => {
+    if (isFirstYearMount.current) { isFirstYearMount.current = false; return; }
+    setFilterTypes(null);
+  }, [yearFilter]);
 
   // ── 套用篩選後的假單 ──
   const myLeaves = useMemo(() => {
