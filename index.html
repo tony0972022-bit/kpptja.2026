@@ -8,6 +8,8 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- Babel for in-browser JSX compilation -->
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- SheetJS for Excel export -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <!-- Import Map for ES Modules -->
 <script type="importmap">
 {
@@ -4815,7 +4817,7 @@ return (
 
     {/* 送出前確認視窗：第一區塊/第二區塊共用 */}
     {confirmOpen && confirmData && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-indigo-100 overflow-hidden">
           <div className="px-5 py-4 bg-indigo-50 border-b border-indigo-100">
             <div className="text-lg font-black text-indigo-900">送出前確認</div>
@@ -6901,6 +6903,11 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
   const [editingNote, setEditingNote] = useState({}); // { groupId: text }
   const [savingNote, setSavingNote] = useState({});   // { groupId: bool }
 
+  // ── 清單篩選：工作項目 & 月份區間 ──
+  const [filterWorkItem, setFilterWorkItem] = useState('all');
+  const [filterMonthFrom, setFilterMonthFrom] = useState('1');
+  const [filterMonthTo, setFilterMonthTo] = useState('12');
+
   // ── 從 calendarEvents 組出「分組後的行程」 ──
   const groupedRows = useMemo(() => {
     const groups = {};
@@ -6919,13 +6926,22 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
     return Object.values(groups).filter(g => g.date && g.workItem);
   }, [calendarEvents]);
 
-  // ── 根據勾選的工作項目 + 年份篩選 ──
+  // ── 根據勾選的工作項目 + 年份 + 清單篩選 ──
   const filteredRows = useMemo(() => {
     const sel = meetingSelectedItems || [];
+    const mFrom = Number(filterMonthFrom);
+    const mTo = Number(filterMonthTo);
     return groupedRows
-      .filter(g => sel.includes(g.workItem) && String(g.date).startsWith(yearFilter))
+      .filter(g => {
+        if (!sel.includes(g.workItem)) return false;
+        if (!String(g.date).startsWith(yearFilter)) return false;
+        const mo = Number(String(g.date).slice(5, 7));
+        if (mo < mFrom || mo > mTo) return false;
+        if (filterWorkItem !== 'all' && g.workItem !== filterWorkItem) return false;
+        return true;
+      })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [groupedRows, meetingSelectedItems, yearFilter]);
+  }, [groupedRows, meetingSelectedItems, yearFilter, filterWorkItem, filterMonthFrom, filterMonthTo]);
 
   // 可用年份清單（從 calendarEvents 推導）
   const yearOptions = useMemo(() => {
@@ -7013,6 +7029,32 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
         {/* ───── Tab 1: 記錄清單 ───── */}
         {activeTab === 'list' && (
           <div className="p-4">
+            {/* 篩選列 */}
+            {(meetingSelectedItems || []).length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 mb-4 pb-4 border-b border-gray-100">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-gray-500 whitespace-nowrap">工作項目</span>
+                  <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                    value={filterWorkItem} onChange={e => setFilterWorkItem(e.target.value)}>
+                    <option value="all">全部</option>
+                    {(meetingSelectedItems || []).map(item => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-gray-500 whitespace-nowrap">月份區間</span>
+                  <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                    value={filterMonthFrom} onChange={e => { const v = e.target.value; setFilterMonthFrom(v); if (Number(filterMonthTo) < Number(v)) setFilterMonthTo(v); }}>
+                    {Array.from({length:12},(_,i)=><option key={i+1} value={String(i+1)}>{i+1} 月</option>)}
+                  </select>
+                  <span className="text-xs text-gray-400">至</span>
+                  <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                    value={filterMonthTo} onChange={e => { const v = e.target.value; setFilterMonthTo(v); if (Number(filterMonthFrom) > Number(v)) setFilterMonthFrom(v); }}>
+                    {Array.from({length:12},(_,i)=><option key={i+1} value={String(i+1)}>{i+1} 月</option>)}
+                  </select>
+                </div>
+                <span className="text-xs text-gray-400 ml-auto">共 {filteredRows.length} 筆</span>
+              </div>
+            )}
             {(meetingSelectedItems || []).length === 0 ? (
               <div className="text-center py-12 text-gray-400">
                 <Bell size={40} className="mx-auto mb-3 opacity-30"/>
@@ -7022,8 +7064,8 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
             ) : filteredRows.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
                 <Bell size={40} className="mx-auto mb-3 opacity-30"/>
-                <p className="font-bold">{yearFilter} 年尚無符合的排班記錄</p>
-                <p className="text-sm mt-1">目前追蹤的項目：{(meetingSelectedItems || []).join('、')}</p>
+                <p className="font-bold">{yearFilter} 年 {filterMonthFrom}～{filterMonthTo} 月尚無符合的記錄</p>
+                <p className="text-sm mt-1">目前追蹤：{filterWorkItem === 'all' ? (meetingSelectedItems || []).join('、') : filterWorkItem}</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
