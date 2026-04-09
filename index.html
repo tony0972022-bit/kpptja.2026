@@ -40,7 +40,7 @@ Calendar, User, Users, ClipboardList, LogOut, Plus, CheckCircle, XCircle, AlertC
 Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
 Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight, ChevronDown,
 Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
-Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo, PieChart, Download, CheckSquare, Bell
+Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo, PieChart, Download, CheckSquare, Bell, Save
 } from 'lucide-react';
 // --- Firebase 綁定設定 (已寫死) ---
 const MANUAL_CONFIG = {
@@ -5005,18 +5005,16 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   const [filterTypes, setFilterTypes] = useState(() => parseBlockFilter(user?.block3FilterTypes));
   // 若 user profile 非同步載入完成，同步更新一次（僅第一次有值時）
   const profileLoaded = useRef(false);
-  const skipNextSave = useRef(false);
   useEffect(() => {
     if (profileLoaded.current) return;
     if (user?.block3FilterTypes !== undefined) {
       profileLoaded.current = true;
-      skipNextSave.current = true; // 從雲端讀回，不要再存一次
       setFilterTypes(parseBlockFilter(user.block3FilterTypes));
     }
   }, [user?.block3FilterTypes]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [savingPref, setSavingPref] = useState(false);
-  const isFirstMount = useRef(true);
+  const [savedPref, setSavedPref] = useState(false); // 顯示「已儲存」提示
   // inline edit: { id: { remark, schoolDone, paymentDone, paymentAmount } }
   const [editing, setEditing] = useState({});
   const [saving, setSaving] = useState({});
@@ -5091,18 +5089,22 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   };
   const isTypeChecked = (t) => filterTypes === null || filterTypes.includes(t);
 
-  // ── 篩選改變時自動同步至雲端（跳過 mount 及從雲端讀回的那次）──
-  useEffect(() => {
-    if (isFirstMount.current) { isFirstMount.current = false; return; }
-    if (skipNextSave.current) { skipNextSave.current = false; return; }
+  // ── 手動存檔假別偏好至雲端 ──
+  const handleSavePref = async () => {
     const docId = user?.docId || user?.uid;
     if (!docId || !crud?.saveUserPref) return;
     setSavingPref(true);
-    // null 存為特殊值 '__all__'，array 直接存
-    crud.saveUserPref(docId, { block3FilterTypes: filterTypes === null ? '__all__' : filterTypes })
-      .catch(e => console.warn('儲存假別偏好失敗:', e))
-      .finally(() => setSavingPref(false));
-  }, [filterTypes]);
+    setSavedPref(false);
+    try {
+      await crud.saveUserPref(docId, { block3FilterTypes: filterTypes === null ? '__all__' : filterTypes });
+      setSavedPref(true);
+      setTimeout(() => setSavedPref(false), 2500);
+    } catch(e) {
+      alert('儲存失敗：' + (e?.message || e));
+    } finally {
+      setSavingPref(false);
+    }
+  };
 
   const getField = (lv, field) =>
     field in (editing[lv.id] || {}) ? editing[lv.id][field] : (lv[field] ?? '');
@@ -5246,7 +5248,6 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
                 ${showFilterPanel || filterTypes !== null ? 'bg-emerald-100 border-emerald-400 text-emerald-800' : 'bg-white border-gray-300 text-gray-600 hover:border-emerald-300'}`}>
               <CheckSquare size={13}/>
               假別篩選 {filterTypes !== null ? `(${filterTypes.length}/${availableTypes.length})` : '(全部)'}
-              {savingPref && <Loader2 size={11} className="animate-spin ml-0.5 opacity-60"/>}
             </button>
             {/* 右側統計 + 匯出 */}
             <div className="ml-auto flex items-center gap-3">
@@ -5285,6 +5286,20 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
                   ))}
                 </div>
               )}
+              {/* 存檔按鈕 */}
+              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-200">
+                <button onClick={handleSavePref} disabled={savingPref}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-60 transition shadow-sm">
+                  {savingPref ? <Loader2 size={12} className="animate-spin"/> : <Save size={12}/>}
+                  {savingPref ? '儲存中…' : '儲存篩選設定'}
+                </button>
+                {savedPref && (
+                  <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
+                    <CheckCircle size={13}/> 已儲存！下次開啟自動套用
+                  </span>
+                )}
+                <span className="text-xs text-gray-400 ml-auto">選好後按儲存，跨裝置生效</span>
+              </div>
             </div>
           )}
 
