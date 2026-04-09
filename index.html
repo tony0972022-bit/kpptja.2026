@@ -893,7 +893,8 @@ createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', '
 updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
 deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id)),
 saveMeetingNote: async (groupId, note) => setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes', groupId), { note, updatedAt: new Date() }, { merge: true }),
-updateLeaveExtra: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), data)
+updateLeaveExtra: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), data),
+saveUserPref: async (docId, data) => { if (!docId) return; await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles', docId), data); }
 };
 const handleSaveMeetingSelectedItems = async (selectedItems) => {
   setMeetingSelectedItems(selectedItems);
@@ -4995,8 +4996,27 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
   const [filterMonthFrom, setFilterMonthFrom] = useState('1');
   const [filterMonthTo, setFilterMonthTo] = useState('12');
-  const [filterTypes, setFilterTypes] = useState(null); // null = 全部，array = 指定假別
+
+  // 從 user profile 讀取已儲存的篩選（null=全選）
+  const parseBlockFilter = (raw) => {
+    if (!raw || raw === '__all__') return null;
+    return Array.isArray(raw) ? raw : null;
+  };
+  const [filterTypes, setFilterTypes] = useState(() => parseBlockFilter(user?.block3FilterTypes));
+  // 若 user profile 非同步載入完成，同步更新一次（僅第一次有值時）
+  const profileLoaded = useRef(false);
+  const skipNextSave = useRef(false);
+  useEffect(() => {
+    if (profileLoaded.current) return;
+    if (user?.block3FilterTypes !== undefined) {
+      profileLoaded.current = true;
+      skipNextSave.current = true; // 從雲端讀回，不要再存一次
+      setFilterTypes(parseBlockFilter(user.block3FilterTypes));
+    }
+  }, [user?.block3FilterTypes]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [savingPref, setSavingPref] = useState(false);
+  const isFirstMount = useRef(true);
   // inline edit: { id: { remark, schoolDone, paymentDone, paymentAmount } }
   const [editing, setEditing] = useState({});
   const [saving, setSaving] = useState({});
@@ -5070,6 +5090,19 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
     }
   };
   const isTypeChecked = (t) => filterTypes === null || filterTypes.includes(t);
+
+  // ── 篩選改變時自動同步至雲端（跳過 mount 及從雲端讀回的那次）──
+  useEffect(() => {
+    if (isFirstMount.current) { isFirstMount.current = false; return; }
+    if (skipNextSave.current) { skipNextSave.current = false; return; }
+    const docId = user?.docId || user?.uid;
+    if (!docId || !crud?.saveUserPref) return;
+    setSavingPref(true);
+    // null 存為特殊值 '__all__'，array 直接存
+    crud.saveUserPref(docId, { block3FilterTypes: filterTypes === null ? '__all__' : filterTypes })
+      .catch(e => console.warn('儲存假別偏好失敗:', e))
+      .finally(() => setSavingPref(false));
+  }, [filterTypes]);
 
   const getField = (lv, field) =>
     field in (editing[lv.id] || {}) ? editing[lv.id][field] : (lv[field] ?? '');
@@ -5213,6 +5246,7 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
                 ${showFilterPanel || filterTypes !== null ? 'bg-emerald-100 border-emerald-400 text-emerald-800' : 'bg-white border-gray-300 text-gray-600 hover:border-emerald-300'}`}>
               <CheckSquare size={13}/>
               假別篩選 {filterTypes !== null ? `(${filterTypes.length}/${availableTypes.length})` : '(全部)'}
+              {savingPref && <Loader2 size={11} className="animate-spin ml-0.5 opacity-60"/>}
             </button>
             {/* 右側統計 + 匯出 */}
             <div className="ml-auto flex items-center gap-3">
