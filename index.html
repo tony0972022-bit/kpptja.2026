@@ -4993,38 +4993,83 @@ return (
 function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
   const [openBlock3, setOpenBlock3] = useState(true);
   const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
-  // inline edit state: { id: { remark, schoolDone, paymentDone, paymentAmount } }
+  const [filterMonthFrom, setFilterMonthFrom] = useState('1');
+  const [filterMonthTo, setFilterMonthTo] = useState('12');
+  const [filterTypes, setFilterTypes] = useState(null); // null = 全部，array = 指定假別
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  // inline edit: { id: { remark, schoolDone, paymentDone, paymentAmount } }
   const [editing, setEditing] = useState({});
   const [saving, setSaving] = useState({});
 
-  // 過濾出自己的假單
-  const myLeaves = useMemo(() => {
+  // ── 屬於自己的全部假單（不含月份/假別篩選）──
+  const allMyLeaves = useMemo(() => {
     const myName = user?.name || '';
     const myEmail = (user?.email || '').toLowerCase();
-    return (leaves || [])
-      .filter(lv => {
-        const nm = lv.requesterName || lv.userName || '';
-        const em = (lv.requesterEmail || lv.userEmail || '').toLowerCase();
-        return nm === myName || em === myEmail;
-      })
+    return (leaves || []).filter(lv => {
+      const nm = lv.requesterName || lv.userName || '';
+      const em = (lv.requesterEmail || lv.userEmail || '').toLowerCase();
+      return nm === myName || em === myEmail;
+    });
+  }, [leaves, user]);
+
+  // ── 本年份內出現過的假別（供勾選面板使用）──
+  const availableTypes = useMemo(() => {
+    const s = new Set();
+    allMyLeaves
       .filter(lv => String(lv.start || lv.date || '').startsWith(yearFilter))
+      .forEach(lv => { if (lv.type) s.add(lv.type); });
+    return [...s].sort();
+  }, [allMyLeaves, yearFilter]);
+
+  // 切換年份時重置假別篩選
+  useEffect(() => { setFilterTypes(null); }, [yearFilter]);
+
+  // ── 套用篩選後的假單 ──
+  const myLeaves = useMemo(() => {
+    const mFrom = Number(filterMonthFrom);
+    const mTo = Number(filterMonthTo);
+    const selTypes = filterTypes; // null = all
+    return allMyLeaves
+      .filter(lv => {
+        const dateStr = String(lv.start || lv.date || '');
+        if (!dateStr.startsWith(yearFilter)) return false;
+        const mo = Number(dateStr.slice(5, 7));
+        if (mo < mFrom || mo > mTo) return false;
+        if (selTypes !== null && !selTypes.includes(lv.type)) return false;
+        return true;
+      })
       .sort((a, b) => String(b.start || b.date || '').localeCompare(String(a.start || a.date || '')));
-  }, [leaves, user, yearFilter]);
+  }, [allMyLeaves, yearFilter, filterMonthFrom, filterMonthTo, filterTypes]);
 
   const yearOptions = useMemo(() => {
     const cur = new Date().getFullYear();
     const yrs = new Set([String(cur), String(cur - 1)]);
-    (leaves || []).forEach(lv => { const y = String(lv.start || lv.date || '').slice(0, 4); if (y) yrs.add(y); });
+    allMyLeaves.forEach(lv => { const y = String(lv.start || lv.date || '').slice(0, 4); if (y) yrs.add(y); });
     return [...yrs].sort((a, b) => b.localeCompare(a));
-  }, [leaves]);
+  }, [allMyLeaves]);
 
-  // 請款總計（只計 paymentDone=true 的）
+  // ── 請款總計（篩選後資料）──
   const paymentTotal = useMemo(() =>
     myLeaves.reduce((sum, lv) => {
       const amt = parseFloat((editing[lv.id]?.paymentAmount ?? lv.paymentAmount) || 0);
       return sum + (isNaN(amt) ? 0 : amt);
     }, 0)
   , [myLeaves, editing]);
+
+  // 假別 toggle
+  const toggleType = (t) => {
+    if (filterTypes === null) {
+      // 目前全選 → 取消這一個（其餘全留）
+      setFilterTypes(availableTypes.filter(x => x !== t));
+    } else if (filterTypes.includes(t)) {
+      const next = filterTypes.filter(x => x !== t);
+      setFilterTypes(next.length === 0 ? null : next);
+    } else {
+      const next = [...filterTypes, t];
+      setFilterTypes(next.length === availableTypes.length ? null : next);
+    }
+  };
+  const isTypeChecked = (t) => filterTypes === null || filterTypes.includes(t);
 
   const getField = (lv, field) =>
     field in (editing[lv.id] || {}) ? editing[lv.id][field] : (lv[field] ?? '');
@@ -5086,7 +5131,7 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
     return u?.name || '—';
   };
 
-  // Excel 匯出
+  // Excel 匯出（使用篩選後資料）
   const handleExport = () => {
     const XLSX = window.XLSX;
     if (!XLSX) { alert('Excel 匯出套件未載入，請重新整理頁面後再試。'); return; }
@@ -5103,17 +5148,17 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
       '請款完成': lv.paymentDone ? '✓' : '',
       '請款金額': lv.paymentAmount != null && lv.paymentAmount !== '' ? Number(lv.paymentAmount) : '',
     }));
-    // 加合計列
     rows.push({
-      '姓名': '', '日期': '', '時間': '', '假別': '', '時數': '', '職代': '', '事由': '',
-      '備註': '', '學校完成': '', '請款完成': '合計',
+      '姓名': '', '日期': '', '時間': '', '假別': `共 ${myLeaves.length} 筆`, '時數': '', '職代': '', '事由': '',
+      '備註': '', '學校完成': '', '請款完成': '請款合計',
       '請款金額': myLeaves.reduce((s, lv) => s + (parseFloat(lv.paymentAmount) || 0), 0),
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [10,12,14,10,6,8,20,16,8,8,10].map(w => ({ wch: w }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `差勤紀錄_${yearFilter}`);
-    XLSX.writeFile(wb, `差勤紀錄_${user?.name||'個人'}_${yearFilter}.xlsx`);
+    const mRange = filterMonthFrom === '1' && filterMonthTo === '12' ? yearFilter : `${yearFilter}_${filterMonthFrom}~${filterMonthTo}月`;
+    XLSX.utils.book_append_sheet(wb, ws, `差勤紀錄_${mRange}`);
+    XLSX.writeFile(wb, `差勤紀錄_${user?.name||'個人'}_${mRange}.xlsx`);
   };
 
   const statusBadge = (lv) => {
@@ -5137,8 +5182,9 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
 
       {openBlock3 && (
         <div className="p-4">
-          {/* 工具列 */}
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* 工具列第一行 */}
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            {/* 年份 */}
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold text-gray-500">年份</span>
               <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-300 outline-none"
@@ -5146,7 +5192,31 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
                 {yearOptions.map(y => <option key={y} value={y}>{y} 年</option>)}
               </select>
             </div>
+            {/* 月份區間 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-gray-500">月份</span>
+              <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-300 outline-none"
+                value={filterMonthFrom}
+                onChange={e => { const v=e.target.value; setFilterMonthFrom(v); if(Number(filterMonthTo)<Number(v)) setFilterMonthTo(v); }}>
+                {Array.from({length:12},(_,i)=><option key={i+1} value={String(i+1)}>{i+1} 月</option>)}
+              </select>
+              <span className="text-xs text-gray-400">至</span>
+              <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-300 outline-none"
+                value={filterMonthTo}
+                onChange={e => { const v=e.target.value; setFilterMonthTo(v); if(Number(filterMonthFrom)>Number(v)) setFilterMonthFrom(v); }}>
+                {Array.from({length:12},(_,i)=><option key={i+1} value={String(i+1)}>{i+1} 月</option>)}
+              </select>
+            </div>
+            {/* 假別篩選按鈕 */}
+            <button onClick={() => setShowFilterPanel(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition
+                ${showFilterPanel || filterTypes !== null ? 'bg-emerald-100 border-emerald-400 text-emerald-800' : 'bg-white border-gray-300 text-gray-600 hover:border-emerald-300'}`}>
+              <CheckSquare size={13}/>
+              假別篩選 {filterTypes !== null ? `(${filterTypes.length}/${availableTypes.length})` : '(全部)'}
+            </button>
+            {/* 右側統計 + 匯出 */}
             <div className="ml-auto flex items-center gap-3">
+              <span className="text-xs text-gray-400">共 {myLeaves.length} 筆</span>
               <div className="text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
                 請款總計：<span className="text-emerald-700 text-base">${paymentTotal.toLocaleString()}</span>
               </div>
@@ -5157,10 +5227,40 @@ function Block3PersonalRecords({ user, users, leaves, crud, leaveTypes }) {
             </div>
           </div>
 
+          {/* 假別勾選面板 */}
+          {showFilterPanel && (
+            <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-gray-600">勾選要顯示的假別</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setFilterTypes(null)} className="text-xs text-emerald-600 hover:underline font-bold">全選</button>
+                  <button onClick={() => setFilterTypes([])} className="text-xs text-gray-400 hover:underline">全不選</button>
+                </div>
+              </div>
+              {availableTypes.length === 0 ? (
+                <span className="text-xs text-gray-400">本年度尚無假單記錄</span>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {availableTypes.map(t => (
+                    <label key={t} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer text-xs font-bold transition select-none
+                      ${isTypeChecked(t) ? 'bg-emerald-100 border-emerald-400 text-emerald-800' : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300'}`}>
+                      <input type="checkbox" className="w-3.5 h-3.5 accent-emerald-600"
+                        checked={isTypeChecked(t)} onChange={() => toggleType(t)} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {myLeaves.length === 0 ? (
             <div className="text-center py-10 text-gray-400">
               <Calendar size={36} className="mx-auto mb-2 opacity-30"/>
-              <p className="font-bold">{yearFilter} 年尚無差勤紀錄</p>
+              <p className="font-bold">
+                {availableTypes.length === 0 ? `${yearFilter} 年尚無差勤紀錄` : '目前篩選條件無符合資料'}
+              </p>
+              {filterTypes !== null && <p className="text-sm mt-1 text-gray-300">可點「假別篩選」調整或「全選」顯示所有假別</p>}
             </div>
           ) : (
             <div className="overflow-x-auto">
