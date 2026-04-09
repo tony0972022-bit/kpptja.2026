@@ -345,6 +345,7 @@ admin: '管理員'
 const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出", "專案報告", "大宗"];
 const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "專案報告", "大宗", "月報"];
 const DEFAULT_AREA_TAGS = ["高雄-身障","屏東-身障","台東-身障","澎湖-身障","訓就-岡山","訓就-鳳山","銀髮","分署"];
+const DEFAULT_MEETING_ITEMS = ["宣導活動", "業務會議", "跨單位協調", "教育訓練", "成果報告", "工作討論"];
 const DEFAULT_ROTATION_RULES = [
 { id: 'visit', name: '澎東訪視', matchTag: '訪視', order: ['高湘怡', '黃國裕', '方姿云', '陳秋媚', '蔡凱宇', '盧怡倫'] },
 { id: 'project', name: '專案報告', matchTag: '專案報告', order: ['盧怡倫', '高湘怡', '黃國裕', '方姿云', '蔡凱宇', '陳秋媚'] },
@@ -530,6 +531,8 @@ const [attendanceRecords, setAttendanceRecords] = useState([]);
 const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
 const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
 const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
+const [meetings, setMeetings] = useState([]);
+const [meetingItems, setMeetingItems] = useState(DEFAULT_MEETING_ITEMS);
 const [rotationRules, setRotationRules] = useState(normalizeRotationRules(DEFAULT_ROTATION_RULES));
 const [roleNames, setRoleNames] = useState(DEFAULT_ROLE_NAMES);
 const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -698,12 +701,14 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const remoteWorkTags = Array.isArray(remote.workTags) && remote.workTags.length > 0 ? remote.workTags : DEFAULT_WORK_TAGS;
     const remoteAreaTags = Array.isArray(remote.areaTags) && remote.areaTags.length > 0 ? remote.areaTags : DEFAULT_AREA_TAGS;
     const remoteLeaveTypes = Array.isArray(remote.leaveTypes) && remote.leaveTypes.length > 0 ? remote.leaveTypes : DEFAULT_LEAVE_TYPES;
+    const remoteMeetingItems = Array.isArray(remote.meetingItems) && remote.meetingItems.length > 0 ? remote.meetingItems : DEFAULT_MEETING_ITEMS;
     setSettings(merged);
     setRoleNames(remoteRoleNames);
     setRotationRules(remoteRotationRules);
     setWorkTags(remoteWorkTags);
     setAreaTags(remoteAreaTags);
     setLeaveTypes(remoteLeaveTypes);
+    setMeetingItems(remoteMeetingItems);
     localStorage.setItem('areaColors', JSON.stringify(merged.areaColors));
     localStorage.setItem('workColors', JSON.stringify(merged.workColors));
     localStorage.setItem('customHolidays', JSON.stringify(merged.customHolidays));
@@ -733,7 +738,8 @@ const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public
 const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
 const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
 const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
-return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); };
+const unsubMeetings = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meetings'), orderBy('date','asc')), (s) => setMeetings(s.docs.map(d => ({id:d.id, ...d.data()}))));
+return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetings(); };
 }, [db, user]);
 const handleLogout = async () => {
 if(auth) await signOut(auth);
@@ -880,7 +886,18 @@ const toDel = calendarEvents.filter(e=>e.groupId===gid);
 await Promise.all(toDel.map(e => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events', e.id))));},
 createLeave: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves'), d),
 updateLeave: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id), { ...data, approvalDate: new Date() }),
-deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id))
+deleteLeave: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'leaves', id)),
+createMeeting: async (d) => addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meetings'), d),
+updateMeeting: async (id, data) => updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'meetings', id), data),
+deleteMeeting: async (id) => deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'meetings', id))
+};
+const handleSaveMeetingItems = async (newItems) => {
+  setMeetingItems(newItems);
+  if (db && userData && (userData.role === 'admin' || userData.role === 'leader')) {
+    try {
+      await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global'), { meetingItems: newItems }, { merge: true });
+    } catch(e) { alert('儲存工作項目失敗: ' + (e?.message || e)); }
+  }
 };
 // --- 待派員通知（僅組長/管理員）：日曆中有「只有工作項目但未派員」的行程 ---
 const unassignedInfo = useMemo(() => {
@@ -991,6 +1008,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
 {id:'accounting', icon:<Calculator size={20}/>, label:'會計統計'},
 {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'},
+{id:'meeting', icon:<Bell size={20}/>, label:'會議及宣導'},
 {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'}
 ].map(item => (
 <button key={item.id} onClick={() => { setView(item.id); setIsSidebarOpen(false); }} className={`relative w-full flex items-center px-4 py-3 transition mb-1 ${isDesktopCollapsed ? 'justify-center' : 'justify-between'} ${view===item.id ? sidebarActive : `text-gray-500 ${sidebarHover} ${!isLight && 'text-slate-400 hover:text-white'}`}`} title={isDesktopCollapsed ? item.label : ""}>
@@ -1074,6 +1092,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} crud={crud} />}
 {view === 'accounting' && <AccountingStatsView users={usersList} leaves={leaves} leaveTypes={leaveTypes} currentUser={userData} />}
 {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} settings={settings} />}
+{view === 'meeting' && <MeetingView user={userData} users={usersList} meetings={meetings} meetingItems={meetingItems} crud={crud} onSaveMeetingItems={handleSaveMeetingItems} />}
 {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
 {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
 {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
@@ -6864,6 +6883,349 @@ return (
 )}
 
 </div></div></div>);}
+// ============================================================
+// MeetingView - 相關會議及宣導
+// ============================================================
+function MeetingView({ user, users, meetings, meetingItems, crud, onSaveMeetingItems }) {
+  const [activeTab, setActiveTab] = useState('list');
+  const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
+
+  // ── 新增/編輯記錄 ──
+  const [showForm, setShowForm] = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
+  const [formDate, setFormDate] = useState(getLocalDateString());
+  const [formWorkItem, setFormWorkItem] = useState('');
+  const [formPersons, setFormPersons] = useState([]);
+  const [formNote, setFormNote] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── 管理設定（管理員） ──
+  const [localItems, setLocalItems] = useState(meetingItems);
+  const [newItemInput, setNewItemInput] = useState('');
+  const [isSavingItems, setIsSavingItems] = useState(false);
+  const isAdmin = user?.role === 'admin' || user?.role === 'leader';
+
+  // 同步 meetingItems prop 更新
+  useEffect(() => { setLocalItems(meetingItems); }, [meetingItems]);
+
+  // ── 篩選年份 ──
+  const filteredMeetings = (meetings || []).filter(m => String(m.date || '').startsWith(yearFilter));
+  const sortedMeetings = [...filteredMeetings].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  // 可用年份清單
+  const yearOptions = useMemo(() => {
+    const cur = new Date().getFullYear();
+    const years = new Set([String(cur), String(cur - 1)]);
+    (meetings || []).forEach(m => { if (m.date) years.add(String(m.date).slice(0, 4)); });
+    return [...years].sort((a, b) => b.localeCompare(a));
+  }, [meetings]);
+
+  // ── 開啟新增表單 ──
+  const openAdd = () => {
+    setEditRecord(null);
+    setFormDate(getLocalDateString());
+    setFormWorkItem(meetingItems[0] || '');
+    setFormPersons([]);
+    setFormNote('');
+    setShowForm(true);
+  };
+
+  // ── 開啟編輯表單 ──
+  const openEdit = (rec) => {
+    setEditRecord(rec);
+    setFormDate(rec.date || getLocalDateString());
+    setFormWorkItem(rec.workItem || '');
+    setFormPersons(Array.isArray(rec.persons) ? rec.persons : []);
+    setFormNote(rec.note || '');
+    setShowForm(true);
+  };
+
+  // ── 人員 toggle ──
+  const togglePerson = (name) => {
+    setFormPersons(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+  };
+
+  // ── 儲存記錄 ──
+  const handleSaveRecord = async () => {
+    if (!formDate) { alert('請選擇日期'); return; }
+    if (!formWorkItem) { alert('請選擇工作項目'); return; }
+    setIsSubmitting(true);
+    try {
+      const payload = { date: formDate, workItem: formWorkItem, persons: formPersons, note: formNote, updatedAt: new Date() };
+      if (editRecord?.id) {
+        await crud.updateMeeting(editRecord.id, payload);
+      } else {
+        await crud.createMeeting({ ...payload, createdAt: new Date(), createdBy: user?.name || '' });
+      }
+      setShowForm(false);
+    } catch(e) { alert('儲存失敗：' + (e?.message || e)); }
+    finally { setIsSubmitting(false); }
+  };
+
+  // ── 刪除記錄 ──
+  const handleDelete = async (id) => {
+    if (!confirm('確定刪除這筆記錄？')) return;
+    try { await crud.deleteMeeting(id); } catch(e) { alert('刪除失敗：' + (e?.message || e)); }
+  };
+
+  // ── 統計：workItem × month ──
+  const statsData = useMemo(() => {
+    const yr = Number(yearFilter);
+    const rows = {};
+    (meetingItems || []).forEach(item => { rows[item] = Array(12).fill(0); });
+    (meetings || []).forEach(m => {
+      const d = String(m.date || '');
+      if (Number(d.slice(0,4)) !== yr) return;
+      const mo = Number(d.slice(5,7)) - 1; // 0-based
+      if (mo < 0 || mo > 11) return;
+      const key = m.workItem || '';
+      if (!rows[key]) rows[key] = Array(12).fill(0);
+      rows[key][mo]++;
+    });
+    return rows;
+  }, [meetings, meetingItems, yearFilter]);
+
+  // ── 儲存管理設定 ──
+  const handleSaveItems = async () => {
+    const cleaned = localItems.filter(s => s.trim());
+    if (!cleaned.length) { alert('工作項目不能為空'); return; }
+    setIsSavingItems(true);
+    try { await onSaveMeetingItems(cleaned); alert('工作項目已儲存！'); }
+    catch(e) { alert('儲存失敗：' + (e?.message || e)); }
+    finally { setIsSavingItems(false); }
+  };
+
+  const TABS = [
+    { id: 'list', label: '記錄清單' },
+    { id: 'stats', label: '統計表' },
+    ...(isAdmin ? [{ id: 'settings', label: '管理設定' }] : [])
+  ];
+
+  const monthLabels = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-4">
+      {/* 標題 */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Bell size={22} className="text-indigo-600"/> 相關會議及宣導</h1>
+        <div className="flex items-center gap-3">
+          <select className="border p-1.5 rounded-lg text-sm bg-white" value={yearFilter} onChange={e=>setYearFilter(e.target.value)}>
+            {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
+          </select>
+          {activeTab === 'list' && (
+            <button onClick={openAdd} className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 shadow">
+              <Plus size={16}/> 新增記錄
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 標籤切換 */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="flex border-b border-gray-200">
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)}
+              className={`px-6 py-3 text-sm font-bold transition border-b-2 ${activeTab === t.id ? 'border-indigo-600 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ───── Tab 1: 記錄清單 ───── */}
+        {activeTab === 'list' && (
+          <div className="p-4">
+            {sortedMeetings.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <Bell size={40} className="mx-auto mb-3 opacity-30"/>
+                <p className="font-bold">{yearFilter} 年尚無記錄</p>
+                <p className="text-sm mt-1">點擊右上角「新增記錄」開始建立</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold w-28">日期</th>
+                      <th className="px-4 py-3 font-semibold w-36">工作項目</th>
+                      <th className="px-4 py-3 font-semibold">人員</th>
+                      <th className="px-4 py-3 font-semibold">備註</th>
+                      <th className="px-4 py-3 font-semibold text-center w-24">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {sortedMeetings.map(m => (
+                      <tr key={m.id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 font-medium text-gray-700 whitespace-nowrap">{m.date}</td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-md text-xs font-bold">{m.workItem || '-'}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {(m.persons || []).length > 0
+                              ? (m.persons || []).map((p, i) => <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">{p}</span>)
+                              : <span className="text-gray-400 text-xs">—</span>
+                            }
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 max-w-xs">
+                          <span className="line-clamp-2">{m.note || '—'}</span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex justify-center gap-2">
+                            <button onClick={() => openEdit(m)} className="p-1.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition" title="編輯"><Edit size={15}/></button>
+                            <button onClick={() => handleDelete(m.id)} className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition" title="刪除"><Trash2 size={15}/></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ───── Tab 2: 統計表 ───── */}
+        {activeTab === 'stats' && (
+          <div className="p-4 overflow-x-auto">
+            <div className="mb-3 text-sm text-gray-500">{yearFilter} 年各工作項目 × 月份 件數統計</div>
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="border border-gray-200 px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">工作項目</th>
+                  {monthLabels.map((m, i) => (
+                    <th key={i} className="border border-gray-200 px-2 py-2 text-center font-semibold text-gray-600 w-12">{m}</th>
+                  ))}
+                  <th className="border border-gray-200 px-3 py-2 text-center font-semibold text-indigo-700 w-16">合計</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(statsData).map(([item, counts]) => {
+                  const total = counts.reduce((s, n) => s + n, 0);
+                  return (
+                    <tr key={item} className="hover:bg-indigo-50/30 transition">
+                      <td className="border border-gray-200 px-3 py-2 font-medium text-gray-800">{item}</td>
+                      {counts.map((cnt, i) => (
+                        <td key={i} className={`border border-gray-200 px-2 py-2 text-center ${cnt > 0 ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-300'}`}>
+                          {cnt > 0 ? cnt : '—'}
+                        </td>
+                      ))}
+                      <td className="border border-gray-200 px-3 py-2 text-center font-black text-indigo-700 bg-indigo-50">{total || '—'}</td>
+                    </tr>
+                  );
+                })}
+                {/* 合計列 */}
+                <tr className="bg-gray-100 font-bold">
+                  <td className="border border-gray-300 px-3 py-2 text-gray-700">月份合計</td>
+                  {Array.from({length:12}).map((_, i) => {
+                    const s = Object.values(statsData).reduce((sum, c) => sum + (c[i] || 0), 0);
+                    return <td key={i} className={`border border-gray-300 px-2 py-2 text-center ${s > 0 ? 'text-indigo-800' : 'text-gray-300'}`}>{s > 0 ? s : '—'}</td>;
+                  })}
+                  <td className="border border-gray-300 px-3 py-2 text-center text-indigo-800">
+                    {Object.values(statsData).reduce((s, c) => s + c.reduce((a,b) => a+b, 0), 0) || '—'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ───── Tab 3: 管理設定（管理員/組長） ───── */}
+        {activeTab === 'settings' && isAdmin && (
+          <div className="p-6 max-w-xl space-y-5">
+            <div>
+              <label className="text-sm font-bold text-gray-700 block mb-2">工作項目清單</label>
+              <div className="space-y-2">
+                {localItems.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                      value={item}
+                      onChange={e => setLocalItems(prev => prev.map((v, i) => i === idx ? e.target.value : v))}
+                    />
+                    <button onClick={() => setLocalItems(prev => prev.filter((_, i) => i !== idx))}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
+                      <Trash2 size={15}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                placeholder="新增工作項目…"
+                value={newItemInput}
+                onChange={e => setNewItemInput(e.target.value)}
+                onKeyDown={e => { if(e.key==='Enter' && newItemInput.trim()){ setLocalItems(prev=>[...prev, newItemInput.trim()]); setNewItemInput(''); }}}
+              />
+              <button onClick={() => { if(newItemInput.trim()){ setLocalItems(prev=>[...prev, newItemInput.trim()]); setNewItemInput(''); }}}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">
+                <Plus size={16}/>
+              </button>
+            </div>
+            <button onClick={handleSaveItems} disabled={isSavingItems}
+              className={`px-6 py-2.5 rounded-lg font-bold text-white text-sm ${isSavingItems?'bg-gray-400':'bg-indigo-600 hover:bg-indigo-700'} shadow transition`}>
+              {isSavingItems ? '儲存中…' : '儲存工作項目'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ───── 新增/編輯 Modal ───── */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={()=>setShowForm(false)}>
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden" onClick={e=>e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-800">{editRecord ? '編輯記錄' : '新增記錄'}</h2>
+              <button onClick={()=>setShowForm(false)} className="text-gray-400 hover:text-gray-700 p-1 rounded"><X size={22}/></button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="text-sm font-bold text-gray-700 block mb-1">日期</label>
+                <input type="date" className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                  value={formDate} onChange={e=>setFormDate(e.target.value)}/>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-gray-700 block mb-1">工作項目</label>
+                <select className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
+                  value={formWorkItem} onChange={e=>setFormWorkItem(e.target.value)}>
+                  <option value="" disabled>請選擇</option>
+                  {meetingItems.map(item=><option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-gray-700 block mb-2">參與人員（可複選）</label>
+                <div className="flex flex-wrap gap-2">
+                  {(users || []).map(u=>(
+                    <button key={u.docId||u.uid} type="button"
+                      onClick={()=>togglePerson(u.name)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition ${formPersons.includes(u.name)?'bg-indigo-600 text-white border-indigo-600':'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
+                      {u.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-gray-700 block mb-1">備註（可自由輸入）</label>
+                <textarea className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-indigo-300 outline-none resize-none min-h-[80px]"
+                  placeholder="可補充地點、主題、說明…"
+                  value={formNote} onChange={e=>setFormNote(e.target.value)}/>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button onClick={()=>setShowForm(false)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-100">取消</button>
+              <button onClick={handleSaveRecord} disabled={isSubmitting}
+                className={`px-5 py-2 rounded-lg text-white text-sm font-bold ${isSubmitting?'bg-gray-400':'bg-indigo-600 hover:bg-indigo-700'} shadow transition`}>
+                {isSubmitting ? '儲存中…' : '確認儲存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function LoginScreen({ auth }) {
 const [isLoggingIn, setIsLoggingIn] = useState(false);
 const handleGoogleLogin = async () => {
