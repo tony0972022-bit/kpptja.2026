@@ -3748,6 +3748,7 @@ const [pendingSubmit, setPendingSubmit] = useState(null);
 const [submittingTaskId, setSubmittingTaskId] = useState(null);
 const [openBlock1, setOpenBlock1] = useState(true);
 const [openBlock2, setOpenBlock2] = useState(false);
+const [overtimeModalOpen, setOvertimeModalOpen] = useState(false);
 const block2Ref = useRef(null);
 const officialTypes = leaveTypes.filter(t => t.category === 'official');
 const personalTypes = leaveTypes.filter(t => t.category === 'personal');
@@ -4382,6 +4383,7 @@ ${deputyName} 您好：
     setConfirmData(null);
     setPendingSubmit(null);
     setSubmitError('');
+    setOvertimeModalOpen(false);
     const fromBlock1 = !!safePayload?.sourceGroupId;
     if (!fromBlock1) {
       resetBlock2Form();
@@ -4426,16 +4428,15 @@ return (
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setOpenBlock2(true);
-              setShowOfficialTypes(true);
+              // 預選第一個加班類型
+              const firstOT = officialTypes.find(t => isOvertime(t.name));
+              if (firstOT) setForm(prev => ({ ...prev, type: firstOT.name }));
+              else setForm(prev => ({ ...prev, type: officialTypes[0]?.name || '' }));
               setTypeError(false);
-              // 導到第二區塊，並預選「加班(請款/不列計)」假別（兼容不同命名）
-              const otPayName = (leaveTypes.find(t => (t.name||'').includes('加班') && (((t.name||'').includes('不列計')) || ((t.name||'').includes('請款'))))?.name) || OVERTIME_PAY_TYPE || overtimeTypeName || '';
-              setForm(prev => ({ ...prev, type: otPayName || prev.type }));
-              setTimeout(() => block2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+              setOvertimeModalOpen(true);
             }}
             className="px-3 py-1.5 rounded-lg bg-indigo-700 text-white text-xs font-bold hover:bg-indigo-800"
-            title="加班申請不會顯示在日曆，請由此入口送出"
+            title="送出加班/公務申請"
           >
             加班申請
           </button>
@@ -4475,7 +4476,7 @@ return (
                   前往排班日曆
                 </button>
                 <div className="text-xs text-indigo-700/80">
-                  加班請按右上角「加班申請」。
+                  加班請按上方「加班申請」按鈕。
                 </div>
               </div>
             </div>
@@ -4497,24 +4498,7 @@ return (
         <div className="px-6 pb-6">
           <form onSubmit={handleManualSubmit} className="space-y-5">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-bold text-gray-700">選擇假別</label>
-                <label className="text-xs font-bold text-gray-600 flex items-center gap-2 select-none">
-                  <input
-                    type="checkbox"
-                    checked={showOfficialTypes}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setShowOfficialTypes(next);
-                      // 關閉公務/加班時，避免殘留選到公務假別
-                      if (!next && officialTypes.some(t => t.name === form.type)) {
-                        setForm({ ...form, type: '' });
-                      }
-                    }}
-                  />
-                  加班/公務
-                </label>
-              </div>
+              <label className="text-sm font-bold text-gray-700 block mb-1">選擇假別</label>
 
               <select
                 className={`w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition ${typeError && !form.type ? 'border-red-400 ring-1 ring-red-200' : ''}`}
@@ -4531,12 +4515,6 @@ return (
                   <option key={t.id} value={t.name}>{t.name}</option>
                 ))}
 
-                {showOfficialTypes && (
-                  <option value="__group_official" disabled>── 公務 / 加班 ──</option>
-                )}
-                {showOfficialTypes && officialTypes.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
-                ))}
               </select>
 
               {typeError && !form.type && (
@@ -4866,6 +4844,113 @@ return (
             >
               {isSubmitting ? "送出中…" : "確認送出"}
             </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* 加班/公務申請 Modal（由第一區塊「加班申請」按鈕觸發）*/}
+    {overtimeModalOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={()=>{ setOvertimeModalOpen(false); setForm(p=>({...p,type:''})); setTypeError(false); }}>
+        <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden" style={{maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+          <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Clock size={20} className="text-indigo-600"/> 加班/公務申請</h2>
+            <button type="button" onClick={()=>{ setOvertimeModalOpen(false); setForm(p=>({...p,type:''})); setTypeError(false); }} className="text-gray-400 hover:text-gray-700 p-1 rounded"><X size={24}/></button>
+          </div>
+          <div className="px-6 pb-6 pt-4">
+            <form onSubmit={handleManualSubmit} className="space-y-5">
+              <div>
+                <label className="text-sm font-bold text-gray-700 block mb-1">選擇假別（公務/加班）</label>
+                <select className={`w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition ${typeError && !form.type ? 'border-red-400 ring-1 ring-red-200' : ''}`} value={form.type} onChange={e=>{ setForm({...form,type:e.target.value}); setTypeError(false); }}>
+                  <option value="" disabled>請選擇公務/加班假別</option>
+                  {officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+                {typeError && !form.type && <div className="mt-2 text-xs text-red-700 bg-red-50 p-2 rounded border border-red-100">請先選擇假別後再送出。</div>}
+                {currentTypeDesc && <div className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-100 flex items-start gap-2"><Info size={14} className="mt-0.5 shrink-0"/> {currentTypeDesc}</div>}
+              </div>
+
+              <div className="bg-gray-50 border border-gray-100 p-4 rounded-xl space-y-4">
+                <div className="flex bg-gray-200/60 p-1 rounded-lg w-full md:w-fit mx-auto md:mx-0">
+                  <button type="button" onClick={() => { if (!isOvertimePayType) setInputMode('slot'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'slot' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>簡易時段</button>
+                  <button type="button" onClick={() => { setInputMode('manual'); setManualRangeType(isOvertime(form.type) ? 'lt1' : 'gt1'); }} className={`flex-1 md:flex-none px-5 py-2 text-sm font-bold rounded-md transition-all ${inputMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>大於一天</button>
+                </div>
+                {isOvertimePayType && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">加班(請款)限制：僅可申請 17:00-19:00，且每日每次固定為 2 小時。</div>}
+                {inputMode === 'slot' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div><label className="text-xs font-bold text-gray-600 block mb-1">日期</label><input type="date" className="w-full border p-2 rounded-lg bg-white" value={slotDate} onChange={e=>setSlotDate(e.target.value)} /></div>
+                    <div><label className="text-xs font-bold text-gray-600 block mb-1">時段（快速帶入）</label><div className="flex gap-2">{[{id:'morning',label:'上午'},{id:'afternoon',label:'下午'},{id:'all_day',label:'整天'}].map(s=>(<button key={s.id} type="button" onClick={()=>applySlotPreset(s.id)} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-bold transition ${slotType===s.id?'bg-blue-600 text-white border-blue-700 shadow':'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>{s.label}</button>))}</div></div>
+                    <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div><label className="text-xs font-bold text-gray-600 block mb-1">起始時間</label><div className="grid grid-cols-2 gap-2"><select className="w-full border p-2 rounded-lg bg-white" value={slotStartH} onChange={e=>setSlotStartH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select className="w-full border p-2 rounded-lg bg-white" value={slotStartM} onChange={e=>setSlotStartM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div></div>
+                      <div><label className="text-xs font-bold text-gray-600 block mb-1">結束時間</label><div className="grid grid-cols-2 gap-2"><select className="w-full border p-2 rounded-lg bg-white" value={slotEndH} onChange={e=>setSlotEndH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select className="w-full border p-2 rounded-lg bg-white" value={slotEndM} onChange={e=>setSlotEndM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div></div>
+                    </div>
+                    <div className="md:col-span-2 text-[11px] text-gray-500">時段按鈕為快速帶入，你仍可手動調整起訖時間；同日會自動扣除午休 12:00-13:00 重疊時數。</div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {manualRangeType === 'lt1' && isOvertime(form.type) ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-xs font-bold text-gray-600 block mb-1">日期</label><input type="date" className="w-full border p-2 rounded-lg bg-white" value={shortDate} onChange={e=>setShortDate(e.target.value)} /></div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">起</label><div className="flex gap-2"><select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortStartH} onChange={e=>setShortStartH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortStartM} onChange={e=>setShortStartM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div></div>
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">迄</label><div className="flex gap-2"><select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortEndH} onChange={e=>setShortEndH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select disabled={isOvertimePayType} className="w-full border p-2 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-400" value={shortEndM} onChange={e=>setShortEndM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div></div>
+                        </div>
+                        <div className="text-[11px] text-gray-500">註：同日會自動扣除午休 12:00-13:00 重疊時數。</div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">起始日期</label><input type="date" className="w-full border p-2 rounded-lg bg-white" value={multiStartDate} onChange={e=>setMultiStartDate(e.target.value)} /></div>
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">天數（產生日期清單）</label><input type="number" min="1" className="w-full border p-2 rounded-lg bg-white" value={multiDays} onChange={e=>setMultiDays(e.target.value)} /></div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">第一天開始時間</label><div className="grid grid-cols-2 gap-2"><select className="w-full border p-2 rounded-lg bg-white" value={multiStartH} onChange={e=>setMultiStartH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select className="w-full border p-2 rounded-lg bg-white" value={multiStartM} onChange={e=>setMultiStartM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div></div>
+                          <div><label className="text-xs font-bold text-gray-600 block mb-1">最後一天結束時間</label><div className="grid grid-cols-2 gap-2"><select className="w-full border p-2 rounded-lg bg-white" value={multiEndH} onChange={e=>setMultiEndH(e.target.value)}>{Array.from({length:24}).map((_,i)=>{const v=String(i).padStart(2,'0');return <option key={v} value={v}>{v}</option>;})}</select><select className="w-full border p-2 rounded-lg bg-white" value={multiEndM} onChange={e=>setMultiEndM(e.target.value)}>{['00','10','20','30','40','50'].map(v=><option key={v} value={v}>{v}</option>)}</select></div><div className="text-[11px] text-gray-500 mt-1">註：以工作時段 08:00-12:00、13:00-17:00 計算，並自動扣除午休。</div></div>
+                        </div>
+                        <div className="text-sm bg-gray-50 border rounded-lg p-3 text-gray-700">
+                          <div className="font-bold mb-2">日期確認（自動避開例假日/週末）</div>
+                          {multiDates?.length ? (
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {multiDates.map(x=>(
+                                <label key={x.date} className="flex items-center gap-2 text-xs bg-white border rounded-lg px-2 py-1.5">
+                                  <input type="checkbox" checked={!!multiSelected?.[x.date]} onChange={e=>setMultiSelected(prev=>({...(prev||{}),[x.date]:e.target.checked}))}/>
+                                  <span className="font-bold">{x.date}{getWeekdayLabel(x.date)}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : <div className="text-xs text-gray-500">—</div>}
+                          <div className="text-[11px] text-gray-500 mt-2">已勾選 {(multiDates||[]).filter(x=>multiSelected?.[x.date]).length} 天（{fmtDaysHoursText(hours)}）</div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-sm bg-gray-50 border rounded-lg p-3 text-gray-700">
+                      <div className="font-bold mb-1">預覽</div>
+                      <div className="text-xs text-gray-600">{(()=>{try{if(manualRangeType==='lt1'&&isOvertime(form.type)){if(!shortDate)return '—';return `${shortDate} ${shortStartH}:${shortStartM} ～ ${shortDate} ${shortEndH}:${shortEndM}（共 ${fmtDaysHoursText(hours)}）`;}const picked=(multiDates||[]).filter(x=>multiSelected?.[x.date]).map(x=>x.date).sort();if(!picked.length)return '—';return `${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（共 ${fmtDaysHoursText(hours)}）`;}catch{return '—';}})()}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-bold text-gray-700 block mb-1">職務代理人</label>
+                  <select className="w-full border p-2.5 rounded-lg bg-white" value={form.deputyId} onChange={e=>setForm({...form,deputyId:e.target.value})} required={!(form.type||'').includes('加班')}>
+                    <option value="">請選擇</option>
+                    {deputies.map(d=><option key={d.docId||d.uid} value={(d.docId||d.uid||(d.email||'').toLowerCase())}>{d.name}</option>)}
+                  </select>
+                  <div className="text-[11px] text-gray-500 mt-1">送出時將自動檢查職代時段衝突</div>
+                </div>
+                <div>
+                  <label className="text-sm font-bold text-gray-700 block mb-1">事由（可補充）</label>
+                  <textarea className="w-full border p-2.5 rounded-lg bg-white min-h-[92px]" value={form.reason} onChange={e=>setForm({...form,reason:e.target.value})} placeholder="系統會先帶入假別名稱，你可再補充說明…"/>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-2">
+                {submitError && <div className="w-full text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2">{submitError}</div>}
+                <div className="text-xs text-gray-600">{(()=>{try{if(inputMode==='slot'){const d=slotDate;if(!d)return '請選擇日期';const r=getSlotRange(d,slotStartH,slotStartM,slotEndH,slotEndM);if(!r.valid)return '結束時間需晚於開始時間';return `預覽：${String(r.start||'').replace('T',' ')} ～ ${String(r.end||'').replace('T',' ')}（${fmtDaysHoursText(r.hours)}）`;}if(manualRangeType==='lt1'&&isOvertime(form.type)){if(!shortDate)return '請選擇日期';const s=`${shortDate} ${shortStartH}:${shortStartM}`;const e=`${shortDate} ${shortEndH}:${shortEndM}`;return `預覽：${s} ～ ${e}（${fmtDaysHoursText(hours)}）`;}const picked=(multiDates||[]).filter(x=>multiSelected?.[x.date]).map(x=>x.date).sort();if(!picked.length)return '請填寫起始日期與天數';return `預覽：${picked[0]} ${String(multiStartH).padStart(2,'0')}:${String(multiStartM).padStart(2,'0')} ～ ${picked[picked.length-1]} ${String(multiEndH).padStart(2,'0')}:${String(multiEndM).padStart(2,'0')}（${fmtDaysHoursText(hours)}）`;}catch{return '';}})()}</div>
+                <button type="submit" disabled={isSubmitting} className={`px-5 py-2.5 rounded-lg font-black text-white ${isSubmitting?'bg-gray-400':'bg-indigo-600 hover:bg-indigo-700'} transition shadow`}>{isSubmitting?'送出中…':'送出申請'}</button>
+              </div>
+            </form>
           </div>
         </div>
       </div>
