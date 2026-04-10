@@ -249,7 +249,7 @@ const DEFAULT_LEAVE_TYPES = [
 { id: 'l1', name: "出差", category: "official", desc: "處理公務" },
 { id: 'l2', name: "公出", category: "official", desc: "短暫外出洽公" },
 { id: 'l3', name: "公假", category: "official", desc: "依法令規定給予之公假" },
-{ id: 'l4_1', name: "加班(補休)", category: "official", desc: "延長工時，可累積補休時數" },
+{ id: 'l4_1', name: "加班(+時數)", category: "official", desc: "延長工時，可累積補休時數" },
 { id: 'l4_2', name: "加班(請款)", category: "official", desc: "延長工時，請領加班費" },
 { id: 'l5', name: "特休", category: "personal", desc: "有薪，依年資給予" },
 { id: 'l6', name: "事假", category: "personal", desc: "無薪，一年最多14天" },
@@ -260,28 +260,31 @@ const DEFAULT_LEAVE_TYPES = [
 { id: 'l11', name: "產假/陪產檢及陪產假", category: "personal", desc: "有薪，產假8星期/陪產假7天" },
 { id: 'l12', name: "家庭照顧假", category: "personal", desc: "無薪，併入事假計算，一年最多7天" },
 { id: 'l13', name: "補休", category: "personal", desc: "使用加班累積之時數" },
-{ id: 'l14', name: "榮譽假", category: "personal", desc: "內部獎勵" }];
+{ id: 'l14', name: "榮譽假", category: "personal", desc: "內部獎勵" },
+{ id: 'l15', name: "教育訓練", category: "official", desc: "機構辦理之教育訓練，免審核直接記錄", autoApprove: true }];
 
 
 // --- Overtime type canonicalization (legacy compatibility) ---
-// 你指定的命名規則：
-// - 新名稱：加班(補休)；舊名稱：加班申請(列計)、加班申請(補休) → 統一視為「加班(補休)」
-// - 新名稱：加班(請款)；舊名稱：加班申請(不列計)、加班申請(請款) → 統一視為「加班(請款)」
-const OVERTIME_COMP_TYPE = "加班(補休)";
+// 命名規則：
+// - 新名稱：加班(+時數)；舊名稱：加班(+時數)、加班申請(列計)、加班申請(補休)、加班(列計) → 統一視為「加班(+時數)」
+// - 新名稱：加班(請款)；舊名稱：加班申請(不列計)、加班申請(請款)、加班(不列計) → 統一視為「加班(請款)」
+const OVERTIME_COMP_TYPE = "加班(+時數)";
 var OVERTIME_COMP_TYPE_LEGACY = "加班申請(列計)"; // legacy: 舊名稱（列計）
 var OVERTIME_COMP_TYPE_LEGACY2 = "加班申請(補休)"; // legacy: 舊名稱（補休）
 // expose for safety
 window.OVERTIME_COMP_TYPE_LEGACY = OVERTIME_COMP_TYPE_LEGACY;
-const OVERTIME_COMP_LEGACY_TYPES = new Set(["加班申請(列計)", "加班申請(補休)", "加班(列計)"]);
+// 加班(+時數) 也納入 legacy，確保舊資料自動對應到新名稱
+const OVERTIME_COMP_LEGACY_TYPES = new Set(["加班申請(列計)", "加班申請(補休)", "加班(補休)", "加班(列計)", "加班(+時數)"]);
 const OVERTIME_PAY_TYPE = "加班(請款)";
 const OVERTIME_PAY_LEGACY_TYPES = new Set(["加班申請(不列計)", "加班申請(請款)", "加班(不列計)"]);
 const isOvertime = (t) => (t || "").includes("加班");
 
-// 將資料庫/舊資料的字串正規化為「加班(補休)」或「加班(請款)」
+// 將資料庫/舊資料的字串正規化為「加班(+時數)」或「加班(請款)」
 const normalizeOvertimeType = (t) => {
   const x = (t || "").trim();
   if (!x) return x;
-  if (OVERTIME_COMP_LEGACY_TYPES.has(x) || (x.includes("加班") && (x.includes("補休") || x.includes("補修") || x.includes("列計")) && !x.includes("不列計") && !x.includes("請款"))) {
+  if (OVERTIME_COMP_LEGACY_TYPES.has(x) || x === OVERTIME_COMP_TYPE ||
+      (x.includes("加班") && (x.includes("補休") || x.includes("補修") || x.includes("列計") || x.includes("+時數") || x.includes("時數")) && !x.includes("不列計") && !x.includes("請款"))) {
     return OVERTIME_COMP_TYPE;
   }
   if (OVERTIME_PAY_LEGACY_TYPES.has(x) || (x.includes("加班") && (x.includes("不列計") || x.includes("請款")))) {
@@ -290,11 +293,15 @@ const normalizeOvertimeType = (t) => {
   return x;
 };
 
-// 判斷是否屬於「加班(補休)」或「加班(請款)」
+// 判斷是否屬於「加班(+時數)」或「加班(請款)」
 const isOvertimeComp = (t) => normalizeOvertimeType(t) === OVERTIME_COMP_TYPE;
 const isOvertimePay = (t) => normalizeOvertimeType(t) === OVERTIME_PAY_TYPE;
 // 假別下拉排序（把常用假別置頂）
-const LEAVE_SELECT_PRIORITY = ["特休","榮譽假","加班(請款)","加班(補休)","補休"];
+// 判斷某假別是否為「免審核直接核准」類型（autoApprove: true）
+const isAutoApproveType = (typeName, leaveTypesArr) =>
+  !!(leaveTypesArr || []).find(t => t.name === typeName && t.autoApprove);
+
+const LEAVE_SELECT_PRIORITY = ["特休","榮譽假","加班(請款)","加班(+時數)","補休"];
 const sortLeaveTypesForSelect = (arr=[]) => {
   const list = Array.isArray(arr) ? [...arr] : [];
   const rank = (name) => {
@@ -1377,6 +1384,7 @@ const [selAreas, setSelAreas] = useState([]); // 修改：改為陣列支援複�
 const [selUsers, setSelUsers] = useState([]);
 const [editGroupId, setEditGroupId] = useState(null);
 const [isSubmitting, setIsSubmitting] = useState(false);
+const [selAllStaff, setSelAllStaff] = useState(false); // 全體標記（教育訓練等不需個別派員）
 const [modalError, setModalError] = useState('');
 const [modalWarning, setModalWarning] = useState('');
 const [importantModalOpen, setImportantModalOpen] = useState(false);
@@ -1533,6 +1541,7 @@ setModalData({ date: dStr, workItem: '', note: '' });
 applySlotPreset('morning');
 setSelAreas([]); // 初始化清空
 setSelUsers([]);
+setSelAllStaff(false);
 setModalError('');
 setModalWarning('');
 setEditGroupId(null);
@@ -1550,7 +1559,8 @@ setModalStartTime(tagEv.startTime || preset.start);
 setModalEndTime(tagEv.endTime || preset.end);
 // 處理舊資料(字串)與新資料(陣列)的相容性
 setSelAreas(Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []));
-setSelUsers(personEvs.map(p => p.userId));
+setSelUsers(personEvs.filter(p => p.userId !== '__ALL__').map(p => p.userId));
+setSelAllStaff(!!(tagEv.allStaff));
 setModalError('');
 setModalWarning('');
 setEditGroupId(tagEv.groupId);
@@ -1802,10 +1812,16 @@ try {
 if (editGroupId) await crud.deleteEventsByGroup(editGroupId);
 const groupId = editGroupId || `g_${Date.now()}`;
 // 儲存 selAreas 陣列 + 自訂起訖時間
-await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, note: modalData.note, timestamp: new Date() });
-for(const uid of selUsers) {
-const u = users.find(x=>x.uid === uid || x.docId === uid);
-if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });}
+await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, note: modalData.note, allStaff: selAllStaff, timestamp: new Date() });
+if (selAllStaff) {
+  // 全體標記：新增一筆虛擬 __ALL__ 人員事件，讓「待派員」通知不觸發，且會議清單可顯示「全體」
+  await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: '__ALL__', userName: '全體', userAvatar: '全', userColor: 'bg-teal-200', slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });
+} else {
+  for(const uid of selUsers) {
+    const u = users.find(x=>x.uid === uid || x.docId === uid);
+    if(u) await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: u.uid || u.docId, userName: u.name, userAvatar: u.initials, userColor: u.color, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });
+  }
+}
 if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && leaveAssignments.length > 0) {
   for (const { leave, assignedUser } of leaveAssignments) {
     if (!assignedUser) continue;
@@ -2545,7 +2561,8 @@ const renderGroup = (g) => {
   const note = g.tag?.note || '';
   const groupEvents = [g.tag, ...g.people].filter(Boolean);
   const slotType = g.slot || 'all_day';
-  const hasPeople = (g.people || []).length > 0;
+  const isAllStaff = !!g.tag?.allStaff;
+  const hasPeople = isAllStaff || (g.people || []).some(p => p.userId !== '__ALL__');
   const bgClass = getWorkBgClass(tagName, hasPeople);
   const startTime = String(g.tag?.startTime || '').slice(0,5);
   const endTime = String(g.tag?.endTime || '').slice(0,5);
@@ -2554,7 +2571,7 @@ const renderGroup = (g) => {
 
   const allAreasTitle = areas.join('、');
 
-  const sortedPeople = [...(g.people || [])].sort((a,b)=>{
+  const sortedPeople = [...(g.people || [])].filter(p => p.userId !== '__ALL__').sort((a,b)=>{
     const aj=(userMetaById[a.userId]?.joinDate)?new Date(userMetaById[a.userId].joinDate).getTime():Number.POSITIVE_INFINITY;
     const bj=(userMetaById[b.userId]?.joinDate)?new Date(userMetaById[b.userId].joinDate).getTime():Number.POSITIVE_INFINITY;
     return aj-bj;
@@ -2575,30 +2592,38 @@ const renderGroup = (g) => {
     >
       <div className={`px-2 ${hasInfoLine ? 'py-1.5 gap-1' : 'py-1 gap-0.5'} text-xs flex flex-col`}>
   <div className="flex items-center justify-between gap-2">
-    <div className="flex items-center gap-1 overflow-hidden" title={allPeopleTitle}>
+    <div className="flex items-center gap-1 overflow-hidden" title={isAllStaff ? '全體參與' : allPeopleTitle}>
       <div className="flex items-center gap-1 flex-nowrap">
-        {shownPeople.map(p => {
-          const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
-          const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
-          return (
-            <UserAvatar
-              key={p.id}
-              user={displayUser}
-              size="w-5 h-5 md:w-6 md:h-6"
-              textSize="text-xs"
-              className="shadow-sm border-white border-[1.5px] flex-shrink-0"
-            />
-          );
-        })}
-        {morePeople > 0 && (
-          <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-white/60 text-gray-700 border border-gray-200 flex-shrink-0">
-            +{morePeople}
+        {isAllStaff ? (
+          <span className="px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-teal-100 text-teal-800 border border-teal-400 whitespace-nowrap">
+            全體
           </span>
-        )}
-        {!hasPeople && (
-          <span className="px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-yellow-400/60 text-yellow-900 border border-yellow-500 whitespace-nowrap">
-            待派員
-          </span>
+        ) : (
+          <>
+            {shownPeople.map(p => {
+              const userProfile = users.find(u => u.uid === p.userId || u.docId === p.userId || u.name === p.userName);
+              const displayUser = userProfile || { initials: p.userAvatar, color: p.userColor || 'bg-gray-200', usePhoto: false };
+              return (
+                <UserAvatar
+                  key={p.id}
+                  user={displayUser}
+                  size="w-5 h-5 md:w-6 md:h-6"
+                  textSize="text-xs"
+                  className="shadow-sm border-white border-[1.5px] flex-shrink-0"
+                />
+              );
+            })}
+            {morePeople > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-white/60 text-gray-700 border border-gray-200 flex-shrink-0">
+                +{morePeople}
+              </span>
+            )}
+            {!hasPeople && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-yellow-400/60 text-yellow-900 border border-yellow-500 whitespace-nowrap">
+                待派員
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -2805,7 +2830,14 @@ className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${activ
 <input className="w-full border p-2 rounded bg-white text-sm" placeholder="例如: 09:00 或 備註事項" value={modalData.note} onChange={e=>setModalData({ ...modalData, note:e.target.value})}/></div>
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label>
-<div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+<div className="mb-2">
+<button type="button"
+  onClick={()=>{ const next=!selAllStaff; setSelAllStaff(next); if(next) setSelUsers([]); }}
+  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition ${selAllStaff?'bg-teal-100 border-teal-500 text-teal-800 ring-1 ring-teal-300':'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+  <Users size={12}/> 全體標記（教育訓練 / 不需個別派員）
+</button>
+</div>
+<div className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${selAllStaff?'opacity-40 pointer-events-none':''}`}>
 {usersBySeniority.map(u => {
 const active = selUsers.includes(u.uid || u.docId);
 return (
@@ -4333,12 +4365,27 @@ let usedCompensatory = 0;
 leaves.forEach(l => { if ((l.requesterId === user.uid || l.requesterId === user.docId || l.requesterUid === user.uid || l.requesterDocId === user.docId) && l.status === 'approved' && l.type === '補休') { usedCompensatory += Number(l.hours); } });
 const balance = totalOvertime - usedCompensatory;
 if (finalHours > balance) { showSubmitError(`補休時數不足，目前可用 ${balance} 小時，申請 ${finalHours} 小時。`); return; }}
-if(!isOvertime(form.type) && hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ const hit = getDeputyConflict(form.deputyId, finalStart, finalEnd); const detail = hit ? `\n衝突資料：${hit.title}\n衝突時段：${hit.timeText}${hit.status ? `\n狀態：${hit.status}` : ''}` : ''; showSubmitError(`職務代理人時段衝突，請改選其他人員。${detail}`); return; }
 const isOvertimeReq = isOvertime(form.type);
+const isAutoApp = isAutoApproveType(form.type, leaveTypes); // 免審核假別
+if(!isAutoApp && !isOvertime(form.type) && hasDeputyConflict(form.deputyId, finalStart, finalEnd)){ const hit = getDeputyConflict(form.deputyId, finalStart, finalEnd); const detail = hit ? `\n衝突資料：${hit.title}\n衝突時段：${hit.timeText}${hit.status ? `\n狀態：${hit.status}` : ''}` : ''; showSubmitError(`職務代理人時段衝突，請改選其他人員。${detail}`); return; }
 if(!form.type){ showSubmitError('請先選擇假別。'); setTypeError(true); return; }
-if(!isOvertimeReq && !form.deputyId){ showSubmitError('請先選擇職務代理人。'); return; }
-const deputyName = isOvertimeReq ? '-' : (getUserNameByKey(users, form.deputyId, '') || '');
-const payload = { ...form, deputyId: isOvertimeReq ? '' : (form.deputyId||''), requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null, requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name, start: finalStart, end: finalEnd, hours: finalHours, status: isOvertimeReq ? 'deputy_signed' : 'pending', deputySignedAt: isOvertimeReq ? new Date() : null, deputySignedBy: isOvertimeReq ? 'EXEMPT' : null, timestamp: new Date(), sourceGroupId: submittingTaskId || null, sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() };
+if(!isAutoApp && !isOvertimeReq && !form.deputyId){ showSubmitError('請先選擇職務代理人。'); return; }
+const deputyName = (isOvertimeReq || isAutoApp) ? '-' : (getUserNameByKey(users, form.deputyId, '') || '');
+const payload = { ...form,
+  deputyId: (isOvertimeReq || isAutoApp) ? '' : (form.deputyId||''),
+  requesterId: user.docId || user.uid, requesterUid: user.uid, requesterDocId: user.docId || null,
+  requesterEmail: (user.email||'').toLowerCase(), requesterName: user.name,
+  start: finalStart, end: finalEnd, hours: finalHours,
+  // 免審核 → 直接 approved；加班 → deputy_signed；其他 → pending
+  status: isAutoApp ? 'approved' : (isOvertimeReq ? 'deputy_signed' : 'pending'),
+  deputySignedAt: (isAutoApp || isOvertimeReq) ? new Date() : null,
+  deputySignedBy: isAutoApp ? 'AUTO' : (isOvertimeReq ? 'EXEMPT' : null),
+  deputySignedByName: isAutoApp ? '免審核' : (isOvertimeReq ? '免職代' : null),
+  approverId: isAutoApp ? 'AUTO' : null,
+  approvedAt: isAutoApp ? new Date() : null,
+  approvedByName: isAutoApp ? '自動核准' : null,
+  timestamp: new Date(), sourceGroupId: submittingTaskId || null,
+  sourceType: submittingTaskId ? 'calendar_event' : '', submittedAt: new Date() };
 setConfirmData({ type: payload.type, start: payload.start, end: payload.end, hours: payload.hours, deputyName, reason: payload.reason || '' });
 setPendingSubmit(payload);
 setConfirmOpen(true);
@@ -6221,10 +6268,10 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
   };
 
   // 會計用假別分組（例假日不納入統計）
-  // 依附圖的會計輸出格式：休假(特休)、榮譽假、加班(請款)、加班(補休用)、補休、其他假別
+  // 會計用假別分組格式：特休、榮譽假、加班(請款)、加班(+時數)、補休、其他假別
   const BASE_ROWS = [
-    // 依附圖的會計輸出格式：特休、榮譽假、加班(請款)、加班(補休)、補休、其他假別
-    // 注意：此處僅改「名稱顯示」與「統計歸類」(依假別 type)，不會影響其他頁面資料
+    // 依附圖的會計輸出格式：特休、榮譽假、加班(請款)、加班(+時數)、補休、其他假別
+    // 注意：match 使用 normalizeOvertimeType，可相容舊資料「加班(補休)」等命名
     { key: '特休', label: '特休', match: (t) => {
         const s = String(t||'');
         return s.includes('特休') && !s.includes('獲得');
@@ -6232,7 +6279,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     },
     { key: '榮譽假', label: '榮譽假', match: (t) => String(t||'') === '榮譽假' },
     { key: '加班(請款)', label: '加班(請款)', match: (t) => String(t||'') === '加班(請款)' },
-    { key: '加班(補休)', label: '加班(補休)', match: (t) => String(t||'') === '加班(補休)' },
+    { key: '加班(+時數)', label: '加班(+時數)', match: (t) => isOvertimeComp(t) },
     { key: '補休', label: '補休', match: (t) => String(t||'') === '補休' },
   ];
 
@@ -6305,14 +6352,14 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     return Math.round(v);
   };
 
-  // #額外加班：可補休（依加班(補休)核准小時數累加）
+  // #額外加班：可補休（依加班(+時數)核准小時數累加）
   const extraCompHours = (() => {
     if (!targetUser) return 0;
     let total = 0;
     scopedLeaves.forEach(l => {
       const t = String(l.type || '');
-      // 只計入「加班(補休...)」這種會產生補休的加班，避免把「補休」本身算進來
-      if (t === '加班(補休)') {
+      // 只計入「加班(+時數)」這種會產生補休的加班（含舊名稱「加班(補休)」等），避免把「補休」本身算進來
+      if (isOvertimeComp(t)) {
         total += Number(l.hours || 0);
       }
     });
@@ -6323,7 +6370,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     let total = 0;
     (arr || []).forEach(l => {
       const t = String(l.type || '');
-      if (t === '加班(補休)') {
+      if (isOvertimeComp(t)) {
         total += Number(l.hours || 0);
       }
     });
@@ -6428,7 +6475,7 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
         const nameHireLine = esc(u.name || u.displayName || u.email || '—') + (join ? ` (${esc(join)}到職)` : '');
 
         rows.forEach((r, idx) => {
-          const isOvertimeGroup = (r.key === '加班(補休)' || r.key === '補休');
+          const isOvertimeGroup = (r.key === '加班(+時數)' || r.key === '補休');
           const bg = isOvertimeGroup ? 'background:#FFF2CC;' : '';
           html += `<tr style="${bg}">`;
 
@@ -6567,8 +6614,8 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
               </thead>
               <tbody>
                 {rowData.map(r => (
-                  <tr key={r.key} className={((r.key==='加班(補休)'||r.key==='補休') ? "bg-yellow-50 hover:bg-yellow-100/60" : "hover:bg-gray-50")}>
-                    <td className={"p-2 border font-bold whitespace-nowrap " + ((r.key==='加班(補休)'||r.key==='補休') ? "text-yellow-800" : "text-gray-700")}>{r.label}</td>
+                  <tr key={r.key} className={((r.key==='加班(+時數)'||r.key==='補休') ? "bg-yellow-50 hover:bg-yellow-100/60" : "hover:bg-gray-50")}>
+                    <td className={"p-2 border font-bold whitespace-nowrap " + ((r.key==='加班(+時數)'||r.key==='補休') ? "text-yellow-800" : "text-gray-700")}>{r.label}</td>
                     {months.map(m => (<td key={m} className="p-1 border text-center">{fmt(r.months[m])}</td>))}
                   </tr>
                 ))}
@@ -7412,6 +7459,8 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
         groups[e.groupId].date = e.date || '';
         groups[e.groupId].workItem = e.item || '';
         groups[e.groupId].slot = e.slot || 'all_day';
+        groups[e.groupId].startTime = e.startTime || '';
+        groups[e.groupId].endTime = e.endTime || '';
       }
       if (e.type === 'person' && e.userName) {
         if (!groups[e.groupId].people.includes(e.userName)) groups[e.groupId].people.push(e.userName);
@@ -7567,6 +7616,7 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
                       <th className="px-4 py-3 font-semibold w-28">日期</th>
+                      <th className="px-4 py-3 font-semibold w-32">時間</th>
                       <th className="px-4 py-3 font-semibold w-36">工作項目</th>
                       <th className="px-4 py-3 font-semibold">出席人員</th>
                       <th className="px-4 py-3 font-semibold min-w-[200px]">備註</th>
@@ -7578,16 +7628,24 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
                       const isEditing = gid in editingNote;
                       const isSaving = !!savingNote[gid];
                       const noteVal = isEditing ? editingNote[gid] : (meetingNotes?.[gid] ?? '');
+                      const timeText = row.startTime && row.endTime
+                        ? `${String(row.startTime).slice(0,5)}～${String(row.endTime).slice(0,5)}`
+                        : row.slot === 'all_day' ? '全天' : row.slot === 'morning' ? '上午' : row.slot === 'afternoon' ? '下午' : '—';
                       return (
                         <tr key={gid} className="hover:bg-gray-50 transition">
                           <td className="px-4 py-3 font-medium text-gray-700 whitespace-nowrap">{row.date}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{timeText}</td>
                           <td className="px-4 py-3">
                             <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-md text-xs font-bold">{row.workItem}</span>
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-1">
                               {row.people.length > 0
-                                ? row.people.map((p, i) => <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">{p}</span>)
+                                ? row.people.map((p, i) => (
+                                    p === '全體'
+                                      ? <span key={i} className="px-2 py-0.5 bg-teal-100 text-teal-800 border border-teal-300 rounded-full text-xs font-bold">全體</span>
+                                      : <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">{p}</span>
+                                  ))
                                 : <span className="text-gray-400 text-xs">—</span>
                               }
                             </div>
