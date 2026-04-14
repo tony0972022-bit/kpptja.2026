@@ -1158,7 +1158,7 @@ calendarEvents.filter(e => e.date === dStr).forEach(e => {
   else if (e.type === 'person') groupMap[e.groupId].people.push(e);
 });
 const externalGroups = Object.values(groupMap)
-  .filter(g => g.tag && EXTERNAL_WORK_TAGS.includes(g.tag.item))
+  .filter(g => g.tag && g.tag.item)
   .map(g => {
     const slot = g.tag.slot || 'all_day';
     const startTime = g.tag.startTime || (slot === 'morning' ? '08:00' : slot === 'afternoon' ? '13:00' : '08:00');
@@ -1174,11 +1174,11 @@ const externalGroups = Object.values(groupMap)
     };
   })
   .sort((a, b) => a.startTime.localeCompare(b.startTime));
-// 收集當日休假人員（含時段）
+// 收集當日休假人員（含假別與時段）
 const leavePersonnel = (leaves || [])
   .filter(l => {
     if (l.status !== 'approved') return false;
-    if (!personalLeaveTypeNames.includes(l.type)) return false;
+    if (l.type === '榮譽假(獲得)') return false;
     const startDate = String(l.start || '').slice(0, 10);
     const endDate = String(l.end || l.start || '').slice(0, 10);
     return startDate <= dStr && dStr <= endDate;
@@ -1186,7 +1186,7 @@ const leavePersonnel = (leaves || [])
   .map(l => {
     const hrs = Number(l.hours || 0);
     const period = hrs >= 8 ? '整天' : (String(l.start || '').includes('T08') || String(l.start || '').includes('T09') ? '上午' : '下午');
-    return { name: l.requesterName, period };
+    return { name: l.requesterName, type: l.type, period };
   });
 week.push({ day: weekDays[d.getDay()], date: dStr, externalGroups, leavePersonnel });}
 return week;
@@ -1360,12 +1360,18 @@ return (
 <td className="p-2 border-l border-gray-100">
   {d.leavePersonnel.length === 0 ? <span className="text-gray-300">—</span> : (
     <div className="flex flex-col gap-1">
-      {d.leavePersonnel.map((lp, li) => (
-        <span key={li} className="inline-flex items-center gap-1 bg-green-50 border border-green-200 text-green-800 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap w-fit">
-          {lp.name}
-          <span className="text-green-500 font-bold">{lp.period}</span>
-        </span>
-      ))}
+      {d.leavePersonnel.map((lp, li) => {
+        const isOffType = ['出差','公出','公假','加班(+時數)','加班(請款)','補休','教育訓練'].includes(lp.type);
+        const colorCls = isOffType ? 'bg-sky-50 border-sky-200 text-sky-800' : 'bg-green-50 border-green-200 text-green-800';
+        const periodCls = isOffType ? 'text-sky-600' : 'text-green-600';
+        return (
+          <span key={li} className={`inline-flex items-center gap-0.5 border px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap w-fit ${colorCls}`}>
+            {lp.name}
+            <span className={`font-bold ${periodCls}`}>{lp.period}</span>
+            <span className="text-gray-400 text-[9px]">({lp.type})</span>
+          </span>
+        );
+      })}
     </div>
   )}
 </td>
@@ -5966,6 +5972,7 @@ let usedBereavement = 0;
 let usedMaternity = 0;
 let usedFamilyCare = 0;
 let usedOfficial = 0; // 新增：公務出差
+let usedGongJia = 0; // 公假專項統計
 filteredLeaves.forEach(l => {
 const hours = getEffectiveLeaveHours(l);
 const days = hours / 8;
@@ -5985,6 +5992,7 @@ usedFamilyCare += hours;
 usedPersonal += hours;}
 // 公務出差
 if (l.type === '出差' || l.type === '公出' || l.type === '公假') usedOfficial += hours;
+if (l.type === '公假') usedGongJia += hours;
 });
 let allTimeCompensatoryEarned = 0;
 let allTimeCompensatoryUsed = 0;
@@ -6137,10 +6145,12 @@ return (
   </div>
   <div className="text-xs space-y-1">
     <div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div>
-    <details className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
-      <summary className="cursor-pointer select-none font-bold text-gray-700">假別說明</summary>
-      <div className="mt-2">出差/公出/公假</div>
-    </details>
+    <div className="mt-2 pt-2 border-t border-gray-100">
+      <div className="font-bold text-gray-700 mb-1">公假 (預設配額 1天)</div>
+      <div className="flex justify-between text-gray-600"><span>配額:</span><span className="font-bold text-sky-600">8 小時<span className="text-[10px] text-gray-400 ml-1">(1天)</span></span></div>
+      <div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedGongJia} 小時</span></div>
+      <div className={`flex justify-between font-bold ${8 - usedGongJia > 0 ? 'text-green-600' : 'text-red-500'}`}><span>剩餘:</span><span>{Math.max(0, 8 - usedGongJia)} 小時</span></div>
+    </div>
   </div>
 </div>
 </div>
@@ -6790,6 +6800,7 @@ let afternoonState = isRedDay ? 'holiday' : 'normal';
 const dayLeaves = leaves.filter(l =>
 isMyLeave(l) &&
 l.status === 'approved' &&
+l.type !== '榮譽假(獲得)' &&
 isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
@@ -6888,6 +6899,7 @@ let afternoonOfficialLabel = '出差';
 const dayLeaves = leaves.filter(l =>
 isMyLeave(l) &&
 l.status === 'approved' &&
+l.type !== '榮譽假(獲得)' &&
 isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
@@ -6925,6 +6937,12 @@ dayLeaves.forEach(dl => {
   if (isOfficialLeave) return;
   const { hours: dh, period: dp } = calcDailyLeaveInfo(dl, dateStr);
   remarkParts.push(`${dl.type} ${dp} ${dh}小時`);
+});
+// 榮譽假(獲得)另外加入備註顯示，不影響出勤狀態
+const honorGainLeaves = leaves.filter(l =>
+  isMyLeave(l) && l.status === 'approved' && l.type === '榮譽假(獲得)' && isDateInLeaveRange(l, dateStr));
+honorGainLeaves.forEach(hl => {
+  if (!isRedDay) remarkParts.push(`榮譽假(獲得) 整天 ${hl.hours}小時`);
 });
 const remarkText = remarkParts.join(' / ');
 return (
@@ -7461,6 +7479,7 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
         groups[e.groupId].slot = e.slot || 'all_day';
         groups[e.groupId].startTime = e.startTime || '';
         groups[e.groupId].endTime = e.endTime || '';
+        groups[e.groupId].note = e.note || '';
       }
       if (e.type === 'person' && e.userName) {
         if (!groups[e.groupId].people.includes(e.userName)) groups[e.groupId].people.push(e.userName);
@@ -7546,6 +7565,33 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
 
   const monthLabels = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
 
+  // ── 事由欄位顯示/隱藏 ──
+  const [showReasonCol, setShowReasonCol] = useState(true);
+
+  // ── Excel 下載 ──
+  const downloadMeetingExcel = () => {
+    if (!XLSX) { alert('Excel 套件未載入，請重新整理頁面。'); return; }
+    const rows = filteredRows.map(row => {
+      const timeText = row.startTime && row.endTime
+        ? `${String(row.startTime).slice(0,5)}～${String(row.endTime).slice(0,5)}`
+        : row.slot === 'all_day' ? '全天' : row.slot === 'morning' ? '上午' : row.slot === 'afternoon' ? '下午' : '—';
+      return {
+        '日期': row.date,
+        '時間': timeText,
+        '工作項目': row.workItem,
+        '出席人員': row.people.join('、'),
+        '事由': row.note || '',
+        '備註': meetingNotes?.[row.groupId] || '',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const colWidths = [{ wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
+    ws['!cols'] = colWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `會議及宣導_${yearFilter}`);
+    XLSX.writeFile(wb, `會議及宣導_${yearFilter}.xlsx`);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       {/* 標題 */}
@@ -7555,6 +7601,9 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
           <select className="border p-1.5 rounded-lg text-sm bg-white" value={yearFilter} onChange={e=>setYearFilter(e.target.value)}>
             {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
           </select>
+          <button onClick={downloadMeetingExcel} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm transition" title="下載 Excel">
+            <Download size={15}/> 下載 Excel
+          </button>
         </div>
       </div>
 
@@ -7596,6 +7645,10 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
                   </select>
                 </div>
                 <span className="text-xs text-gray-400 ml-auto">共 {filteredRows.length} 筆</span>
+                <button onClick={() => setShowReasonCol(v => !v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${showReasonCol ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-gray-100 border-gray-200 text-gray-500'}`}>
+                  {showReasonCol ? '隱藏事由欄' : '顯示事由欄'}
+                </button>
               </div>
             )}
             {(meetingSelectedItems || []).length === 0 ? (
@@ -7619,6 +7672,7 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
                       <th className="px-4 py-3 font-semibold w-32">時間</th>
                       <th className="px-4 py-3 font-semibold w-36">工作項目</th>
                       <th className="px-4 py-3 font-semibold">出席人員</th>
+                      {showReasonCol && <th className="px-4 py-3 font-semibold min-w-[160px]">事由</th>}
                       <th className="px-4 py-3 font-semibold min-w-[200px]">備註</th>
                     </tr>
                   </thead>
@@ -7650,6 +7704,9 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
                               }
                             </div>
                           </td>
+                          {showReasonCol && (
+                            <td className="px-4 py-3 text-xs text-gray-600">{row.note || <span className="text-gray-300">—</span>}</td>
+                          )}
                           <td className="px-4 py-3">
                             {isEditing ? (
                               <div className="flex flex-col gap-1.5">
@@ -7966,3 +8023,4 @@ root.render(<App />);</script></body></html>
 
 
 
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
