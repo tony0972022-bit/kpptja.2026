@@ -1176,19 +1176,34 @@ const externalGroups = Object.values(groupMap)
     };
   })
   .sort((a, b) => a.startTime.localeCompare(b.startTime));
-// 收集當日休假人員（含假別與時段）
+// 收集當日休假人員（只含私假：特休、病假、榮譽假、事假等，不含公出/出差/公假等公務假）
 const leavePersonnel = (leaves || [])
   .filter(l => {
     if (l.status !== 'approved') return false;
-    if (l.type === '榮譽假(獲得)') return false;
+    if (l.type === '榮譽假(獲得)') return false; // 獲得記錄不算請假
+    // 只顯示私假（category=personal），排除公務假別
+    if (!personalLeaveTypeNames.includes(l.type)) return false;
     const startDate = String(l.start || '').slice(0, 10);
     const endDate = String(l.end || l.start || '').slice(0, 10);
     return startDate <= dStr && dStr <= endDate;
   })
   .map(l => {
     const hrs = Number(l.hours || 0);
-    const period = hrs >= 8 ? '整天' : (String(l.start || '').includes('T08') || String(l.start || '').includes('T09') ? '上午' : '下午');
-    return { name: l.requesterName, type: l.type, period };
+    const startStr = String(l.start || '');
+    const endStr = String(l.end || '');
+    let period;
+    if (hrs >= 8) {
+      period = '整天';
+    } else if (hrs === 4) {
+      // 標準半天：依開始時間判斷上午/下午
+      period = (startStr.includes('T08') || startStr.includes('T09') || startStr.includes('T07')) ? '上午' : '下午';
+    } else {
+      // 非標準時數（1~3.5小時等）：顯示實際時間區間
+      const sTime = startStr.slice(11, 16); // HH:MM
+      const eTime = endStr.slice(11, 16);
+      period = sTime && eTime ? `${sTime}~${eTime}` : (sTime || '指定時段');
+    }
+    return { name: l.requesterName, type: l.type, period, hrs };
   });
 week.push({ day: weekDays[d.getDay()], date: dStr, externalGroups, leavePersonnel });}
 return week;
@@ -1363,13 +1378,11 @@ return (
   {d.leavePersonnel.length === 0 ? <span className="text-gray-300">—</span> : (
     <div className="flex flex-col gap-1">
       {d.leavePersonnel.map((lp, li) => {
-        const isOffType = ['出差','公出','公假','加班(+時數)','加班(請款)','補休','教育訓練'].includes(lp.type);
-        const colorCls = isOffType ? 'bg-sky-50 border-sky-200 text-sky-800' : 'bg-green-50 border-green-200 text-green-800';
-        const periodCls = isOffType ? 'text-sky-600' : 'text-green-600';
         return (
-          <span key={li} className={`inline-flex items-center gap-0.5 border px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap w-fit ${colorCls}`}>
+          <span key={li} className="inline-flex items-center gap-0.5 border bg-green-50 border-green-200 text-green-800 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap w-fit">
             {lp.name}
-            <span className={`font-bold ${periodCls}`}>{lp.period}</span>
+            <span className="font-bold text-green-600">{lp.period}</span>
+            <span className="text-green-500 text-[9px]">{lp.hrs}h</span>
             <span className="text-gray-400 text-[9px]">({lp.type})</span>
           </span>
         );
@@ -7682,7 +7695,7 @@ function MeetingView({ user, calendarEvents, workTags, meetingSelectedItems, mee
   const monthLabels = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
 
   // ── 事由欄位顯示/隱藏 ──
-  const [showReasonCol, setShowReasonCol] = useState(true);
+  const [showReasonCol, setShowReasonCol] = useState(false);
 
   // ── Excel 下載 ──
   const downloadMeetingExcel = () => {
