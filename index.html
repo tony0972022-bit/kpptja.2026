@@ -3382,7 +3382,23 @@ icsContent += "BEGIN:VTIMEZONE\r\nTZID:Asia/Taipei\r\nBEGIN:STANDARD\r\nTZOFFSET
 expandedRows.forEach((item, index) => {
 const dStr = item.date.replace(/-/g, '');
 let start = '', end = '';
-if (item.slot === 'morning') { start = `${dStr}T080000`; end = `${dStr}T120000`; } else if (item.slot === 'afternoon') { start = `${dStr}T130000`; end = `${dStr}T170000`; } else { start = `${dStr}T080000`; end = `${dStr}T170000`; }
+// 優先使用實際起訖時間（排班 tag 上的 startTime/endTime，或請假單的 start/end）
+const tagStartT = String(item.rawTag?.startTime || '').trim();
+const tagEndT = String(item.rawTag?.endTime || '').trim();
+const leaveStartT = String(item.rawLeave?.start || '').split('T')[1]?.slice(0, 5) || '';
+const leaveEndT = String(item.rawLeave?.end || '').split('T')[1]?.slice(0, 5) || '';
+const realStartT = tagStartT || leaveStartT;
+const realEndT = tagEndT || leaveEndT;
+const toICS = (hm) => {
+  const [hh, mm] = String(hm || '').split(':');
+  return `${String(hh || '00').padStart(2, '0')}${String(mm || '00').padStart(2, '0')}00`;
+};
+if (realStartT && realEndT) {
+  start = `${dStr}T${toICS(realStartT)}`;
+  end = `${dStr}T${toICS(realEndT)}`;
+} else if (item.slot === 'morning') { start = `${dStr}T080000`; end = `${dStr}T120000`; }
+else if (item.slot === 'afternoon') { start = `${dStr}T130000`; end = `${dStr}T170000`; }
+else { start = `${dStr}T080000`; end = `${dStr}T170000`; }
 const title = item.content || item.leaveType || '排班';
 let desc = item.note !== '-' ? item.note : '';
 if (item.leaveType !== '-') desc += `\\n假別: ${item.leaveType} (${item.leaveHours}hr)`;
@@ -6893,24 +6909,67 @@ batch.delete(ref);
 });
 try { await batch.commit(); alert('打卡紀錄已儲存！'); } catch (e) { alert('儲存失敗: ' + e.message); }
 };
-// helper：計算多日假單中某天的實際時數與時段（第一天/中間/最後一天分別處理）
+// helper：計算多日假單中某天的實際時數與時段（依實際起訖時間計算，扣除午休 12:00-13:00）
 const calcDailyLeaveInfo = (dl, dStr) => {
   const totalHours = Number(dl.hours || 0);
   const lsStr = String(dl.start || '').slice(0, 10);
   const leStr = String(dl.end || dl.start || '').slice(0, 10);
   if (!lsStr) return { hours: totalHours, period: '整天' };
+
+  // 取 start/end 的 HH:mm（若缺漏則用工作日預設 08:00 / 17:00）
+  const startT = String(dl.start || '').split('T')[1] || '08:00';
+  const endT = String(dl.end || dl.start || '').split('T')[1] || '17:00';
+
+  // 依起訖判斷時段（上午/下午/整天），以 12:00-13:00 為分界
+  const classifyPeriod = (sHM, eHM) => {
+    const toMin = (hm) => {
+      const [hh, mm] = String(hm || '').split(':');
+      return (Number(hh) || 0) * 60 + (Number(mm) || 0);
+    };
+    const s = toMin(sHM);
+    const e = toMin(eHM);
+    if (!(e > s)) return '整天';
+    // 僅落在上午工作時段 (<=12:00)
+    if (e <= 12 * 60) return '上午';
+    // 僅落在下午工作時段 (>=13:00)
+    if (s >= 13 * 60) return '下午';
+    // 跨越中午（含午休）→ 視為整天
+    return '整天';
+  };
+
+  // 依起訖計算當日有效時數（扣午休 12:00-13:00），上限 8 小時
+  const calcDayHours = (dateStr, sHM, eHM) => {
+    try {
+      const s = new Date(`${dateStr}T${sHM}`);
+      const e = new Date(`${dateStr}T${eHM}`);
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime()) || e <= s) return 0;
+      let h = (e.getTime() - s.getTime()) / 36e5;
+      const lunchS = new Date(`${dateStr}T12:00`);
+      const lunchE = new Date(`${dateStr}T13:00`);
+      const ov = Math.max(0, Math.min(e.getTime(), lunchE.getTime()) - Math.max(s.getTime(), lunchS.getTime()));
+      h -= ov / 36e5;
+      h = Math.max(0, Math.min(8, h));
+      return Math.round(h * 2) / 2; // 以 0.5 小時為刻度
+    } catch { return 0; }
+  };
+
+  // 單日假單：直接用儲存的 hours；若 hours 為 0 則由起訖時間回算
   if (!leStr || lsStr === leStr) {
-    const isMorn = (dl.start || '').includes('T08') || (dl.start || '').includes('T09');
-    return { hours: totalHours, period: totalHours >= 8 ? '整天' : (isMorn ? '上午' : '下午') };
+    const hoursFromTime = calcDayHours(lsStr, startT, endT);
+    const h = (totalHours > 0) ? totalHours : hoursFromTime;
+    const period = (h >= 8) ? '整天' : classifyPeriod(startT, endT);
+    return { hours: h, period };
   }
-  const startH = parseInt(String(dl.start || '').slice(11, 13)) || 8;
-  const endH = parseInt(String(dl.end || '').slice(11, 13)) || 17;
+
+  // 多日假單：依「該天在區間中的位置」決定使用的起訖時間
   const isFirst = dStr === lsStr;
   const isLast = dStr === leStr;
-  let h, period;
-  if (isFirst) { h = startH >= 13 ? 4 : 8; period = h >= 8 ? '整天' : '下午'; }
-  else if (isLast) { h = endH <= 12 ? 4 : 8; period = h >= 8 ? '整天' : '上午'; }
-  else { h = 8; period = '整天'; }
+  let sHM, eHM;
+  if (isFirst) { sHM = startT; eHM = '17:00'; }
+  else if (isLast) { sHM = '08:00'; eHM = endT; }
+  else { sHM = '08:00'; eHM = '17:00'; }
+  const h = calcDayHours(dStr, sHM, eHM);
+  const period = (h >= 8) ? '整天' : classifyPeriod(sHM, eHM);
   return { hours: h, period };
 };
 const downloadExcel = () => {
@@ -6934,15 +6993,14 @@ isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
 const isOfficial = officialTypes.includes(dayLeave.type);
-const isAllDay = Number(dayLeave.hours) >= 8;
-const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
-const isAfternoon = dayLeave.start.includes('T13') || dayLeave.start.includes('T12');
+// 依實際起訖時間判斷該日該假單的時段（上午/下午/整天），而非寫死 T08/T09/T12/T13
+const { period } = calcDailyLeaveInfo(dayLeave, dateStr);
 const stateVal = isOfficial ? 'official' : 'personal';
-if (isAllDay) {
+if (period === '整天') {
 morningState = stateVal; afternoonState = stateVal;
-} else if (isMorning) {
+} else if (period === '上午') {
 morningState = stateVal;
-} else if (isAfternoon) {
+} else if (period === '下午') {
 afternoonState = stateVal;}
 });
 const overtimeText = getDayOvertimeRanges(dateStr).map(x => `${x.type} ${x.start}-${x.end}`).join(" / ") || "";
@@ -7033,18 +7091,17 @@ isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
 const isOfficial = officialTypes.includes(dayLeave.type);
-const isAllDay = Number(dayLeave.hours) >= 8;
-const isMorning = dayLeave.start.includes('T08') || dayLeave.start.includes('T09');
-const isAfternoon = dayLeave.start.includes('T13') || dayLeave.start.includes('T12');
+// 依實際起訖時間判斷該日該假單的時段（上午/下午/整天），而非寫死 T08/T09/T12/T13
+const { period } = calcDailyLeaveInfo(dayLeave, dateStr);
 const stateVal = isOfficial ? 'official' : 'personal';
 const officialLabel = (dayLeave.type === '公出') ? '公出' : '出差';
-if (isAllDay) {
+if (period === '整天') {
 morningState = stateVal; afternoonState = stateVal;
 if (isOfficial) { morningOfficialLabel = officialLabel; afternoonOfficialLabel = officialLabel; }
-} else if (isMorning) {
+} else if (period === '上午') {
 morningState = stateVal;
 if (isOfficial) morningOfficialLabel = officialLabel;
-} else if (isAfternoon) {
+} else if (period === '下午') {
 afternoonState = stateVal;
 if (isOfficial) afternoonOfficialLabel = officialLabel;}
 });
