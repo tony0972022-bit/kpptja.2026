@@ -7049,6 +7049,7 @@ l.type !== '榮譽假(獲得)' &&
 isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
+if (isOvertime(dayLeave.type)) return; // 加班不覆蓋上下午打卡欄位，加班時段另由「加班」欄顯示
 const isOfficial = officialTypes.includes(dayLeave.type);
 // 依實際起訖時間判斷該日該假單的時段（上午/下午/整天），而非寫死 T08/T09/T12/T13
 const { period } = calcDailyLeaveInfo(dayLeave, dateStr);
@@ -7147,6 +7148,7 @@ l.type !== '榮譽假(獲得)' &&
 isDateInLeaveRange(l, dateStr));
 dayLeaves.forEach(dayLeave => {
 if (isRedDay) return;
+if (isOvertime(dayLeave.type)) return; // 加班不覆蓋上下午打卡欄位，加班時段另由「加班」欄顯示
 const isOfficial = officialTypes.includes(dayLeave.type);
 // 依實際起訖時間判斷該日該假單的時段（上午/下午/整天），而非寫死 T08/T09/T12/T13
 const { period } = calcDailyLeaveInfo(dayLeave, dateStr);
