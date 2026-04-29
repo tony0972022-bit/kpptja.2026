@@ -6914,6 +6914,7 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
   const allLeaveTypeNames = (leaveTypes || []).map(t => t.name);
   const [selLeaveTypes, setSelLeaveTypes] = useState(allLeaveTypeNames);
   const [selPersons, setSelPersons] = useState([]); // 凱宇限定，空陣列 = 全員
+  const [showLeaveSection, setShowLeaveSection] = useState(false); // 預設摺疊
 
   // 篩選器隨設定變動同步
   useEffect(() => { setSelAreas(areaTags); }, [areaTags.join(',')]);
@@ -7324,13 +7325,22 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
         </div>
       </div>
 
-      {/* ============== Section B：請假趨勢 ============== */}
+      {/* ============== Section B：請假趨勢（凱宇限定，預設摺疊） ============== */}
+      {isKaiyu && (
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 bg-gradient-to-r from-pink-50 to-purple-50 border-b border-gray-200 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setShowLeaveSection(v => !v)}
+          className="w-full px-5 py-4 bg-gradient-to-r from-pink-50 to-purple-50 border-b border-gray-200 flex items-center gap-2 hover:from-pink-100 hover:to-purple-100 transition text-left"
+        >
           <Activity className="text-pink-600" size={22}/>
           <h3 className="text-lg font-black text-gray-800">B. 人員請假趨勢</h3>
           <span className="text-xs text-gray-500 ml-auto">資料來源：請假申請（已核准 {leaves.filter(l=>l.status==='approved').length} 筆）</span>
-        </div>
+          {showLeaveSection
+            ? <ChevronDown size={20} className="text-gray-500"/>
+            : <ChevronRight size={20} className="text-gray-500"/>}
+        </button>
+        {showLeaveSection && (
         <div className="p-5 space-y-5">
           <div className="flex flex-wrap gap-3 items-end">
             <div>
@@ -7361,10 +7371,9 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
           </div>
 
           {isKaiyu && (
-            <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-3">
-              <div className="text-xs font-bold text-gray-700 mb-2 flex items-center gap-2">
+            <div>
+              <div className="text-xs font-bold text-gray-600 mb-2 flex items-center gap-2">
                 人員（多選）
-                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px]">凱宇限定</span>
                 <span className="text-gray-400 font-normal text-[10px]">不選代表全員</span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -7441,12 +7450,11 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
             </div>
           </div>
 
-          {/* 圖7 凱宇限定：個人 × 假別 */}
+          {/* 圖7：個人 × 假別 */}
           {isKaiyu && personLeaveTable && personLeaveTable.length > 0 && (
             <div>
               <div className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                 👥 個人 × 假別 彙整表（時數）
-                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px]">凱宇限定</span>
               </div>
               <div className="overflow-auto bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
                 <table className="text-xs min-w-full">
@@ -7474,7 +7482,9 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
             </div>
           )}
         </div>
+        )}
       </div>
+      )}
     </div>
   );
 }
