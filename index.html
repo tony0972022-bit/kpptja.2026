@@ -17,6 +17,7 @@
 "react": "https://esm.sh/react@18.2.0",
 "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
 "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
+"recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.2.0,react-dom@18.2.0",
 "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
 "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
 "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js",
@@ -40,8 +41,12 @@ Calendar, User, Users, ClipboardList, LogOut, Plus, CheckCircle, XCircle, AlertC
 Menu, Settings, Sun, CloudRain, Briefcase, LayoutDashboard,
 Sparkles, MapPin, Tag, WifiOff, FileSpreadsheet, Calculator, X, ChevronLeft, ChevronRight, ChevronDown,
 Clock, RefreshCw, Trash2, List, AlertTriangle, ArrowRight, Lock, Palette, Edit, FileText, Info, Edit2, Play, Square,
-Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo, PieChart, Download, CheckSquare, Bell, Save
+Image as ImageIcon, Camera, Moon, SidebarClose, SidebarOpen, Shield, UserCog, Loader2, CalendarPlus, Check, Database, Undo, PieChart, Download, CheckSquare, Bell, Save,
+BarChart3, TrendingUp, Activity
 } from 'lucide-react';
+import {
+ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
+} from 'recharts';
 // --- Firebase 綁定設定 (已寫死) ---
 const MANUAL_CONFIG = {
 apiKey: "AIzaSyBQ6ttl2QlbQbM4lO_faSEyIK1EVZy5jH4",
@@ -1078,6 +1083,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
 {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
 {id:'accounting', icon:<Calculator size={20}/>, label:'會計統計'},
+{id:'analytics', icon:<BarChart3 size={20}/>, label:'統計分析'},
 {id:'attendance', icon:<Clock size={20}/>, label:'打卡紀錄'},
 {id:'meeting', icon:<Bell size={20}/>, label:'會議及宣導'},
 {id:'profile', icon:<UserCog size={20}/>, label:'個人設定'}
@@ -1162,6 +1168,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} />}
 {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} crud={crud} />}
 {view === 'accounting' && <AccountingStatsView users={usersList} leaves={leaves} leaveTypes={leaveTypes} currentUser={userData} />}
+{view === 'analytics' && <AnalyticsView user={userData} users={usersList} calendarEvents={calendarEvents} leaves={leaves} leaveTypes={leaveTypes} areaTags={areaTags} workTags={workTags} />}
 {view === 'attendance' && <AttendanceView user={userData} db={db} attendanceRecords={attendanceRecords} leaves={leaves} leaveTypes={leaveTypes} settings={settings} />}
 {view === 'meeting' && <MeetingView user={userData} calendarEvents={calendarEvents} workTags={workTags} meetingSelectedItems={meetingSelectedItems} meetingNotes={meetingNotes} crud={crud} onSaveMeetingSelectedItems={handleSaveMeetingSelectedItems} />}
 {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
@@ -6855,6 +6862,622 @@ function AccountingStatsView({ users, leaves, leaveTypes, currentUser }) {
     </div>
   );
 }
+// ====================================================================
+// AnalyticsView：統計分析（訪視日趨勢 + 人員請假趨勢）
+// ====================================================================
+function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTags, workTags }) {
+  const isKaiyu = (user?.email || '').toLowerCase() === 'kaiyu097@gmail.com' || user?.name === '蔡凱宇';
+
+  // 顏色（recharts 用 hex）
+  const AREA_HEX = {
+    "高雄-身障": "#ef4444",
+    "屏東-身障": "#eab308",
+    "台東-身障": "#22c55e",
+    "澎湖-身障": "#f97316",
+    "訓就-岡山": "#a855f7",
+    "訓就-鳳山": "#ec4899",
+    "銀髮": "#0ea5e9",
+    "分署": "#64748b"
+  };
+  const PALETTE = ["#6366f1","#10b981","#f59e0b","#ef4444","#0ea5e9","#a855f7","#ec4899","#14b8a6","#64748b","#eab308","#f97316","#3b82f6"];
+  const areaColor = (a, idx=0) => AREA_HEX[a] || PALETTE[idx % PALETTE.length];
+
+  const WORK_HEX = {
+    "審查": "#6366f1",
+    "訪視": "#10b981",
+    "成效": "#0ea5e9",
+    "試用": "#14b8a6",
+    "專案報告": "#f59e0b",
+    "大宗": "#f97316",
+    "月報": "#facc15"
+  };
+  const workColor = (w, idx=0) => WORK_HEX[w] || PALETTE[idx % PALETTE.length];
+
+  const LEAVE_HEX = {
+    "特休": "#8b5cf6", "病假": "#ef4444", "事假": "#f97316",
+    "榮譽假": "#06b6d4", "補休": "#10b981", "出差": "#3b82f6",
+    "公出": "#0ea5e9", "公假": "#6366f1", "加班(請款)": "#f59e0b",
+    "加班(+時數)": "#eab308", "婚假": "#ec4899", "喪假": "#64748b",
+    "產假": "#a855f7", "陪產假": "#d946ef", "生理假": "#fb7185",
+    "公傷假": "#dc2626", "榮譽假(獲得)": "#22d3ee"
+  };
+  const leaveColor = (t, idx=0) => LEAVE_HEX[t] || PALETTE[idx % PALETTE.length];
+
+  // ===== Section A 篩選器 state =====
+  const [dateMode, setDateMode] = useState('event'); // event=訪視日(執行日), created=建立日
+  const [vYear, setVYear] = useState('all');
+  const [selAreas, setSelAreas] = useState(areaTags);
+  const [selWorks, setSelWorks] = useState(workTags);
+
+  // ===== Section B 篩選器 state =====
+  const [lYear, setLYear] = useState('all');
+  const allLeaveTypeNames = (leaveTypes || []).map(t => t.name);
+  const [selLeaveTypes, setSelLeaveTypes] = useState(allLeaveTypeNames);
+  const [selPersons, setSelPersons] = useState([]); // 凱宇限定，空陣列 = 全員
+
+  // 篩選器隨設定變動同步
+  useEffect(() => { setSelAreas(areaTags); }, [areaTags.join(',')]);
+  useEffect(() => { setSelWorks(workTags); }, [workTags.join(',')]);
+  useEffect(() => { setSelLeaveTypes(allLeaveTypeNames); }, [allLeaveTypeNames.join(',')]);
+
+  // 取得日期字串（依 dateMode）
+  const getEventDate = (e) => {
+    if (dateMode === 'event') return String(e.date || '').slice(0, 10);
+    if (e.timestamp) {
+      try {
+        if (typeof e.timestamp.toDate === 'function') return e.timestamp.toDate().toISOString().slice(0, 10);
+        if (e.timestamp.seconds) return new Date(e.timestamp.seconds * 1000).toISOString().slice(0, 10);
+        if (e.timestamp instanceof Date) return e.timestamp.toISOString().slice(0, 10);
+        const t = new Date(e.timestamp);
+        if (!isNaN(t.getTime())) return t.toISOString().slice(0, 10);
+      } catch {}
+    }
+    return String(e.date || '').slice(0, 10);
+  };
+
+  // 訪視（tag）事件
+  const tagEvents = useMemo(() =>
+    (calendarEvents || []).filter(e => e.type === 'tag' && e.item && e.date)
+  , [calendarEvents]);
+
+  // 可選年份（從訪視事件 + 請假紀錄）
+  const availableYears = useMemo(() => {
+    const years = new Set();
+    tagEvents.forEach(e => {
+      const y = String(e.date || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) years.add(y);
+    });
+    leaves.forEach(l => {
+      const y = String(l.start || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) years.add(y);
+    });
+    return [...years].sort();
+  }, [tagEvents, leaves]);
+
+  // 篩選後的訪視資料
+  const filteredViz = useMemo(() => {
+    return tagEvents.filter(e => {
+      if (!selWorks.includes(e.item)) return false;
+      const eventAreas = Array.isArray(e.area) ? e.area : (e.area ? [e.area] : []);
+      if (eventAreas.length === 0) return false;
+      if (!eventAreas.some(a => selAreas.includes(a))) return false;
+      const dStr = getEventDate(e);
+      if (vYear !== 'all' && !dStr.startsWith(vYear)) return false;
+      return true;
+    });
+  }, [tagEvents, selWorks, selAreas, vYear, dateMode]);
+
+  // 圖1：每月訪視量趨勢線（轄區分線）
+  const monthlyByArea = useMemo(() => {
+    const map = {};
+    filteredViz.forEach(e => {
+      const ym = getEventDate(e).slice(0, 7);
+      if (!ym) return;
+      const eventAreas = Array.isArray(e.area) ? e.area : [e.area];
+      eventAreas.forEach(a => {
+        if (!selAreas.includes(a)) return;
+        if (!map[ym]) map[ym] = { ym };
+        map[ym][a] = (map[ym][a] || 0) + 1;
+      });
+    });
+    // 補齊缺漏月份的轄區欄位為 0
+    return Object.values(map).sort((a, b) => a.ym.localeCompare(b.ym)).map(row => {
+      selAreas.forEach(a => { if (row[a] === undefined) row[a] = 0; });
+      return row;
+    });
+  }, [filteredViz, selAreas, dateMode]);
+
+  // 圖2：月初/月中/月底熱圖
+  const heatmapData = useMemo(() => {
+    const map = {};
+    selAreas.forEach(a => { map[a] = { early: 0, mid: 0, late: 0 }; });
+    filteredViz.forEach(e => {
+      const day = parseInt(getEventDate(e).slice(8, 10), 10);
+      if (!day) return;
+      const seg = day <= 10 ? 'early' : (day <= 20 ? 'mid' : 'late');
+      const eventAreas = Array.isArray(e.area) ? e.area : [e.area];
+      eventAreas.forEach(a => {
+        if (!selAreas.includes(a)) return;
+        if (!map[a]) map[a] = { early: 0, mid: 0, late: 0 };
+        map[a][seg] += 1;
+      });
+    });
+    return map;
+  }, [filteredViz, selAreas, dateMode]);
+
+  const heatmapMax = useMemo(() => {
+    let max = 0;
+    Object.values(heatmapData).forEach(o => {
+      Object.values(o).forEach(v => { if (v > max) max = v; });
+    });
+    return Math.max(1, max);
+  }, [heatmapData]);
+
+  const heatColor = (v) => {
+    if (v <= 0) return '#f8fafc';
+    const intensity = v / heatmapMax;
+    const alpha = 0.18 + 0.72 * intensity;
+    return `rgba(59, 130, 246, ${alpha})`;
+  };
+
+  // 圖3：每日散佈（1-31 日，按轄區堆疊）
+  const dayBucketData = useMemo(() => {
+    const arr = Array.from({ length: 31 }, (_, i) => {
+      const o = { day: i + 1 };
+      selAreas.forEach(a => { o[a] = 0; });
+      return o;
+    });
+    filteredViz.forEach(e => {
+      const day = parseInt(getEventDate(e).slice(8, 10), 10);
+      if (!day || day < 1 || day > 31) return;
+      const eventAreas = Array.isArray(e.area) ? e.area : [e.area];
+      eventAreas.forEach(a => {
+        if (!selAreas.includes(a)) return;
+        arr[day - 1][a] = (arr[day - 1][a] || 0) + 1;
+      });
+    });
+    return arr;
+  }, [filteredViz, selAreas, dateMode]);
+
+  // 圖4：轄區 × 工作類別 矩陣
+  const matrixData = useMemo(() => {
+    const map = {};
+    selAreas.forEach(a => {
+      map[a] = { _total: 0 };
+      selWorks.forEach(w => { map[a][w] = 0; });
+    });
+    filteredViz.forEach(e => {
+      const eventAreas = Array.isArray(e.area) ? e.area : [e.area];
+      eventAreas.forEach(a => {
+        if (!selAreas.includes(a)) return;
+        if (!map[a]) {
+          map[a] = { _total: 0 };
+          selWorks.forEach(w => { map[a][w] = 0; });
+        }
+        map[a][e.item] = (map[a][e.item] || 0) + 1;
+        map[a]._total += 1;
+      });
+    });
+    return map;
+  }, [filteredViz, selAreas, selWorks, dateMode]);
+
+  // 篩選後的請假資料（核准的私假/公假/加班全納入，依使用者選擇）
+  const filteredLeaves = useMemo(() => {
+    return leaves.filter(l => {
+      if (l.status !== 'approved') return false;
+      if (!selLeaveTypes.includes(l.type)) return false;
+      const y = String(l.start || '').slice(0, 4);
+      if (lYear !== 'all' && y !== lYear) return false;
+      if (isKaiyu && selPersons.length > 0 && !selPersons.includes(l.requesterName)) return false;
+      return true;
+    });
+  }, [leaves, selLeaveTypes, lYear, selPersons, isKaiyu]);
+
+  // 圖5：每月請假時數堆疊
+  const monthlyLeaveByType = useMemo(() => {
+    const map = {};
+    filteredLeaves.forEach(l => {
+      const ym = String(l.start || '').slice(0, 7);
+      if (!ym) return;
+      if (!map[ym]) map[ym] = { ym };
+      map[ym][l.type] = (map[ym][l.type] || 0) + (Number(l.hours) || 0);
+    });
+    const list = Object.values(map).sort((a, b) => a.ym.localeCompare(b.ym));
+    list.forEach(row => {
+      selLeaveTypes.forEach(t => { if (row[t] === undefined) row[t] = 0; });
+    });
+    return list;
+  }, [filteredLeaves, selLeaveTypes]);
+
+  // 圖6：每月日期分布（1-31 日，請假人次）
+  const dailyLeaveCount = useMemo(() => {
+    const arr = Array.from({ length: 31 }, (_, i) => ({ day: i + 1, count: 0 }));
+    filteredLeaves.forEach(l => {
+      const day = parseInt(String(l.start || '').slice(8, 10), 10);
+      if (day >= 1 && day <= 31) arr[day - 1].count += 1;
+    });
+    return arr;
+  }, [filteredLeaves]);
+
+  // 圖7：個人 × 假別 表（凱宇限定）
+  const personLeaveTable = useMemo(() => {
+    if (!isKaiyu) return null;
+    const map = {};
+    filteredLeaves.forEach(l => {
+      const name = l.requesterName || '未知';
+      if (!map[name]) map[name] = { name, _total: 0 };
+      map[name][l.type] = (map[name][l.type] || 0) + (Number(l.hours) || 0);
+      map[name]._total += (Number(l.hours) || 0);
+    });
+    return Object.values(map).sort((a, b) => b._total - a._total);
+  }, [filteredLeaves, isKaiyu]);
+
+  // 凱宇用：人員清單
+  const personOptions = useMemo(() => {
+    const s = new Set();
+    leaves.forEach(l => { if (l.requesterName) s.add(l.requesterName); });
+    return [...s].sort();
+  }, [leaves]);
+
+  const toggleSel = (list, setList, value) => {
+    if (list.includes(value)) setList(list.filter(x => x !== value));
+    else setList([...list, value]);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-5">
+      <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-200">
+        <div className="flex items-center gap-3 mb-1">
+          <BarChart3 className="text-indigo-600" size={26}/>
+          <h2 className="text-2xl font-black text-gray-800">統計分析</h2>
+        </div>
+        <p className="text-sm text-gray-500">透過歷年資料分析，掌握各轄區訪視節奏與人員請假趨勢。資料來源為「排班日曆」工作項目與「請假申請」核准紀錄。</p>
+      </div>
+
+      {/* ============== Section A：訪視日趨勢 ============== */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 bg-gradient-to-r from-emerald-50 to-blue-50 border-b border-gray-200 flex items-center gap-2">
+          <TrendingUp className="text-emerald-600" size={22}/>
+          <h3 className="text-lg font-black text-gray-800">A. 訪視日趨勢分析</h3>
+          <span className="text-xs text-gray-500 ml-auto">資料來源：排班日曆工作項目（{tagEvents.length} 筆）</span>
+        </div>
+        <div className="p-5 space-y-5">
+          {/* 篩選器 */}
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <div className="text-xs font-bold text-gray-600 mb-1">日期維度</div>
+              <select className="border rounded-lg px-3 py-2 text-sm bg-white" value={dateMode} onChange={e => setDateMode(e.target.value)}>
+                <option value="event">訪視日（執行日）</option>
+                <option value="created">建立日（派案進來）</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-xs font-bold text-gray-600 mb-1">年度</div>
+              <select className="border rounded-lg px-3 py-2 text-sm bg-white" value={vYear} onChange={e => setVYear(e.target.value)}>
+                <option value="all">全部年度</option>
+                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-bold text-gray-600 mb-2">轄區（多選）</div>
+            <div className="flex flex-wrap gap-2">
+              {areaTags.map((a, idx) => {
+                const active = selAreas.includes(a);
+                return (
+                  <button key={a} onClick={() => toggleSel(selAreas, setSelAreas, a)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'text-white' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    style={active ? { backgroundColor: areaColor(a, idx), borderColor: areaColor(a, idx) } : {}}>
+                    {a}
+                  </button>
+                );
+              })}
+              <button onClick={() => setSelAreas(areaTags)} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">全選</button>
+              <button onClick={() => setSelAreas([])} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">清除</button>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-bold text-gray-600 mb-2">工作類別（多選）</div>
+            <div className="flex flex-wrap gap-2">
+              {workTags.map((w, idx) => {
+                const active = selWorks.includes(w);
+                return (
+                  <button key={w} onClick={() => toggleSel(selWorks, setSelWorks, w)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'text-white' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    style={active ? { backgroundColor: workColor(w, idx), borderColor: workColor(w, idx) } : {}}>
+                    {w}
+                  </button>
+                );
+              })}
+              <button onClick={() => setSelWorks(workTags)} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">全選</button>
+              <button onClick={() => setSelWorks([])} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">清除</button>
+            </div>
+          </div>
+
+          {/* KPI */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
+              <div className="text-xs text-blue-700 font-bold">符合條件件數</div>
+              <div className="text-2xl font-black text-blue-900">{filteredViz.length}</div>
+            </div>
+            <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
+              <div className="text-xs text-emerald-700 font-bold">涵蓋月份</div>
+              <div className="text-2xl font-black text-emerald-900">{monthlyByArea.length}</div>
+            </div>
+            <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
+              <div className="text-xs text-purple-700 font-bold">活躍轄區</div>
+              <div className="text-2xl font-black text-purple-900">{Object.values(matrixData).filter(o => (o._total||0) > 0).length}</div>
+            </div>
+            <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+              <div className="text-xs text-amber-700 font-bold">月平均件數</div>
+              <div className="text-2xl font-black text-amber-900">{monthlyByArea.length > 0 ? Math.round(filteredViz.length / monthlyByArea.length) : 0}</div>
+            </div>
+          </div>
+
+          {/* 圖1 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">📈 每月訪視量趨勢（按轄區分線）</div>
+            <div className="h-80 bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              {monthlyByArea.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyByArea} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                    <XAxis dataKey="ym" tick={{ fontSize: 11 }}/>
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false}/>
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 12 }}/>
+                    {selAreas.map((a, idx) => (
+                      <Line key={a} type="monotone" dataKey={a} stroke={areaColor(a, idx)} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }}/>
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-gray-400 text-sm">無符合條件的資料</div>}
+            </div>
+          </div>
+
+          {/* 圖2 熱圖 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">🔥 月初／月中／月底集中度（顏色越深件數越多）</div>
+            <div className="overflow-auto bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              <table className="text-xs min-w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left py-2 px-3 font-bold text-gray-600">轄區</th>
+                    <th className="text-center py-2 px-3 font-bold text-gray-600">月初 (1–10 日)</th>
+                    <th className="text-center py-2 px-3 font-bold text-gray-600">月中 (11–20 日)</th>
+                    <th className="text-center py-2 px-3 font-bold text-gray-600">月底 (21 日後)</th>
+                    <th className="text-center py-2 px-3 font-bold text-gray-700">合計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selAreas.map((a, idx) => {
+                    const row = heatmapData[a] || { early: 0, mid: 0, late: 0 };
+                    const total = row.early + row.mid + row.late;
+                    return (
+                      <tr key={a}>
+                        <td className="py-2 px-3 font-bold whitespace-nowrap" style={{ color: areaColor(a, idx) }}>● {a}</td>
+                        <td className="text-center py-2 px-3 font-bold text-gray-800 border" style={{ backgroundColor: heatColor(row.early) }}>{row.early}</td>
+                        <td className="text-center py-2 px-3 font-bold text-gray-800 border" style={{ backgroundColor: heatColor(row.mid) }}>{row.mid}</td>
+                        <td className="text-center py-2 px-3 font-bold text-gray-800 border" style={{ backgroundColor: heatColor(row.late) }}>{row.late}</td>
+                        <td className="text-center py-2 px-3 font-bold text-gray-700">{total}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 圖3 每日散佈 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">📊 每月日期分布（1–31 日，按轄區堆疊）</div>
+            <div className="h-80 bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              {filteredViz.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dayBucketData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                    <XAxis dataKey="day" tick={{ fontSize: 10 }}/>
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false}/>
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 12 }}/>
+                    {selAreas.map((a, idx) => (
+                      <Bar key={a} dataKey={a} stackId="a" fill={areaColor(a, idx)} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-gray-400 text-sm">無符合條件的資料</div>}
+            </div>
+          </div>
+
+          {/* 圖4 矩陣 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">🧩 轄區 × 工作類別 矩陣</div>
+            <div className="overflow-auto bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              <table className="text-xs min-w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left py-2 px-3 font-bold text-gray-600 sticky left-0 bg-white">轄區</th>
+                    {selWorks.map((w, idx) => <th key={w} className="text-center py-2 px-3 font-bold whitespace-nowrap" style={{ color: workColor(w, idx) }}>{w}</th>)}
+                    <th className="text-center py-2 px-3 font-bold text-gray-700">合計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selAreas.map((a, idx) => {
+                    const row = matrixData[a] || { _total: 0 };
+                    return (
+                      <tr key={a} className="border-t">
+                        <td className="py-2 px-3 font-bold whitespace-nowrap sticky left-0 bg-white" style={{ color: areaColor(a, idx) }}>● {a}</td>
+                        {selWorks.map(w => {
+                          const v = row[w] || 0;
+                          return <td key={w} className={`text-center py-2 px-3 ${v > 0 ? 'font-bold text-gray-800' : 'text-gray-300'}`}>{v}</td>;
+                        })}
+                        <td className="text-center py-2 px-3 font-bold text-gray-700">{row._total || 0}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============== Section B：請假趨勢 ============== */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 bg-gradient-to-r from-pink-50 to-purple-50 border-b border-gray-200 flex items-center gap-2">
+          <Activity className="text-pink-600" size={22}/>
+          <h3 className="text-lg font-black text-gray-800">B. 人員請假趨勢</h3>
+          <span className="text-xs text-gray-500 ml-auto">資料來源：請假申請（已核准 {leaves.filter(l=>l.status==='approved').length} 筆）</span>
+        </div>
+        <div className="p-5 space-y-5">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <div className="text-xs font-bold text-gray-600 mb-1">年度</div>
+              <select className="border rounded-lg px-3 py-2 text-sm bg-white" value={lYear} onChange={e => setLYear(e.target.value)}>
+                <option value="all">全部年度</option>
+                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-bold text-gray-600 mb-2">假別（多選）</div>
+            <div className="flex flex-wrap gap-2">
+              {(leaveTypes || []).map((t, idx) => {
+                const active = selLeaveTypes.includes(t.name);
+                return (
+                  <button key={t.id || t.name} onClick={() => toggleSel(selLeaveTypes, setSelLeaveTypes, t.name)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'text-white' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    style={active ? { backgroundColor: leaveColor(t.name, idx), borderColor: leaveColor(t.name, idx) } : {}}>
+                    {t.name}
+                  </button>
+                );
+              })}
+              <button onClick={() => setSelLeaveTypes(allLeaveTypeNames)} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">全選</button>
+              <button onClick={() => setSelLeaveTypes([])} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-gray-50 text-gray-600 hover:bg-gray-100">清除</button>
+            </div>
+          </div>
+
+          {isKaiyu && (
+            <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-3">
+              <div className="text-xs font-bold text-gray-700 mb-2 flex items-center gap-2">
+                人員（多選）
+                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px]">凱宇限定</span>
+                <span className="text-gray-400 font-normal text-[10px]">不選代表全員</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {personOptions.map(p => {
+                  const active = selPersons.includes(p);
+                  return (
+                    <button key={p} onClick={() => toggleSel(selPersons, setSelPersons, p)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                      {p}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setSelPersons([])} className="px-3 py-1.5 rounded-full text-xs font-bold border bg-white text-gray-600 hover:bg-gray-100">清除（=全員）</button>
+              </div>
+            </div>
+          )}
+
+          {/* KPI */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-pink-50 rounded-xl p-3 border border-pink-100">
+              <div className="text-xs text-pink-700 font-bold">符合條件件數</div>
+              <div className="text-2xl font-black text-pink-900">{filteredLeaves.length}</div>
+            </div>
+            <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
+              <div className="text-xs text-purple-700 font-bold">總時數</div>
+              <div className="text-2xl font-black text-purple-900">{filteredLeaves.reduce((s, l) => s + (Number(l.hours) || 0), 0).toFixed(1)}</div>
+            </div>
+            <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+              <div className="text-xs text-amber-700 font-bold">涵蓋月份</div>
+              <div className="text-2xl font-black text-amber-900">{monthlyLeaveByType.length}</div>
+            </div>
+            <div className="bg-rose-50 rounded-xl p-3 border border-rose-100">
+              <div className="text-xs text-rose-700 font-bold">月平均時數</div>
+              <div className="text-2xl font-black text-rose-900">{monthlyLeaveByType.length > 0 ? (filteredLeaves.reduce((s, l) => s + (Number(l.hours) || 0), 0) / monthlyLeaveByType.length).toFixed(1) : '0'}</div>
+            </div>
+          </div>
+
+          {/* 圖5 月度堆疊 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">📊 每月請假時數（按假別堆疊）</div>
+            <div className="h-80 bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              {monthlyLeaveByType.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyLeaveByType} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                    <XAxis dataKey="ym" tick={{ fontSize: 11 }}/>
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false}/>
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 12 }}/>
+                    {selLeaveTypes.map((t, idx) => (
+                      <Bar key={t} dataKey={t} stackId="a" fill={leaveColor(t, idx)} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-gray-400 text-sm">無符合條件的資料</div>}
+            </div>
+          </div>
+
+          {/* 圖6 每日請假人次 */}
+          <div>
+            <div className="text-sm font-bold text-gray-700 mb-2">📅 每月日期分布（1–31 日，請假人次）</div>
+            <div className="h-72 bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+              {filteredLeaves.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyLeaveCount} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                    <XAxis dataKey="day" tick={{ fontSize: 10 }}/>
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false}/>
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#ec4899" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-gray-400 text-sm">無符合條件的資料</div>}
+            </div>
+          </div>
+
+          {/* 圖7 凱宇限定：個人 × 假別 */}
+          {isKaiyu && personLeaveTable && personLeaveTable.length > 0 && (
+            <div>
+              <div className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                👥 個人 × 假別 彙整表（時數）
+                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[10px]">凱宇限定</span>
+              </div>
+              <div className="overflow-auto bg-gradient-to-br from-gray-50 to-white rounded-xl p-3 border">
+                <table className="text-xs min-w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-left py-2 px-3 font-bold text-gray-600 sticky left-0 bg-white">人員</th>
+                      {selLeaveTypes.map((t, idx) => <th key={t} className="text-center py-2 px-3 font-bold whitespace-nowrap" style={{ color: leaveColor(t, idx) }}>{t}</th>)}
+                      <th className="text-center py-2 px-3 font-bold text-gray-700">合計</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personLeaveTable.map(row => (
+                      <tr key={row.name} className="border-t">
+                        <td className="py-2 px-3 font-bold whitespace-nowrap sticky left-0 bg-white text-gray-800">{row.name}</td>
+                        {selLeaveTypes.map(t => {
+                          const v = row[t] || 0;
+                          return <td key={t} className={`text-center py-2 px-3 ${v > 0 ? 'font-bold text-gray-800' : 'text-gray-300'}`}>{v ? v.toFixed(1) : 0}</td>;
+                        })}
+                        <td className="text-center py-2 px-3 font-bold text-gray-700">{row._total.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 function AttendanceView({ user, db, attendanceRecords, leaves, leaveTypes, settings }) {
 const [selectedMonth, setSelectedMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
 const [localRecords, setLocalRecords] = useState({});
@@ -6896,7 +7519,8 @@ const getDayOvertimeRanges = (dateStr) => {
 const isTimePointOverlapped = (timeHHMM, ranges) => {
   if (!timeHHMM) return false;
   const t = String(timeHHMM).slice(0,5);
-  return (ranges || []).some(r => t >= r.start && t <= r.end);
+  // 使用嚴格比較（不含端點）：避免 簽退=17:00 與 加班 17:00-19:00 端點相接被誤判為重疊
+  return (ranges || []).some(r => t > r.start && t < r.end);
 };
 useEffect(() => {
 const currentMonthRecords = attendanceRecords.filter(r => r.userId === user.uid && r.month === selectedMonth);
