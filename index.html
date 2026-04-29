@@ -963,6 +963,63 @@ const unassignedCount = useMemo(() => {
     return 0;
   }
 }, [calendarEvents]);
+
+// --- 「請假申請」第一區塊：尚未送出請假的待送出案件數（與 LeaveForm.pendingExternalTasks 同邏輯） ---
+const pendingLeaveCount = useMemo(() => {
+  try {
+    if (!userData) return 0;
+    const _overlaps = (s1, e1, s2, e2) => {
+      try {
+        const a1 = new Date(s1).getTime();
+        const b1 = new Date(e1).getTime();
+        const a2 = new Date(s2).getTime();
+        const b2 = new Date(e2).getTime();
+        if ([a1,b1,a2,b2].some(x => !Number.isFinite(x))) return false;
+        return a1 < b2 && a2 < b1;
+      } catch { return false; }
+    };
+    const groups = {};
+    (calendarEvents || []).forEach(e => {
+      if (!e || !e.groupId) return;
+      if (!groups[e.groupId]) groups[e.groupId] = { tag: null, people: [] };
+      if (e.type === 'tag') groups[e.groupId].tag = e;
+      if (e.type === 'person') groups[e.groupId].people.push(e);
+    });
+    let count = 0;
+    Object.values(groups).forEach(g => {
+      if (!g.tag) return;
+      const isMe = g.people.some(p => p.userId === userData.uid || p.userId === userData.docId || p.userName === userData.name);
+      if (!isMe) return;
+      const d = g.tag.date;
+      let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
+      let endTime = g.tag.endTime ? `${d}T${g.tag.endTime}` : `${d}T17:00`;
+      if (!g.tag.startTime && !g.tag.endTime) {
+        if (g.tag.slot === 'morning') { endTime = `${d}T12:00`; }
+        else if (g.tag.slot === 'afternoon') { startTime = `${d}T13:00`; }
+      }
+      const hasLeave = (leaves || []).some(l => {
+        if (!l) return false;
+        const isMine =
+          l.requesterId === userData.uid ||
+          l.requesterId === userData.docId ||
+          l.requesterUid === userData.uid ||
+          l.requesterDocId === userData.docId ||
+          l.requesterName === userData.name;
+        if (!isMine) return false;
+        if (['rejected', 'withdrawn', 'recalled'].includes(l.status)) return false;
+        if (l.sourceGroupId && l.sourceGroupId === g.tag.groupId) return true;
+        if (l.sourceGroupId) return false;
+        if (l.sourceType !== 'calendar_event') return false;
+        return _overlaps(startTime, endTime, l.start, l.end || l.start);
+      });
+      if (!hasLeave) count++;
+    });
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}, [calendarEvents, leaves, userData]);
+
 if (loading) return (
 <div className="h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-600 gap-4">
 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -1016,7 +1073,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {[
 {id:'dashboard', icon:<LayoutDashboard size={20}/>, label:'儀表板'},
 {id:'calendar', icon:<Calendar size={20}/>, label:'排班日曆', count: ((userData.role==='leader'||userData.role==='admin') ? unassignedCount : 0)},
-{id:'leave', icon:<ClipboardList size={20}/>, label:'請假申請'},
+{id:'leave', icon:<ClipboardList size={20}/>, label:'請假申請', count: pendingLeaveCount},
 {id:'approval', icon:<CheckCircle size={20}/>, label:'差單審核', count: approvalMenuCount},
 {id:'personal', icon:<FileText size={20}/>, label:'請假狀況'},
 {id:'statistics', icon:<PieChart size={20}/>, label:'假別統計'},
