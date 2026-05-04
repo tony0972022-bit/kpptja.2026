@@ -6225,7 +6225,8 @@ const lastDay = `${monthPrefix}-31`;
 const endDay = le || ls;
 return ls <= lastDay && endDay >= firstDay;
 }).sort((a,b) => new Date(b.start) - new Date(a.start));
-const usageFilteredLeaves = usageTypeFilter==='all'?filteredLeaves:filteredLeaves.filter(l=>l.type===usageTypeFilter);
+// 篩選比對使用「正規化後」的假別名稱，讓舊資料（如「加班(補休)」）能與新名稱「加班(+時數)」合併計算
+const usageFilteredLeaves = usageTypeFilter==='all'?filteredLeaves:filteredLeaves.filter(l=>normalizeOvertimeType(l.type)===usageTypeFilter);
 
 let usedAnnual = 0;
 let usedSick = 0;
@@ -6447,7 +6448,7 @@ return (
 <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
 <div className="p-4 border-b bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
 <h3 className="font-bold text-gray-700 flex items-center gap-2"><List size={18}/> 請假使用紀錄 ({selectedMonth === 'all' ? '全年' : `${selectedMonth} 月`})</h3>
-<div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">假別篩選</span><select className="border p-2 rounded text-sm bg-white outline-none" value={usageTypeFilter} onChange={e=>setUsageTypeFilter(e.target.value)}><option value="all">全部</option>{Array.from(new Set(filteredLeaves.map(l=>l.type))).map(t=><option key={t} value={t}>{t}</option>)}</select></div></div>
+<div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">假別篩選</span><select className="border p-2 rounded text-sm bg-white outline-none" value={usageTypeFilter} onChange={e=>setUsageTypeFilter(e.target.value)}><option value="all">全部</option>{Array.from(new Set(filteredLeaves.map(l=>normalizeOvertimeType(l.type)).filter(Boolean))).map(t=><option key={t} value={t}>{t}</option>)}</select></div></div>
 <table className="w-full text-left">
 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
 <tr>
