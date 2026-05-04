@@ -496,6 +496,53 @@ const getEffectiveLeaveHours = (l) => {
     return Number(l?.hours || 0) || 0;
   }
 };
+
+// 跨月份有效時數：只計算落在指定 year-month 內的工作時數
+// month 為 'all' 或字串 '01'..'12'；'all' 直接回傳整段 effective hours
+const getEffectiveLeaveHoursInMonth = (l, year, month) => {
+  try {
+    if (!month || month === 'all') return getEffectiveLeaveHours(l);
+    const startText = String(l?.start || '').trim();
+    const endText = String(l?.end || l?.start || '').trim();
+    const s = startText.split('T')[0];
+    const e = endText.split('T')[0];
+    if (!s || !e) return 0;
+
+    const yearStr = String(year);
+    const monthStr = String(month).padStart(2, '0');
+    const monthPrefix = `${yearStr}-${monthStr}`;
+
+    // 同日：若該日落在所選月份才回傳全段時數，否則 0
+    if (s === e) {
+      if (s.startsWith(monthPrefix)) return getEffectiveLeaveHours(l);
+      return 0;
+    }
+
+    // 多日：依該月份內的工作日 * 8 計算（與 getEffectiveLeaveHours 多日邏輯一致）
+    const dayStart = new Date(s + 'T00:00');
+    const dayEnd = new Date(e + 'T00:00');
+    if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd < dayStart) return 0;
+
+    let cur = new Date(dayStart);
+    let workDays = 0;
+    let guard = 0;
+    while (cur <= dayEnd && guard < 800) {
+      const ds = getLocalDateString(cur);
+      if (ds.startsWith(monthPrefix)) {
+        const day = cur.getDay();
+        const isWeekend = (day === 0 || day === 6);
+        const isHoliday = !!(globalThis.HOLIDAYS && globalThis.HOLIDAYS[ds]);
+        if (!isWeekend && !isHoliday) workDays += 1;
+      }
+      cur.setDate(cur.getDate() + 1);
+      guard++;
+    }
+    return workDays * 8;
+  } catch {
+    return 0;
+  }
+};
+
 // --- Helper Component: User Avatar ---
 // 讓「外框顏色」同時決定「背景顏色」（背景改為加白後的淺色，不用透明度，避免濁感）
 const hexToTint = (hex, whiteness = 0.82) => {
@@ -6161,12 +6208,23 @@ return { days, text: `年資 ${years >= 0 ? years : 0} 年 ${months >= 0 ? month
 };
 const seniority = getSeniorityStats();
 const extraLeaveDays = Number(targetUser.extraLeaveDays || 0);
-const filteredLeaves = leaves.filter(l =>
-(l.requesterId === targetUser.uid || l.requesterId === targetUser.docId) &&
-l.status === 'approved' &&
-l.start.startsWith(String(selectedYear)) &&
-(selectedMonth === 'all' ? true : l.start.startsWith(`${selectedYear}-${selectedMonth}`))
-).sort((a,b) => new Date(b.start) - new Date(a.start));
+const filteredLeaves = leaves.filter(l => {
+if (!(l.requesterId === targetUser.uid || l.requesterId === targetUser.docId)) return false;
+if (l.status !== 'approved') return false;
+const ls = String(l.start || '').split('T')[0];
+const le = String(l.end || l.start || '').split('T')[0];
+if (!ls) return false;
+if (selectedMonth === 'all') {
+  // 全年：起或迄落在所選年度即納入（涵蓋跨年假單）
+  return ls.startsWith(String(selectedYear)) || (le && le.startsWith(String(selectedYear)));
+}
+// 指定月份：日期區間與該月有重疊即納入（涵蓋跨月假單，例如 03/30~04/02 在 3月、4月皆出現）
+const monthPrefix = `${selectedYear}-${selectedMonth}`;
+const firstDay = `${monthPrefix}-01`;
+const lastDay = `${monthPrefix}-31`;
+const endDay = le || ls;
+return ls <= lastDay && endDay >= firstDay;
+}).sort((a,b) => new Date(b.start) - new Date(a.start));
 const usageFilteredLeaves = usageTypeFilter==='all'?filteredLeaves:filteredLeaves.filter(l=>l.type===usageTypeFilter);
 
 let usedAnnual = 0;
@@ -6180,10 +6238,13 @@ let usedMarriage = 0;
 let usedBereavement = 0;
 let usedMaternity = 0;
 let usedFamilyCare = 0;
-let usedOfficial = 0; // 新增：公務出差
-let usedGongJia = 0; // 公假專項統計
+let usedOfficial = 0; // 新增：公務出差（合計）
+let usedTrip = 0;     // 出差
+let usedOuting = 0;   // 公出
+let usedGongJia = 0;  // 公假專項統計
 filteredLeaves.forEach(l => {
-const hours = getEffectiveLeaveHours(l);
+// 依目前所選月份計算該月實際時數（跨月假單僅取該月份的部分；全年總計則為完整時數）
+const hours = getEffectiveLeaveHoursInMonth(l, selectedYear, selectedMonth);
 const days = hours / 8;
 if (l.type.includes('特休')) usedAnnual += hours;
 if (l.type.includes('病假') || l.type.includes('生理假')) usedSick += hours;
@@ -6199,9 +6260,10 @@ if (l.type === '家庭照顧假') {
 usedFamilyCare += hours;
 // 家庭照顧假依法併入事假額度計算
 usedPersonal += hours;}
-// 公務出差
-if (l.type === '出差' || l.type === '公出' || l.type === '公假') usedOfficial += hours;
-if (l.type === '公假') usedGongJia += hours;
+// 公務出差（分別記錄）
+if (l.type === '出差') { usedTrip += hours; usedOfficial += hours; }
+if (l.type === '公出') { usedOuting += hours; usedOfficial += hours; }
+if (l.type === '公假') { usedGongJia += hours; usedOfficial += hours; }
 });
 let allTimeCompensatoryEarned = 0;
 let allTimeCompensatoryUsed = 0;
@@ -6344,7 +6406,7 @@ return (
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-yellow-400 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">榮<br/>譽<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-yellow-600">{honorBalance}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span className="flex items-center gap-1">總獲得: {isAdminOrLeader && <button onClick={handleAddHonorLeave} title="發放榮譽假" className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 p-0.5 rounded flex items-center justify-center"><Plus size={12}/></button>}</span><span className="font-bold">{totalHonorEarned}</span></div><div className="flex justify-between text-red-600"><span>總已用:</span><span className="font-bold">{totalHonorUsed}</span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-emerald-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">病<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-emerald-600">{30*8 - usedSick}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{30*8}<span className="text-[10px] text-gray-400 ml-1">(30天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedSick}<span className="text-[10px] text-gray-400 ml-1">({(usedSick/8).toFixed(2)}天)</span></span></div></div></div>
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-amber-500 p-4"><div className="flex justify-between items-start border-b pb-3 mb-3"><div className="flex items-start gap-3"><div className="font-black text-gray-800 text-sm leading-4 text-center w-7">事<br/>假</div></div><div className="text-right"><div className="text-3xl font-black text-amber-600">{14*8 - usedPersonal}</div><div className="text-xs text-gray-500">小時(餘)</div></div></div><div className="text-xs space-y-1"><div className="flex justify-between"><span>額度:</span><span className="font-bold">{14*8}<span className="text-[10px] text-gray-400 ml-1">(14天)</span></span></div><div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedPersonal}<span className="text-[10px] text-gray-400 ml-1">({(usedPersonal/8).toFixed(2)}天)</span></span></div></div></div>
-{/* 新增：公務出差卡片 */}
+{/* 公務出差卡片：合計 + 出差/公出/公假 分項時數（公假不限配額，僅顯示紀錄） */}
 <div className="bg-white rounded-xl shadow-sm border-t-4 border-sky-500 p-4">
   <div className="flex justify-between items-start border-b pb-3 mb-3">
     <div className="flex items-start gap-3">
@@ -6354,11 +6416,10 @@ return (
   </div>
   <div className="text-xs space-y-1">
     <div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div>
-    <div className="mt-2 pt-2 border-t border-gray-100">
-      <div className="font-bold text-gray-700 mb-1">公假 (預設配額 1天)</div>
-      <div className="flex justify-between text-gray-600"><span>配額:</span><span className="font-bold text-sky-600">8 小時<span className="text-[10px] text-gray-400 ml-1">(1天)</span></span></div>
-      <div className="flex justify-between text-red-600"><span>已用:</span><span className="font-bold">{usedGongJia} 小時</span></div>
-      <div className={`flex justify-between font-bold ${8 - usedGongJia > 0 ? 'text-green-600' : 'text-red-500'}`}><span>剩餘:</span><span>{Math.max(0, 8 - usedGongJia)} 小時</span></div>
+    <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+      <div className="flex justify-between"><span className="text-gray-600">出差:</span><span className="font-bold text-sky-700">{usedTrip} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedTrip/8).toFixed(2)}天)</span></span></div>
+      <div className="flex justify-between"><span className="text-gray-600">公出:</span><span className="font-bold text-sky-700">{usedOuting} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOuting/8).toFixed(2)}天)</span></span></div>
+      <div className="flex justify-between"><span className="text-gray-600">公假:</span><span className="font-bold text-sky-700">{usedGongJia} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedGongJia/8).toFixed(2)}天)</span></span></div>
     </div>
   </div>
 </div>
@@ -6416,7 +6477,10 @@ const compactDateStr = (() => {
 const dateStr = compactDateStr;
 const fullDateStr = d1 === d2 ? d1 : `${d1}~${d2}`;
 const timeStr = `${t1} ~ ${t2}`;
-const effectiveHours = getEffectiveLeaveHours(l);
+// 跨月假單：依目前所選月份顯示該月份內的有效時數（例：03/30~04/02 在 3 月顯示 16 時、4 月顯示 16 時）
+const effectiveHours = getEffectiveLeaveHoursInMonth(l, selectedYear, selectedMonth);
+const fullEffectiveHours = getEffectiveLeaveHours(l);
+const isCrossMonthSplit = selectedMonth !== 'all' && d1 !== d2 && d1.slice(0,7) !== d2.slice(0,7);
 // 判斷是否為公務或正向發放
 const isOfficialOrGain = ['出差', '公出', '公假', '榮譽假(獲得)'].includes(l.type);
 return (
@@ -6428,7 +6492,11 @@ return (
 {displayType(l.type)}</span></td>
 <td className="p-4">
 <span className={`px-2 py-1 rounded-md font-bold text-sm ${isOfficialOrGain ? 'text-sky-700' : 'text-gray-700'}`}>
-{effectiveHours} 時 <span className="text-xs text-gray-400">({(effectiveHours/8).toFixed(2)} 天)</span></span></td>
+{effectiveHours} 時 <span className="text-xs text-gray-400">({(effectiveHours/8).toFixed(2)} 天)</span></span>
+{isCrossMonthSplit && (
+  <div className="text-[10px] text-amber-600 mt-1" title={`整段：${fullEffectiveHours} 時 (${(fullEffectiveHours/8).toFixed(2)} 天)`}>跨月：本月 {effectiveHours} 時 / 全段 {fullEffectiveHours} 時</div>
+)}
+</td>
 <td className="p-4 text-sm text-gray-600 max-w-[250px] truncate" title={l.reason}>{l.reason}</td>
 {isAdminOrLeader && (
 <td className="p-4 text-center whitespace-nowrap min-w-[180px]">
