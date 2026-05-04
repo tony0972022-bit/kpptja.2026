@@ -6412,15 +6412,15 @@ return (
     <div className="flex items-start gap-3">
       <div className="font-black text-gray-800 text-sm leading-4 text-center w-7">公<br/>務<br/>出<br/>差</div>
     </div>
-    <div className="text-right"><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div>
+    <div className="text-right">
+      <div><span className="text-2xl font-black text-sky-600">{usedOfficial}</span><span className="text-xs text-gray-500 ml-1">小時</span></div>
+      <div className="text-[10px] text-gray-400 mt-0.5">({(usedOfficial/8).toFixed(2)} 天)</div>
+    </div>
   </div>
   <div className="text-xs space-y-1">
-    <div className="flex justify-between text-gray-600"><span>累計:</span><span className="font-bold">{usedOfficial} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOfficial/8).toFixed(2)}天)</span></span></div>
-    <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
-      <div className="flex justify-between"><span className="text-gray-600">出差:</span><span className="font-bold text-sky-700">{usedTrip} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedTrip/8).toFixed(2)}天)</span></span></div>
-      <div className="flex justify-between"><span className="text-gray-600">公出:</span><span className="font-bold text-sky-700">{usedOuting} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedOuting/8).toFixed(2)}天)</span></span></div>
-      <div className="flex justify-between"><span className="text-gray-600">公假:</span><span className="font-bold text-sky-700">{usedGongJia} 小時<span className="text-[10px] text-gray-400 ml-1">({(usedGongJia/8).toFixed(2)}天)</span></span></div>
-    </div>
+    <div className="flex justify-between"><span className="text-gray-600">出差:</span><span className="font-bold text-sky-700">{usedTrip} 時<span className="text-[10px] text-gray-400 ml-1">({(usedTrip/8).toFixed(2)}天)</span></span></div>
+    <div className="flex justify-between"><span className="text-gray-600">公出:</span><span className="font-bold text-sky-700">{usedOuting} 時<span className="text-[10px] text-gray-400 ml-1">({(usedOuting/8).toFixed(2)}天)</span></span></div>
+    <div className="flex justify-between"><span className="text-gray-600">公假:</span><span className="font-bold text-sky-700">{usedGongJia} 時<span className="text-[10px] text-gray-400 ml-1">({(usedGongJia/8).toFixed(2)}天)</span></span></div>
   </div>
 </div>
 </div>
