@@ -359,8 +359,8 @@ leader: '組長',
 admin: '管理員'
 };
 // 外勤工作項目（觸發「缺公務單」與職代流程）
-// 註：專案報告、月報不列入外勤；若實際需外出至分署請另排「開會」或「公出」並申請對應差單
-const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出"];
+// 註：「月報」「專案報告」「聚餐」預設不列入外勤；若實際需外出，可在排班時勾「外出」覆寫
+const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出", "成效", "試用", "審查"];
 // 工作項目下拉（一般紀錄用）：移除「大宗」（改由輪值類別標籤管理）；新增「聚餐」（內勤）
 const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "專案報告", "月報", "聚餐"];
 const DEFAULT_AREA_TAGS = ["高雄-身障","屏東-身障","台東-身障","澎湖-身障","訓就-岡山","訓就-鳳山","銀髮","分署"];
@@ -1050,6 +1050,9 @@ const pendingLeaveCount = useMemo(() => {
       if (!g.tag) return;
       const isMe = g.people.some(p => p.userId === userData.uid || p.userId === userData.docId || p.userName === userData.name);
       if (!isMe) return;
+      // 外勤判定：在外勤名單內 OR 排班時勾了「外出（需差單）」覆寫
+      const needsLeave = EXTERNAL_WORK_TAGS.includes(g.tag.item) || !!g.tag.requiresLeave;
+      if (!needsLeave) return;
       const d = g.tag.date;
       let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
       let endTime = g.tag.endTime ? `${d}T${g.tag.endTime}` : `${d}T17:00`;
@@ -1256,7 +1259,7 @@ return `${l.requesterName}(${timeStr})`;
 const todayExternalDetails = [];
 calendarEvents.filter(e => e.date === todayStr && e.type === 'person').forEach(p => {
 const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
-if (tagEv && EXTERNAL_WORK_TAGS.includes(tagEv.item)) {
+if (tagEv && (EXTERNAL_WORK_TAGS.includes(tagEv.item) || !!tagEv.requiresLeave)) {
 const s = p.slot === 'morning' ? '上午' : (p.slot === 'afternoon' ? '下午' : '整天');
 todayExternalDetails.push(`${p.userName}(${s})`);}
 });
@@ -1522,6 +1525,7 @@ const [modalStartTime, setModalStartTime] = useState('08:00');
 const [modalEndTime, setModalEndTime] = useState('12:00');
 const [selAreas, setSelAreas] = useState([]); // 修改：改為陣列支援複選
 const [selRotationCategories, setSelRotationCategories] = useState([]); // 輪值類別：澎東訪視、專案報告、大宗（可複選，僅做標籤/統計用，不自動帶入人員）
+const [selExternalOverride, setSelExternalOverride] = useState(false); // 外出覆寫：勾選後即使工作項目是內勤（月報/專案報告/聚餐）也視為外勤、需差單與職代
 const [selUsers, setSelUsers] = useState([]);
 const [editGroupId, setEditGroupId] = useState(null);
 const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1675,24 +1679,32 @@ const rotationStats = useMemo(() => {
     const tagEv = tagByGroup[e.groupId];
     if (!tagEv) return;
     const cats = Array.isArray(tagEv.rotationCategories) ? tagEv.rotationCategories : null;
+    const tagAreas = Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []);
+    const tagAreaText = tagAreas.join(',');
+    const inPengDong = tagAreaText.includes('澎湖') || tagAreaText.includes('台東');
     rotationRules.forEach(rule => {
       // 舊資料 fallback：優先用 rule.matchTags（陣列）比對，沒有則用單一 matchTag
       const fallbackMatch = (() => {
         if (!tagEv.item) return false;
-        if (Array.isArray(rule.matchTags) && rule.matchTags.length) return rule.matchTags.includes(tagEv.item);
-        return tagEv.item === rule.matchTag;
+        const itemMatch = Array.isArray(rule.matchTags) && rule.matchTags.length
+          ? rule.matchTags.includes(tagEv.item)
+          : tagEv.item === rule.matchTag;
+        if (!itemMatch) return false;
+        // 「澎東訪視」規則僅在 area 含「澎湖」或「台東」時計入（地理限定）
+        if (rule.id === 'visit') return inPengDong;
+        return true;
       })();
       const matched = cats ? cats.includes(rule.name) : fallbackMatch;
       if (!matched) return;
+      // 澎東訪視規則終極把關：無論資料來源為何，轄區必須含澎湖或台東才計入（合計 = 澎 + 東）
+      if (rule.id === 'visit' && !inPengDong) return;
       const target = stats[rule.id];
       if (target.total[e.userName] === undefined) return; // 名單外的人不計
       target.total[e.userName]++;
       // 只對 visit 拆 澎/東：依 area 是否含「澎湖」「台東」分類；可同筆雙計
       if (rule.id === 'visit') {
-        const areas = Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []);
-        const txt = areas.join(',');
-        if (txt.includes('澎湖')) target.peng[e.userName]++;
-        if (txt.includes('台東')) target.dong[e.userName]++;
+        if (tagAreaText.includes('澎湖')) target.peng[e.userName]++;
+        if (tagAreaText.includes('台東')) target.dong[e.userName]++;
       }
       // 該人員最近一次此類別日期
       if (!target.recent[e.userName] || e.date > target.recent[e.userName]) target.recent[e.userName] = e.date;
@@ -1731,6 +1743,7 @@ setModalData({ date: dStr, workItem: '', note: '' });
 applySlotPreset('morning');
 setSelAreas([]); // 初始化清空
 setSelRotationCategories([]); // 輪值類別初始化清空
+setSelExternalOverride(false); // 外出覆寫初始化
 setSelUsers([]);
 setSelAllStaff(false);
 setModalError('');
@@ -1751,6 +1764,7 @@ setModalEndTime(tagEv.endTime || preset.end);
 // 處理舊資料(字串)與新資料(陣列)的相容性
 setSelAreas(Array.isArray(tagEv.area) ? tagEv.area : (tagEv.area ? [tagEv.area] : []));
 setSelRotationCategories(Array.isArray(tagEv.rotationCategories) ? tagEv.rotationCategories : []);
+setSelExternalOverride(!!tagEv.requiresLeave);
 setSelUsers(personEvs.filter(p => p.userId !== '__ALL__').map(p => p.userId));
 setSelAllStaff(!!(tagEv.allStaff));
 setModalError('');
@@ -2004,7 +2018,7 @@ try {
 if (editGroupId) await crud.deleteEventsByGroup(editGroupId);
 const groupId = editGroupId || `g_${Date.now()}`;
 // 儲存 selAreas 陣列 + 自訂起訖時間
-await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, rotationCategories: selRotationCategories, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, note: modalData.note, allStaff: selAllStaff, timestamp: new Date() });
+await crud.createEvent({ groupId, date: modalData.date, type: 'tag', itemId: modalData.workItem, item: modalData.workItem, area: selAreas, rotationCategories: selRotationCategories, requiresLeave: !!selExternalOverride, slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, note: modalData.note, allStaff: selAllStaff, timestamp: new Date() });
 if (selAllStaff) {
   // 全體標記：新增一筆虛擬 __ALL__ 人員事件，讓「待派員」通知不觸發，且會議清單可顯示「全體」
   await crud.createEvent({ groupId, date: modalData.date, type: 'person', userId: '__ALL__', userName: '全體', userAvatar: '全', userColor: 'bg-teal-200', slot: selSlot, startTime: modalStartTime, endTime: modalEndTime, hours: Math.round(effectiveHours * 10) / 10, timestamp: new Date() });
@@ -2825,13 +2839,18 @@ const renderGroup = (g) => {
         )}
       </div>
     </div>
-    {/* 輪值類別標籤＋時段標籤（同一行靠右） */}
+    {/* 輪值類別標籤＋外出標籤＋時段標籤（同一行靠右） */}
     <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
       {rotationCats.map(c => (
         <span key={c} className={`px-1.5 py-0.5 rounded text-[10px] leading-none font-bold border ${rotationCatColors[c] || 'bg-purple-100 text-purple-800 border-purple-300'}`}>
           {c}
         </span>
       ))}
+      {!!g.tag?.requiresLeave && !EXTERNAL_WORK_TAGS.includes(tagName) && (
+        <span className="px-1.5 py-0.5 rounded text-[10px] leading-none font-bold border bg-orange-100 text-orange-800 border-orange-300" title="此排班標記為外出，需送差單與職代">
+          外出
+        </span>
+      )}
       <span className="px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-white/70 text-gray-700 border border-gray-200">
         {slotLabel(slotType)}
       </span>
@@ -3023,8 +3042,26 @@ return (
 <hr className="border-gray-100"/>
 <div className="grid grid-cols-2 gap-4">
 <div>
-<label className="block text-xs font-bold text-gray-700 mb-1">工作項目</label>
-<select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>setModalData({ ...modalData, workItem:e.target.value})}>
+<label className="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between gap-2">
+  <span>工作項目</span>
+  {/* 內勤項目（月報/專案報告/聚餐）若實際外出可勾此項 → 強制納入差勤申請 */}
+  {(modalData.workItem === '月報' || modalData.workItem === '專案報告' || modalData.workItem === '聚餐') && (
+    <label className="text-[11px] font-normal text-orange-600 flex items-center gap-1 cursor-pointer hover:text-orange-700">
+      <input type="checkbox" checked={selExternalOverride} onChange={e=>setSelExternalOverride(e.target.checked)} className="accent-orange-500"/>
+      外出（需差單）
+    </label>
+  )}
+</label>
+<select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>{
+  const newItem = e.target.value;
+  setModalData({ ...modalData, workItem: newItem });
+  // 切換工作項目時若新項目非內勤三項則重置外出覆寫
+  if (!['月報', '專案報告', '聚餐'].includes(newItem)) setSelExternalOverride(false);
+  // 自動帶入：選了「專案報告」或「月報」即自動勾選對應的輪值類別標籤
+  if (newItem === '專案報告' || newItem === '月報') {
+    setSelRotationCategories(prev => prev.includes(newItem) ? prev : [...prev, newItem]);
+  }
+}}>
 <option value="">請選擇...</option>
 {tags.workTags.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
 <div>
@@ -3048,13 +3085,31 @@ return (
 {tags.areaTags.map(a => {
 const active = selAreas.includes(a);
 return (
-<button key={a} type="button" onClick={() => setSelAreas(prev => active ? prev.filter(x=>x!==a) : [...prev, a])}
+<button key={a} type="button" onClick={() => {
+  setSelAreas(prev => active ? prev.filter(x=>x!==a) : [...prev, a]);
+  // 自動帶入：點選含「澎湖」或「台東」的轄區時自動勾選「澎東訪視」
+  if (!active && (a.includes('澎湖') || a.includes('台東'))) {
+    setSelRotationCategories(prev => prev.includes('澎東訪視') ? prev : [...prev, '澎東訪視']);
+  }
+}}
 className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${active ? 'bg-green-100 border-green-500 text-green-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}`}>
 {a}</button>)
 })}</div></div>
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-1">時間/備註 (選填)</label>
-<input className="w-full border p-2 rounded bg-white text-sm" placeholder="例如: 09:00 或 備註事項" value={modalData.note} onChange={e=>setModalData({ ...modalData, note:e.target.value})}/></div>
+<input className="w-full border p-2 rounded bg-white text-sm" placeholder="例如: 09:00 或 備註事項，含人數請寫 (25) 或 25人" value={modalData.note} onChange={e=>{
+  const newNote = e.target.value;
+  setModalData({ ...modalData, note: newNote });
+  // 自動偵測：備註含 (數字) 或 數字人 大於 20，自動勾選「大宗」
+  const matches = String(newNote || '').match(/\((\d+)\)|(\d+)\s*人/g) || [];
+  const hasLarge = matches.some(m => {
+    const digit = m.match(/\d+/)?.[0];
+    return digit && parseInt(digit, 10) > 20;
+  });
+  if (hasLarge) {
+    setSelRotationCategories(prev => prev.includes('大宗') ? prev : [...prev, '大宗']);
+  }
+}}/></div>
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-2">參與人員</label>
 <div className="mb-2">
@@ -3282,8 +3337,28 @@ return (
           const isVisit = r.id === 'visit';
           const isLarge = r.id === 'large';
           const isExpanded = expandedRules.has(r.id);
-          // 最近資訊僅在澎東訪視顯示
-          const latestText = isVisit ? (stat.latest?.date ? `最近：${(stat.latest.names||[]).join('/')} ${stat.latest.date.slice(5).replace('-','/')}` : '最近：—') : '';
+          // 最近資訊（所有規則都顯示）
+          const latestText = stat.latest?.date ? `最近：${(stat.latest.names||[]).join('/')} ${stat.latest.date.slice(5).replace('-','/')}` : '最近：—';
+          // 下一位推薦（依統計）：先未暫停人員 → 次數少優先 → 同次數時最久沒做優先 → 都沒做過者優先
+          const activeOrderList = (r.order || []).filter(n => !(r.pausedUsers || []).includes(n));
+          const nextSuggestion = (() => {
+            if (!activeOrderList.length) return null;
+            const sorted = [...activeOrderList].sort((a, b) => {
+              const ca = stat.total[a] || 0;
+              const cb = stat.total[b] || 0;
+              if (ca !== cb) return ca - cb; // 次數少優先
+              const ra = stat.recent[a] || '';
+              const rb = stat.recent[b] || '';
+              if (!ra && !rb) return 0;
+              if (!ra) return -1; // 未做過者優先
+              if (!rb) return 1;
+              return ra.localeCompare(rb); // 最久沒做優先
+            });
+            return sorted[0];
+          })();
+          // 若管理員手動設定 nextCandidate 仍優先採用
+          const nextPerson = (r.nextCandidate && activeOrderList.includes(r.nextCandidate)) ? r.nextCandidate : nextSuggestion;
+          const nextText = nextPerson ? `下一位：${nextPerson}` : '';
           // 該規則「最近一次」的人員集合（用於橘字標註）
           const latestNamesSet = new Set(stat.latest?.names || []);
           // 簡短摘要（收合時顯示）
@@ -3303,7 +3378,10 @@ return (
                       {isLarge && <span className="text-[10px] font-normal text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">人數&gt;20人</span>}
                       <span className="text-[10px] font-normal text-gray-500">本年共 {totalCount} 次 / {peopleCount} 人</span>
                     </span>
-                    {isVisit && <span className="text-[11px] font-normal text-orange-600">{latestText}</span>}
+                    <div className="flex items-center gap-3 flex-wrap text-[11px] font-normal mt-0.5">
+                      <span className="text-orange-600">{latestText}</span>
+                      {nextText && <span className="text-blue-600">{nextText}</span>}
+                    </div>
                   </div>
                 </div>
                 {editMode !== r.id ? (
@@ -3460,7 +3538,7 @@ const myLeaves = leaves.filter(l =>
 );
 const myLeave = myLeaves[0] || null;
 let status = '正常';
-const isExternal = myWork.some(w => w.tag && EXTERNAL_WORK_TAGS.includes(w.tag.item));
+const isExternal = myWork.some(w => w.tag && (EXTERNAL_WORK_TAGS.includes(w.tag.item) || !!w.tag.requiresLeave));
 const isOfficialLeave = myLeave && isOfficialLeaveType(myLeave.type);
 const isPersonalLeave = myLeave && !isOfficialLeaveType(myLeave.type);
 if (isExternal && !myLeave) status = '缺公務單';
@@ -4248,6 +4326,9 @@ Object.values(groups).forEach(g => {
 if (!g.tag) return;
 const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
 if (!isMe) return;
+// 外勤判定：工作項目在外勤名單內 OR 排班時勾了「外出（需差單）」覆寫
+const needsLeave = EXTERNAL_WORK_TAGS.includes(g.tag.item) || !!g.tag.requiresLeave;
+if (!needsLeave) return;
 const d = g.tag.date;
 let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
 let endTime = g.tag.endTime ? `${d}T${g.tag.endTime}` : `${d}T17:00`;
