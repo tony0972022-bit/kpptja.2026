@@ -2760,6 +2760,14 @@ const renderGroup = (g) => {
   const isPresetRange = ['08:00-12:00', '13:00-17:00', '08:00-17:00'].includes(timeRange);
 
   const allAreasTitle = areas.join('、');
+  // 輪值類別標籤（澎東訪視 / 專案報告 / 大宗 / 月報），顯示於工作項目上方
+  const rotationCats = Array.isArray(g.tag?.rotationCategories) ? g.tag.rotationCategories.filter(Boolean) : [];
+  const rotationCatColors = {
+    '澎東訪視': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    '專案報告': 'bg-amber-100 text-amber-800 border-amber-300',
+    '大宗':     'bg-orange-100 text-orange-800 border-orange-300',
+    '月報':     'bg-yellow-100 text-yellow-800 border-yellow-300',
+  };
 
   const sortedPeople = [...(g.people || [])].filter(p => p.userId !== '__ALL__').sort((a,b)=>{
     const aj=(userMetaById[a.userId]?.joinDate)?new Date(userMetaById[a.userId].joinDate).getTime():Number.POSITIVE_INFINITY;
@@ -2822,6 +2830,16 @@ const renderGroup = (g) => {
     </span>
   </div>
 
+  {/* 輪值類別標籤列（若有勾選） */}
+  {rotationCats.length > 0 && (
+    <div className="flex flex-wrap gap-1">
+      {rotationCats.map(c => (
+        <span key={c} className={`px-1.5 py-0.5 rounded text-[10px] leading-none font-bold border ${rotationCatColors[c] || 'bg-purple-100 text-purple-800 border-purple-300'}`}>
+          {c}
+        </span>
+      ))}
+    </div>
+  )}
   <div className="min-w-0 truncate text-xs" title={areas.length > 0 ? `${tagName} [${allAreasTitle}]` : tagName}>
     <span className="font-bold text-gray-800">{tagName}</span>
     {areaShort && <span className="ml-1 text-gray-600">[{areaShort}]</span>}
@@ -3181,6 +3199,16 @@ const [tempPaused, setTempPaused] = useState([]);
 const [tempNextCandidate, setTempNextCandidate] = useState('');
 const [password, setPassword] = useState('');
 const [showPass, setShowPass] = useState(false);
+// 預設全部收合，使用者點開才展開（accordion 風格）
+const [expandedRules, setExpandedRules] = useState(() => new Set());
+const toggleExpand = (ruleId) => {
+  setExpandedRules(prev => {
+    const next = new Set(prev);
+    if (next.has(ruleId)) next.delete(ruleId);
+    else next.add(ruleId);
+    return next;
+  });
+};
 if(!open) return null;
 
 const startEdit = (rule) => {
@@ -3232,33 +3260,62 @@ const saveOrder = () => {
 
 return (
   <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-    <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl p-6" onClick={e=>e.stopPropagation()}>
-      <div className="flex justify-between items-center mb-4">
+    <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+      {/* Header（固定不動） */}
+      <div className="p-5 border-b flex justify-between items-center shrink-0 bg-white rounded-t-xl">
         <h3 className="font-bold text-lg flex items-center gap-2"><RefreshCw/> 輪值統計表 <span className="text-xs font-normal text-gray-500">({new Date().getFullYear()} 年)</span></h3>
-        <button onClick={onClose}><X/></button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={()=> setExpandedRules(prev => prev.size === rotationData.length ? new Set() : new Set(rotationData.map(r=>r.id)))}
+            className="text-[11px] text-blue-600 hover:underline"
+          >
+            {expandedRules.size === rotationData.length ? '全部收合' : '全部展開'}
+          </button>
+          <button onClick={onClose}><X/></button>
+        </div>
       </div>
 
-      <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-2">
+      {/* Body（內部滾動） */}
+      <div className="p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
         {rotationData.map(r => {
           const displayOrder = (editMode === r.id ? tempOrder : (r.order || []));
           const pausedList = (editMode === r.id ? tempPaused : (r.pausedUsers || []));
           const stat = rotationStats[r.id] || { total:{}, peng:{}, dong:{}, recent:{}, latest:{ date:null, names:[] } };
           const isVisit = r.id === 'visit';
           const isLarge = r.id === 'large';
+          const isExpanded = expandedRules.has(r.id);
           // 最近資訊僅在澎東訪視顯示
           const latestText = isVisit ? (stat.latest?.date ? `最近：${(stat.latest.names||[]).join('/')} ${stat.latest.date.slice(5).replace('-','/')}` : '最近：—') : '';
+          // 該規則「最近一次」的人員集合（用於橘字標註）
+          const latestNamesSet = new Set(stat.latest?.names || []);
+          // 簡短摘要（收合時顯示）
+          const peopleCount = (r.order || []).length;
+          const totalCount = Object.values(stat.total || {}).reduce((s,n)=>s+(Number(n)||0),0);
 
           return (
-            <div key={r.id} className="bg-gray-50 p-3 rounded-lg border">
-              <div className="flex justify-between font-bold mb-3 items-center">
-                <div className="flex flex-col">
-                  <span className="flex items-center gap-2">{r.name}{isLarge && <span className="text-[10px] font-normal text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">人數&gt;20人</span>}</span>
-                  {isVisit && <span className="text-[11px] font-normal text-purple-600">{latestText}</span>}
+            <div key={r.id} className="bg-gray-50 rounded-lg border overflow-hidden">
+              {/* 標題列（可點擊收合/展開） */}
+              <div className={`p-3 flex justify-between items-center gap-2 ${editMode === r.id ? '' : 'cursor-pointer hover:bg-gray-100'}`}
+                   onClick={editMode === r.id ? undefined : ()=>toggleExpand(r.id)}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}/>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold flex items-center gap-2 flex-wrap">
+                      {r.name}
+                      {isLarge && <span className="text-[10px] font-normal text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">人數&gt;20人</span>}
+                      <span className="text-[10px] font-normal text-gray-500">本年共 {totalCount} 次 / {peopleCount} 人</span>
+                    </span>
+                    {isVisit && <span className="text-[11px] font-normal text-orange-600">{latestText}</span>}
+                  </div>
                 </div>
                 {editMode !== r.id ? (
-                  <button onClick={()=>startEdit(r)} className="text-gray-400 hover:text-blue-600 text-[11px] flex items-center gap-1"><Edit2 size={12}/> 編輯順序/暫停</button>
+                  <button
+                    onClick={(e)=>{ e.stopPropagation(); startEdit(r); if (!isExpanded) toggleExpand(r.id); }}
+                    className="text-gray-400 hover:text-blue-600 text-[11px] flex items-center gap-1 whitespace-nowrap shrink-0"
+                  ><Edit2 size={12}/> 編輯順序/暫停</button>
                 ) : (
-                  <div className="flex gap-2 items-center">
+                  <div className="flex gap-2 items-center" onClick={e=>e.stopPropagation()}>
                     {showPass ? (
                       <input autoFocus className="w-16 text-xs border rounded p-1" placeholder="密碼" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
                     ) : null}
@@ -3268,62 +3325,71 @@ return (
                 )}
               </div>
 
-              {/* 統計表格 */}
-              {editMode !== r.id ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs border-collapse bg-white rounded-md overflow-hidden">
-                    <thead className="bg-gray-100 text-gray-600">
-                      <tr>
-                        <th className="p-2 text-left font-bold">人員</th>
-                        {isVisit && <th className="p-2 text-center font-bold text-orange-700">澎</th>}
-                        {isVisit && <th className="p-2 text-center font-bold text-green-700">東</th>}
-                        <th className="p-2 text-center font-bold text-blue-700">{isVisit ? '合計' : '本年次數'}</th>
-                        <th className="p-2 text-left font-bold">最近一次</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(r.order || []).map(p => {
-                        const total = stat.total[p] || 0;
-                        const peng = stat.peng[p] || 0;
-                        const dong = stat.dong[p] || 0;
-                        const isPaused = (r.pausedUsers || []).includes(p);
-                        const recent = stat.recent[p];
-                        return (
-                          <tr key={p} className={`border-t ${isPaused ? 'text-gray-400 bg-gray-50' : 'text-gray-700'}`}>
-                            <td className="p-2 font-medium">{p}{isPaused && <span className="ml-1 text-[10px]">(暫停)</span>}</td>
-                            {isVisit && <td className="p-2 text-center"><span className={peng > 0 ? 'font-bold text-orange-600' : ''}>{peng}</span></td>}
-                            {isVisit && <td className="p-2 text-center"><span className={dong > 0 ? 'font-bold text-green-600' : ''}>{dong}</span></td>}
-                            <td className="p-2 text-center"><span className={total > 0 ? 'font-bold text-blue-600' : ''}>{total}</span></td>
-                            <td className="p-2 text-[11px] text-gray-500">{recent ? recent.slice(5).replace('-','/') : '—'}</td>
+              {/* 展開區（統計表 / 編輯模式） */}
+              {isExpanded && (
+                <div className="px-3 pb-3 border-t border-gray-200 bg-white">
+                  {editMode !== r.id ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border-collapse">
+                        <thead className="bg-gray-100 text-gray-600">
+                          <tr>
+                            <th className="p-2 text-left font-bold">人員</th>
+                            {isVisit && <th className="p-2 text-center font-bold text-orange-700">澎</th>}
+                            {isVisit && <th className="p-2 text-center font-bold text-green-700">東</th>}
+                            <th className="p-2 text-center font-bold text-blue-700">{isVisit ? '合計' : '本年次數'}</th>
+                            <th className="p-2 text-left font-bold">最近一次</th>
                           </tr>
+                        </thead>
+                        <tbody>
+                          {(r.order || []).map(p => {
+                            const total = stat.total[p] || 0;
+                            const peng = stat.peng[p] || 0;
+                            const dong = stat.dong[p] || 0;
+                            const isPaused = (r.pausedUsers || []).includes(p);
+                            const recent = stat.recent[p];
+                            const isLatest = latestNamesSet.has(p);  // 該規則最近一次的人員
+                            return (
+                              <tr key={p} className={`border-t ${isPaused ? 'text-gray-400 bg-gray-50' : 'text-gray-700'}`}>
+                                <td className="p-2 font-medium">{p}{isPaused && <span className="ml-1 text-[10px]">(暫停)</span>}</td>
+                                {isVisit && <td className="p-2 text-center"><span className={peng > 0 ? 'font-bold text-orange-600' : ''}>{peng}</span></td>}
+                                {isVisit && <td className="p-2 text-center"><span className={dong > 0 ? 'font-bold text-green-600' : ''}>{dong}</span></td>}
+                                <td className="p-2 text-center"><span className={total > 0 ? 'font-bold text-blue-600' : ''}>{total}</span></td>
+                                <td className="p-2 text-[11px]">
+                                  {recent
+                                    ? <span className={isLatest ? 'text-orange-600 font-bold' : 'text-gray-500'}>{recent.slice(5).replace('-','/')}{isLatest && ' ★'}</span>
+                                    : <span className="text-gray-400">—</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 pt-2">
+                      {displayOrder.map((p, idx) => {
+                        const isPaused = pausedList.includes(p);
+                        return (
+                          <div key={p} className={`px-2 py-1 text-xs rounded text-center relative ${isPaused ? 'bg-gray-200 text-gray-400 border border-gray-300' : 'bg-white border text-gray-500'}`}>
+                            <div className="font-medium">{p}{isPaused ? '（暫停）' : ''}</div>
+                            <div className="mt-1 flex items-center justify-center gap-1">
+                              <button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="左移"><ChevronLeft size={10}/></button>
+                              <button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="右移"><ChevronRight size={10}/></button>
+                              <button onClick={()=>togglePause(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isPaused ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                {isPaused ? '恢復' : '暫停'}
+                              </button>
+                            </div>
+                          </div>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {displayOrder.map((p, idx) => {
-                    const isPaused = pausedList.includes(p);
-                    return (
-                      <div key={p} className={`px-2 py-1 text-xs rounded text-center relative ${isPaused ? 'bg-gray-200 text-gray-400 border border-gray-300' : 'bg-white border text-gray-500'}`}>
-                        <div className="font-medium">{p}{isPaused ? '（暫停）' : ''}</div>
-                        <div className="mt-1 flex items-center justify-center gap-1">
-                          <button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="左移"><ChevronLeft size={10}/></button>
-                          <button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="右移"><ChevronRight size={10}/></button>
-                          <button onClick={()=>togglePause(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isPaused ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                            {isPaused ? '恢復' : '暫停'}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                    </div>
+                  )}
 
-              {editMode === r.id && (
-                <div className="mt-2 text-[11px] text-gray-500">
-                  順序與暫停狀態僅影響統計表呈現順序與配色。產假/病假期間可先暫停，回來再按恢復。
+                  {editMode === r.id && (
+                    <div className="mt-2 text-[11px] text-gray-500">
+                      順序與暫停狀態僅影響統計表呈現順序與配色。產假/病假期間可先暫停，回來再按恢復。
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -3334,6 +3400,7 @@ return (
           <div>• 澎東訪視：依排班「轄區」標籤含「澎湖」算澎、含「台東」算東。同筆同時含兩者則雙計。</div>
           <div>• 大宗：人數 &gt; 20 人才需勾選輪值類別「大宗」。</div>
           <div>• 統計來源優先讀取新版「輪值類別」標籤；舊資料回退依工作項目（訪視 / 專案報告 / 大宗）對應。</div>
+          <div>• <span className="text-orange-600 font-bold">★ 橘色</span>標示為該規則「最近一次」的人員。</div>
         </div>
       </div>
     </div>
