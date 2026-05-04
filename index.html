@@ -2825,21 +2825,18 @@ const renderGroup = (g) => {
         )}
       </div>
     </div>
-    <span className="shrink-0 px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-white/70 text-gray-700 border border-gray-200">
-      {slotLabel(slotType)}
-    </span>
-  </div>
-
-  {/* 輪值類別標籤列（若有勾選） */}
-  {rotationCats.length > 0 && (
-    <div className="flex flex-wrap gap-1">
+    {/* 輪值類別標籤＋時段標籤（同一行靠右） */}
+    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
       {rotationCats.map(c => (
         <span key={c} className={`px-1.5 py-0.5 rounded text-[10px] leading-none font-bold border ${rotationCatColors[c] || 'bg-purple-100 text-purple-800 border-purple-300'}`}>
           {c}
         </span>
       ))}
+      <span className="px-1.5 py-0.5 rounded-full text-xs leading-none font-medium bg-white/70 text-gray-700 border border-gray-200">
+        {slotLabel(slotType)}
+      </span>
     </div>
-  )}
+  </div>
   <div className="min-w-0 truncate text-xs" title={areas.length > 0 ? `${tagName} [${allAreasTitle}]` : tagName}>
     <span className="font-bold text-gray-800">{tagName}</span>
     {areaShort && <span className="ml-1 text-gray-600">[{areaShort}]</span>}
