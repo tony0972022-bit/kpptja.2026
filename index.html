@@ -1193,17 +1193,18 @@ const userDisplayRole = userData.role === 'admin' ? roleNames['staff'] : roleNam
 return (
 <div className="flex h-screen bg-gray-50 overflow-hidden font-sans text-gray-800 relative">
 {quotaExceeded && !quotaBannerDismissed && (
-<div className="fixed top-0 left-0 right-0 z-[150] bg-gradient-to-r from-rose-600 to-orange-500 text-white shadow-lg">
+<div className="fixed top-0 left-0 right-0 z-[150] shadow-lg border-b-2 border-red-900" style={{ backgroundColor: '#dc2626', color: '#ffffff' }}>
   <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center gap-3 text-sm">
-    <AlertCircle size={20} className="shrink-0" />
-    <div className="flex-1 min-w-0 leading-snug">
+    <AlertCircle size={20} className="shrink-0" style={{ color: '#ffffff' }} />
+    <div className="flex-1 min-w-0 leading-snug" style={{ color: '#ffffff' }}>
       <span className="font-black">⚠ 系統暫停寫入</span>
-      <span className="mx-2 opacity-60">|</span>
-      <span className="opacity-95">雲端資料庫今日用量已達上限，目前<b>無法儲存任何修改</b>（瀏覽功能正常）。預計台灣時間下午 3-4 點自動恢復。</span>
+      <span className="mx-2">|</span>
+      <span>雲端資料庫今日用量已達上限，目前<b>無法儲存任何修改</b>（瀏覽功能正常）。預計台灣時間下午 3-4 點自動恢復。</span>
     </div>
     <button
       onClick={() => setQuotaBannerDismissed(true)}
-      className="p-1 hover:bg-white/20 rounded shrink-0"
+      className="p-1 rounded shrink-0 hover:opacity-80"
+      style={{ color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.15)' }}
       title="關閉通知（系統仍無法寫入）"
     >
       <X size={18} />
