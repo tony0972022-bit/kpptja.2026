@@ -626,58 +626,13 @@ const [loading, setLoading] = useState(true);
 const [connectSeconds, setConnectSeconds] = useState(0);
 const [db, setDb] = useState(null);
 const [auth, setAuth] = useState(null);
-// 雲端資料庫配額爆掉時顯示通知（網站暫停使用，等隔日重置）
-const [quotaExceeded, setQuotaExceeded] = useState(false);
-const [quotaBannerDismissed, setQuotaBannerDismissed] = useState(false);
-// Google 日曆同步狀態（每日首次進入排班日曆頁自動觸發）
-const [googleSyncStatus, setGoogleSyncStatus] = useState('idle'); // 'idle' | 'syncing' | 'success' | 'error'
-const [googleSyncLastTime, setGoogleSyncLastTime] = useState(null);
-const isQuotaError = (err) => {
-  const code = String(err?.code || '');
-  const msg = String(err?.message || err || '');
-  return code === 'resource-exhausted' || /quota.*exceeded/i.test(msg) || /resource.*exhausted/i.test(msg);
-};
-const handleFirestoreError = (err, source) => {
-  if (isQuotaError(err)) {
-    setQuotaExceeded(true);
-    return true;
-  }
-  console.error(`[Firestore:${source || 'unknown'}]`, err);
-  return false;
-};
-// Firestore SDK 對 quota / resource-exhausted 錯誤走 retry，不會經 onSnapshot error callback
-// 改攔截 console.error / console.warn 偵測 SDK logger 輸出的訊息
-useEffect(() => {
-  const origError = console.error;
-  const origWarn = console.warn;
-  const detect = (args) => {
-    try {
-      const text = args.map(a => {
-        if (a == null) return '';
-        if (typeof a === 'string') return a;
-        if (a && a.message) return String(a.message);
-        try { return JSON.stringify(a); } catch { return String(a); }
-      }).join(' ');
-      if (/resource[-_ ]?exhausted/i.test(text) || /quota.*exceeded/i.test(text)) {
-        setQuotaExceeded(true);
-      }
-    } catch {}
-  };
-  console.error = function(...args) { detect(args); return origError.apply(console, args); };
-  console.warn = function(...args) { detect(args); return origWarn.apply(console, args); };
-  return () => { console.error = origError; console.warn = origWarn; };
-}, []);
 const persistGlobalSettings = (patch) => {
 if (!(db && userData && userData.role === 'admin')) return;
 setDoc(
   doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global'),
   patch,
   { merge: true }
-).catch(e => {
-  if (!handleFirestoreError(e, 'persistGlobalSettings')) {
-    alert('同步系統設定失敗: ' + (e?.message || e));
-  }
-});
+).catch(e => alert('同步系統設定失敗: ' + (e?.message || e)));
 };
 const handleUpdateRoleNames = (newNames) => {
 setRoleNames(newNames);
@@ -861,22 +816,22 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const missingInternalWorkItems = !Array.isArray(remote.internalWorkItems);
     const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
     const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
-    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) { handleFirestoreError(e, 'settings.seedMerge'); } }
+    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
   } else {
     const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
-    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) { handleFirestoreError(e, 'settings.init'); }
+    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
   }
-}, (err) => handleFirestoreError(err, 'settings'));
-const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'leaves'));
-const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'calendar_events'));
-const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))), (err) => handleFirestoreError(err, 'user_profiles'));
-const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'attendance'));
-const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'important_items'));
+});
+const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
+const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
+const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
+const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
+const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
 const unsubMeetingNotes = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes')), (s) => {
   const map = {};
   s.docs.forEach(d => { map[d.id] = d.data().note || ''; });
   setMeetingNotes(map);
-}, (err) => handleFirestoreError(err, 'meeting_notes'));
+});
 return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetingNotes(); };
 }, [db, user?.uid]);
 const handleLogout = async () => {
@@ -1195,26 +1150,6 @@ const iconColor = isLight ? 'text-blue-600' : 'text-blue-400';
 const userDisplayRole = userData.role === 'admin' ? roleNames['staff'] : roleNames[userData.role];
 return (
 <div className="flex h-screen bg-gray-50 overflow-hidden font-sans text-gray-800 relative">
-{quotaExceeded && !quotaBannerDismissed && (
-<div className="fixed top-0 left-0 right-0 z-[150] shadow-lg border-b-2 border-red-900" style={{ backgroundColor: '#dc2626', color: '#ffffff' }}>
-  <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center gap-3 text-sm">
-    <AlertCircle size={20} className="shrink-0" style={{ color: '#ffffff' }} />
-    <div className="flex-1 min-w-0 leading-snug" style={{ color: '#ffffff' }}>
-      <span className="font-black">⚠ 系統暫停寫入</span>
-      <span className="mx-2">|</span>
-      <span>雲端資料庫今日用量已達上限，目前<b>無法儲存任何修改</b>（瀏覽功能正常）。預計台灣時間下午 3-4 點自動恢復。</span>
-    </div>
-    <button
-      onClick={() => { setQuotaExceeded(false); setQuotaBannerDismissed(false); }}
-      className="p-1 rounded shrink-0 hover:opacity-80"
-      style={{ color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.15)' }}
-      title="關閉通知（若配額仍超出，下次寫入失敗時會再顯示）"
-    >
-      <X size={18} />
-    </button>
-  </div>
-</div>
-)}
 {isSidebarOpen && (
 <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>
 )}
@@ -1234,23 +1169,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 <button className={`hidden md:flex p-1 rounded hover:bg-opacity-20 ${isLight?'hover:bg-gray-300':'hover:bg-slate-600'}`} onClick={toggleDesktopSidebar} title={isDesktopCollapsed ? "展開選單" : "收合選單"}>
 {isDesktopCollapsed ? <ChevronRight size={18}/> : <ChevronLeft size={18}/>}</button></div>
 <div className={`p-4 flex items-center gap-3 border-b cursor-pointer transition ${sidebarProfileBg} ${isLight ? 'border-gray-200' : 'border-slate-700'} ${sidebarHover} ${isDesktopCollapsed ? 'justify-center' : ''}`} onClick={()=>setView('profile')} title="個人設定">
-<div className="relative shrink-0">
-  <UserAvatar user={userData} size="w-10 h-10" textSize="text-sm" />
-  <span
-    className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 ${isLight ? 'border-white' : 'border-slate-800'} ${
-      googleSyncStatus === 'syncing' ? 'bg-amber-400 animate-pulse' :
-      googleSyncStatus === 'success' ? 'bg-emerald-500' :
-      googleSyncStatus === 'error' ? 'bg-red-500' :
-      'bg-gray-400'
-    }`}
-    title={`Google 日曆：${
-      googleSyncStatus === 'syncing' ? '同步中...' :
-      googleSyncStatus === 'success' ? (googleSyncLastTime ? `已同步（${new Date(googleSyncLastTime).getHours()}:${String(new Date(googleSyncLastTime).getMinutes()).padStart(2,'0')}）` : '已同步') :
-      googleSyncStatus === 'error' ? '同步失敗，請至排班日曆手動同步' :
-      '尚未同步（首次進入排班日曆會自動同步）'
-    }`}
-  />
-</div>
+<UserAvatar user={userData} size="w-10 h-10" textSize="text-sm" />
 {!isDesktopCollapsed && (
 <div className="overflow-hidden">
 <p className="font-medium truncate">{userData.name}</p>
@@ -1341,26 +1260,10 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 <div className="md:hidden bg-white p-4 shadow-sm flex items-center justify-between border-b">
 <button onClick={()=>setIsSidebarOpen(true)} className="text-gray-600"><Menu size={24}/></button>
 <span className="font-bold text-gray-800">差勤排班系統</span>
-<div className="relative shrink-0">
-  <UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" />
-  <span
-    className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-      googleSyncStatus === 'syncing' ? 'bg-amber-400 animate-pulse' :
-      googleSyncStatus === 'success' ? 'bg-emerald-500' :
-      googleSyncStatus === 'error' ? 'bg-red-500' :
-      'bg-gray-400'
-    }`}
-    title={`Google 日曆：${
-      googleSyncStatus === 'syncing' ? '同步中...' :
-      googleSyncStatus === 'success' ? '已同步' :
-      googleSyncStatus === 'error' ? '同步失敗' :
-      '尚未同步'
-    }`}
-  />
-</div></div>
+<UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" /></div>
 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
 {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} />}
-{view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} googleSyncStatus={googleSyncStatus} setGoogleSyncStatus={setGoogleSyncStatus} setGoogleSyncLastTime={setGoogleSyncLastTime} />}
+{view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
 {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} leaveTypes={leaveTypes} events={calendarEvents} db={db} />}
 {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} internalWorkItems={internalWorkItems} />}
@@ -1654,7 +1557,7 @@ return (
 </td>
 </tr></React.Fragment>
 )})}</tbody></table></div></div></div>);}
-function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules, googleSyncStatus, setGoogleSyncStatus, setGoogleSyncLastTime }) {
+function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
 const intWorkSet = useMemo(() => new Set(Array.isArray(tags?.internalWorkItems) ? tags.internalWorkItems : INTERNAL_WORK_TAGS), [tags?.internalWorkItems]);
 // 是否視為「外勤」：預設皆為外勤，僅當工作項目在內勤清單時例外
 const isExternalItem = (itemName) => !!itemName && !intWorkSet.has(itemName);
@@ -2857,129 +2760,6 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
     setIsSyncingGoogle(false);
   }
 };
-
-// 自動同步：依指定 baseDate 重算該月 sync items（不依賴 useMemo 的當前 date state）
-const buildSyncItemsForMonth = (baseDate) => {
-  const y = baseDate.getFullYear();
-  const m = baseDate.getMonth();
-  const monthStart = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  const monthEnd = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`;
-  const win = getMonthWindow(baseDate);
-  const monthStartTs = win.start.getTime();
-  const monthEndTs = win.end.getTime();
-
-  const grouped = {};
-  (events || []).forEach(ev => {
-    if (!ev?.groupId || !ev?.date) return;
-    if (ev.date < monthStart || ev.date > monthEnd) return;
-    if (!grouped[ev.groupId]) grouped[ev.groupId] = { groupId: ev.groupId, tag: null, people: [] };
-    if (ev.type === 'tag') grouped[ev.groupId].tag = ev;
-    if (ev.type === 'person') grouped[ev.groupId].people.push(ev);
-  });
-  const groupItems = Object.values(grouped).filter(g => !!g.tag).map(group => ({
-    kind: 'group', syncKey: `group:${String(group?.groupId || '')}`, group
-  }));
-
-  const allowedStatus = new Set(['pending', 'deputy_signed', 'approved']);
-  const leaveItems = (leaves || []).filter(l => {
-    if (!l) return false;
-    const typeText = String(l.type || '').trim();
-    if (!typeText) return false;
-    if (typeText.includes('出差') || typeText.includes('公出')) return false;
-    if (!allowedStatus.has(String(l.status || ''))) return false;
-    const s = new Date(String(l.start || ''));
-    const e = new Date(String(l.end || l.start || ''));
-    if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return false;
-    return s.getTime() < monthEndTs && e.getTime() >= monthStartTs;
-  }).map(leave => {
-    const leaveId = String(leave?.id || `${leave?.requesterName || ''}:${leave?.start || ''}:${leave?.end || ''}`);
-    return { kind: 'leave', syncKey: `leave:${leaveId}`, leave };
-  });
-
-  const importantSyncItems = (importantItems || []).filter(it => {
-    if (!it) return false;
-    const d = new Date(`${String(it.date || '').trim()}T00:00:00`);
-    if (!Number.isFinite(d.getTime())) return false;
-    const ts = d.getTime();
-    return ts >= monthStartTs && ts < monthEndTs;
-  }).map(important => {
-    const importantId = String(important?.id || `${important?.date || ''}:${getImportantTitle(important)}`);
-    return { kind: 'important', syncKey: `important:${importantId}`, important };
-  });
-
-  return [...groupItems, ...leaveItems, ...importantSyncItems];
-};
-
-// 背景靜默同步：當月+下月、個人+共用，整合到一次 OAuth token
-const runAutoSync = async () => {
-  if (isSyncingGoogle) return;
-  if (!user?.uid) return;
-  const pid = String(personalCalendarId || '').trim();
-  const sid = String(sharedCalendarId || '').trim();
-  if (!pid && !sid) { setGoogleSyncStatus?.('idle'); return; }
-
-  setGoogleSyncStatus?.('syncing');
-  setIsSyncingGoogle(true);
-  try {
-    const token = await getGoogleCalendarToken();
-    const base = new Date(date);
-    const months = [base, new Date(base.getFullYear(), base.getMonth() + 1, 1)];
-    const jobs = [];
-    if (pid) jobs.push({ calendarId: pid, ownerFilter: true });
-    if (sid) jobs.push({ calendarId: sid, ownerFilter: false });
-
-    for (const job of jobs) {
-      for (const md of months) {
-        const win = getMonthWindow(md);
-        const allItems = buildSyncItemsForMonth(md);
-        const targets = job.ownerFilter ? allItems.filter(isSyncItemOwnedByCurrentUser) : allItems;
-        if (!targets.length) continue;
-        const existingEvents = await fetchGoogleMonthEvents(token, job.calendarId, win.startIso, win.endIso);
-        const existingMap = new Map();
-        (existingEvents || []).forEach(ev => {
-          const key = extractSyncedKey(ev);
-          if (key && ev?.id && !existingMap.has(key)) existingMap.set(key, ev.id);
-        });
-        for (const item of targets) {
-          let payload = null;
-          if (item.kind === 'group') payload = toGoogleCalendarPayload(item.group);
-          if (item.kind === 'leave') payload = toGoogleLeavePayload(item.leave);
-          if (item.kind === 'important') payload = toGoogleImportantPayload(item.important);
-          if (!payload) continue;
-          const existingId = existingMap.get(String(item.syncKey || ''));
-          await upsertGoogleEvent(token, job.calendarId, existingId, payload);
-        }
-      }
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    try { localStorage.setItem(`lastGoogleAutoSync_${user.uid}`, today); } catch(e) {}
-    setGoogleSyncStatus?.('success');
-    setGoogleSyncLastTime?.(new Date());
-  } catch (err) {
-    console.error('Auto sync failed:', err);
-    setGoogleSyncStatus?.('error');
-  } finally {
-    setIsSyncingGoogle(false);
-  }
-};
-
-// 每日首次進入排班日曆頁時自動觸發背景同步（OAuth 授權彈窗會跳一次）
-useEffect(() => {
-  if (!user?.uid) return;
-  if (!events?.length && !leaves?.length && !importantItems?.length) return;
-  const today = new Date().toISOString().slice(0, 10);
-  let lastSyncDate = '';
-  try { lastSyncDate = localStorage.getItem(`lastGoogleAutoSync_${user.uid}`) || ''; } catch(e) {}
-  if (lastSyncDate === today) {
-    if (googleSyncStatus === 'idle') setGoogleSyncStatus?.('success');
-    return;
-  }
-  // 延遲 2 秒讓使用者先看到畫面，再跳授權彈窗
-  const timer = setTimeout(() => { runAutoSync(); }, 2000);
-  return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [user?.uid, (events||[]).length > 0, (leaves||[]).length > 0, (importantItems||[]).length > 0]);
 
 const renderGrid = () => {
 const cells = [];
