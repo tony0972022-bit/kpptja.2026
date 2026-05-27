@@ -626,13 +626,32 @@ const [loading, setLoading] = useState(true);
 const [connectSeconds, setConnectSeconds] = useState(0);
 const [db, setDb] = useState(null);
 const [auth, setAuth] = useState(null);
+// 雲端資料庫配額爆掉時顯示通知（網站暫停使用，等隔日重置）
+const [quotaExceeded, setQuotaExceeded] = useState(false);
+const isQuotaError = (err) => {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || err || '');
+  return code === 'resource-exhausted' || /quota.*exceeded/i.test(msg) || /resource.*exhausted/i.test(msg);
+};
+const handleFirestoreError = (err, source) => {
+  if (isQuotaError(err)) {
+    setQuotaExceeded(true);
+    return true;
+  }
+  console.error(`[Firestore:${source || 'unknown'}]`, err);
+  return false;
+};
 const persistGlobalSettings = (patch) => {
 if (!(db && userData && userData.role === 'admin')) return;
 setDoc(
   doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global'),
   patch,
   { merge: true }
-).catch(e => alert('同步系統設定失敗: ' + (e?.message || e)));
+).catch(e => {
+  if (!handleFirestoreError(e, 'persistGlobalSettings')) {
+    alert('同步系統設定失敗: ' + (e?.message || e));
+  }
+});
 };
 const handleUpdateRoleNames = (newNames) => {
 setRoleNames(newNames);
@@ -816,24 +835,24 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const missingInternalWorkItems = !Array.isArray(remote.internalWorkItems);
     const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
     const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
-    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
+    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) { handleFirestoreError(e, 'settings.seedMerge'); } }
   } else {
     const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
-    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
+    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) { handleFirestoreError(e, 'settings.init'); }
   }
-});
-const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
-const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
-const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
+}, (err) => handleFirestoreError(err, 'settings'));
+const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'leaves'));
+const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'calendar_events'));
+const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))), (err) => handleFirestoreError(err, 'user_profiles'));
+const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'attendance'));
+const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))), (err) => handleFirestoreError(err, 'important_items'));
 const unsubMeetingNotes = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes')), (s) => {
   const map = {};
   s.docs.forEach(d => { map[d.id] = d.data().note || ''; });
   setMeetingNotes(map);
-});
+}, (err) => handleFirestoreError(err, 'meeting_notes'));
 return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetingNotes(); };
-}, [db, user]);
+}, [db, user?.uid]);
 const handleLogout = async () => {
 if(auth) await signOut(auth);
 };
@@ -897,20 +916,21 @@ if(type==='work') {
 const t = workTags.filter(item => item !== val);
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+const patch = { workTags: t };
 if (settings.workColors && settings.workColors[val]) {
   const newWorkColors = { ...settings.workColors };
   delete newWorkColors[val];
   setSettings(prev => ({ ...prev, workColors: newWorkColors }));
   localStorage.setItem('workColors', JSON.stringify(newWorkColors));
-  persistGlobalSettings({ workColors: newWorkColors });
+  patch.workColors = newWorkColors;
 }
 if (internalWorkItems.includes(val)) {
   const i2 = internalWorkItems.filter(x => x !== val);
   setInternalWorkItems(i2);
   localStorage.setItem('internalWorkItems', JSON.stringify(i2));
-  persistGlobalSettings({ internalWorkItems: i2 });
+  patch.internalWorkItems = i2;
 }
-persistGlobalSettings({ workTags: t });
+persistGlobalSettings(patch);
 } else {
 const t = areaTags.filter(item => item !== val);
 setAreaTags(t);
@@ -925,34 +945,37 @@ if (areaTags.includes(newVal)) { alert("此轄區已存在"); return; }
 const t = areaTags.map(item => item === oldVal ? newVal : item);
 setAreaTags(t);
 localStorage.setItem('areaTags', JSON.stringify(t));
+const patch = { areaTags: t };
 if (settings.areaColors && settings.areaColors[oldVal]) {
 const newColors = { ...settings.areaColors };
 newColors[newVal] = newColors[oldVal];
 delete newColors[oldVal];
 setSettings(prev => ({ ...prev, areaColors: newColors}));
 localStorage.setItem('areaColors', JSON.stringify(newColors));
-persistGlobalSettings({ areaColors: newColors });}
-persistGlobalSettings({ areaTags: t });
+patch.areaColors = newColors;
+}
+persistGlobalSettings(patch);
 } else if(type === 'work') {
 if (workTags.includes(newVal)) { alert("此項目已存在"); return; }
 const t = workTags.map(item => item === oldVal ? newVal : item);
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+const patch = { workTags: t };
 if (settings.workColors && settings.workColors[oldVal]) {
 const newWorkColors = { ...settings.workColors };
 newWorkColors[newVal] = newWorkColors[oldVal];
 delete newWorkColors[oldVal];
 setSettings(prev => ({ ...prev, workColors: newWorkColors }));
 localStorage.setItem('workColors', JSON.stringify(newWorkColors));
-persistGlobalSettings({ workColors: newWorkColors });
+patch.workColors = newWorkColors;
 }
 if (internalWorkItems.includes(oldVal)) {
   const i2 = internalWorkItems.map(x => x === oldVal ? newVal : x);
   setInternalWorkItems(i2);
   localStorage.setItem('internalWorkItems', JSON.stringify(i2));
-  persistGlobalSettings({ internalWorkItems: i2 });
+  patch.internalWorkItems = i2;
 }
-persistGlobalSettings({ workTags: t });
+persistGlobalSettings(patch);
 }
 };
 const handleToggleInternalWork = (itemName) => {
@@ -1122,6 +1145,41 @@ const pendingLeaveCount = useMemo(() => {
   }
 }, [calendarEvents, leaves, userData, internalWorkItems]);
 
+if (quotaExceeded) return (
+<div className="fixed inset-0 z-[200] bg-slate-900/95 flex items-center justify-center p-4 text-gray-100">
+  <div className="max-w-lg w-full bg-white text-gray-800 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="bg-gradient-to-br from-rose-500 to-orange-500 text-white px-6 py-5 flex items-center gap-3">
+      <AlertCircle size={32} />
+      <div>
+        <div className="text-xl font-black leading-tight">系統暫停使用</div>
+        <div className="text-xs opacity-90 mt-0.5">雲端資料庫今日用量已達上限</div>
+      </div>
+    </div>
+    <div className="px-6 py-5 space-y-3 text-sm leading-relaxed">
+      <p className="text-gray-700">
+        差勤系統的雲端資料庫（Firebase Firestore）使用 <b>免費方案</b>，每日有讀寫次數上限。
+        系統偵測到目前已達當日用量上限，<b>暫時無法讀取或寫入任何資料</b>，因此系統暫停使用。
+      </p>
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-900 text-[13px]">
+        <div className="font-bold mb-1">📅 預計恢復時間</div>
+        <div>用量配額會於 <b>太平洋時間每日午夜（約台灣時間下午 3-4 點）</b> 自動重置，屆時系統會自動恢復正常。請稍後再試。</div>
+      </div>
+      <p className="text-[12px] text-gray-500 text-center pt-1">
+        重新整理頁面或重新登入皆無法解決此狀況，請耐心等候配額重置。
+      </p>
+    </div>
+    <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
+      <button
+        onClick={() => window.location.reload()}
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
+      >重試（重新整理）</button>
+      <button
+        onClick={async () => { try { if (auth) await signOut(auth); } catch(e){} }}
+        className="px-4 py-2 rounded-lg bg-gray-700 text-white text-sm font-bold hover:bg-gray-800"
+      >登出</button>
+    </div>
+  </div>
+</div>);
 if (loading) return (
 <div className="h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-600 gap-4">
 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -1262,7 +1320,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
 {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} leaveTypes={leaveTypes} events={calendarEvents} db={db} />}
-{view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} />}
+{view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} crud={crud} />}
 {view === 'accounting' && <AccountingStatsView users={usersList} leaves={leaves} leaveTypes={leaveTypes} currentUser={userData} />}
 {view === 'analytics' && <AnalyticsView user={userData} users={usersList} calendarEvents={calendarEvents} leaves={leaves} leaveTypes={leaveTypes} areaTags={areaTags} workTags={workTags} />}
@@ -3426,12 +3484,11 @@ return (
                             const total = stat.total[p] || 0;
                             const peng = stat.peng[p] || 0;
                             const dong = stat.dong[p] || 0;
-                            const isPaused = (r.pausedUsers || []).includes(p);
                             const recent = stat.recent[p];
                             const isLatest = latestNamesSet.has(p);  // 該規則最近一次的人員
                             return (
-                              <tr key={p} className={`border-t ${isPaused ? 'text-gray-400 bg-gray-50' : 'text-gray-700'}`}>
-                                <td className="p-2 font-medium">{p}{isPaused && <span className="ml-1 text-[10px]">(暫停)</span>}</td>
+                              <tr key={p} className="border-t text-gray-700">
+                                <td className="p-2 font-medium">{p}</td>
                                 {isVisit && <td className="p-2 text-center"><span className={peng > 0 ? 'font-bold text-orange-600' : ''}>{peng}</span></td>}
                                 {isVisit && <td className="p-2 text-center"><span className={dong > 0 ? 'font-bold text-green-600' : ''}>{dong}</span></td>}
                                 <td className="p-2 text-center"><span className={total > 0 ? 'font-bold text-blue-600' : ''}>{total}</span></td>
@@ -3453,6 +3510,8 @@ return (
         })}
         <div className="text-[11px] text-gray-500 bg-blue-50 border border-blue-100 rounded p-2 leading-relaxed">
           <div className="font-bold text-blue-700 mb-1">統計規則</div>
+          <div>• 本表僅作<b>歷史次數呈現</b>，不再做自動排序或推薦人選；排班由組長手動指派。</div>
+          <div>• <b>全員一律計入統計</b>，請假／休假／離職等狀態不影響本表（如需暫不列入，請聯絡管理員調整名單）。</div>
           <div>• 澎東訪視：依排班「轄區」標籤含「澎湖」算澎、含「台東」算東。同筆同時含兩者則雙計。</div>
           <div>• 大宗：人數 &gt; 20 人才需勾選輪值類別「大宗」。</div>
           <div>• 統計來源優先讀取新版「輪值類別」標籤；舊資料回退依工作項目（訪視 / 專案報告 / 大宗）對應。</div>
@@ -3463,7 +3522,9 @@ return (
   </div>
 );
 }
-function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView }) {
+function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView, internalWorkItems }) {
+const intWorkSet = useMemo(() => new Set(Array.isArray(internalWorkItems) ? internalWorkItems : INTERNAL_WORK_TAGS), [internalWorkItems]);
+const isExternalItem = (itemName) => !!itemName && !intWorkSet.has(itemName);
 const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
 const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
 const [monthMode, setMonthMode] = useState('year'); // 'month' or 'year' (預設全年)
@@ -7214,10 +7275,13 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
   const leaveColor = (t, idx=0) => LEAVE_HEX[t] || PALETTE[idx % PALETTE.length];
 
   // ===== Section A 篩選器 state =====
+  // 統計分析預設只勾選「審查 / 訪視 / 訪視+審查」三項工作類別
+  const DEFAULT_ANALYTICS_WORKS = ['審查', '訪視', '訪視+審查'];
+  const defaultSelWorks = (list) => (Array.isArray(list) ? list.filter(w => DEFAULT_ANALYTICS_WORKS.includes(w)) : []);
   const [dateMode, setDateMode] = useState('event'); // event=訪視日(執行日), created=建立日
   const [vYear, setVYear] = useState('all');
   const [selAreas, setSelAreas] = useState(areaTags);
-  const [selWorks, setSelWorks] = useState(workTags);
+  const [selWorks, setSelWorks] = useState(defaultSelWorks(workTags));
 
   // ===== Section B 篩選器 state =====
   const [lYear, setLYear] = useState('all');
@@ -7228,7 +7292,7 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
 
   // 篩選器隨設定變動同步
   useEffect(() => { setSelAreas(areaTags); }, [areaTags.join(',')]);
-  useEffect(() => { setSelWorks(workTags); }, [workTags.join(',')]);
+  useEffect(() => { setSelWorks(defaultSelWorks(workTags)); }, [workTags.join(',')]);
   useEffect(() => { setSelLeaveTypes(allLeaveTypeNames); }, [allLeaveTypeNames.join(',')]);
 
   // 取得日期字串（依 dateMode）
