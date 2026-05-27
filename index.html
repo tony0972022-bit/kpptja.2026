@@ -641,6 +641,28 @@ const handleFirestoreError = (err, source) => {
   console.error(`[Firestore:${source || 'unknown'}]`, err);
   return false;
 };
+// Firestore SDK 對 quota / resource-exhausted 錯誤走 retry，不會經 onSnapshot error callback
+// 改攔截 console.error / console.warn 偵測 SDK logger 輸出的訊息
+useEffect(() => {
+  const origError = console.error;
+  const origWarn = console.warn;
+  const detect = (args) => {
+    try {
+      const text = args.map(a => {
+        if (a == null) return '';
+        if (typeof a === 'string') return a;
+        if (a && a.message) return String(a.message);
+        try { return JSON.stringify(a); } catch { return String(a); }
+      }).join(' ');
+      if (/resource[-_ ]?exhausted/i.test(text) || /quota.*exceeded/i.test(text)) {
+        setQuotaExceeded(true);
+      }
+    } catch {}
+  };
+  console.error = function(...args) { detect(args); return origError.apply(console, args); };
+  console.warn = function(...args) { detect(args); return origWarn.apply(console, args); };
+  return () => { console.error = origError; console.warn = origWarn; };
+}, []);
 const persistGlobalSettings = (patch) => {
 if (!(db && userData && userData.role === 'admin')) return;
 setDoc(
