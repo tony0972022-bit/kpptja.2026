@@ -360,6 +360,11 @@ admin: '管理員'
 };
 // 外勤工作項目（觸發「缺公務單」與職代流程）
 // 註：「月報」「專案報告」「聚餐」預設不列入外勤；若實際需外出，可在排班時勾「外出」覆寫
+// 預設：所有工作項目皆視為「外勤」，需走差勤申請。
+// 「內勤工作項目」清單為例外清單，列入者視為內勤、不觸發差勤申請。
+// INTERNAL_WORK_TAGS 為首次啟動的種子值（之後皆以設定畫面切換維護）。
+const INTERNAL_WORK_TAGS = ["專案報告", "月報", "聚餐"];
+// 保留舊常數以利資料遷移（不再被引用為判斷依據）。
 const EXTERNAL_WORK_TAGS = ["訪視", "出差", "受訓", "開會", "公出", "成效", "試用", "審查"];
 // 工作項目下拉（一般紀錄用）：移除「大宗」（改由輪值類別標籤管理）；新增「聚餐」（內勤）
 const DEFAULT_WORK_TAGS = ["審查", "訪視", "成效", "試用", "專案報告", "月報", "聚餐"];
@@ -599,6 +604,7 @@ const [calendarEvents, setCalendarEvents] = useState([]);
 const [importantItems, setImportantItems] = useState([]);
 const [attendanceRecords, setAttendanceRecords] = useState([]);
 const [workTags, setWorkTags] = useState(DEFAULT_WORK_TAGS);
+const [internalWorkItems, setInternalWorkItems] = useState(INTERNAL_WORK_TAGS);
 const [areaTags, setAreaTags] = useState(DEFAULT_AREA_TAGS);
 const [leaveTypes, setLeaveTypes] = useState(DEFAULT_LEAVE_TYPES);
 const [meetingSelectedItems, setMeetingSelectedItems] = useState([]);
@@ -684,6 +690,10 @@ if(savedRotationRules) {
 }
 const savedWT = localStorage.getItem('workTags');
 if (savedWT) setWorkTags(JSON.parse(savedWT));
+try {
+  const savedIWT = localStorage.getItem('internalWorkItems');
+  if (savedIWT) setInternalWorkItems(JSON.parse(savedIWT));
+} catch(e) {}
 const savedAT = localStorage.getItem('areaTags');
 if (savedAT) setAreaTags(JSON.parse(savedAT));
 const init = async () => {
@@ -749,6 +759,8 @@ init();
 useEffect(() => {
 if (!db || !user) return;
 const settingsRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global');
+// 防止多 client 互踩 setDoc：每個 client/session 只允許寫回一次「missing 補欄位」
+let didSeedWriteOnce = false;
 const unsubSettings = onSnapshot(settingsRef, async (snap) => {
   if (snap.exists()) {
     const remote = snap.data() || {};
@@ -769,6 +781,12 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const remoteRoleNames = { ...DEFAULT_ROLE_NAMES, ...(remote.roleNames || {}) };
     const remoteRotationRules = normalizeRotationRules(remote.rotationRules || DEFAULT_ROTATION_RULES);
     const remoteWorkTags = Array.isArray(remote.workTags) && remote.workTags.length > 0 ? remote.workTags : DEFAULT_WORK_TAGS;
+    // 內勤清單：優先用新欄位；否則從舊 externalWorkItems 反推（workTags - externalWorkItems）；都沒有就用種子
+    const remoteInternalWorkItems = Array.isArray(remote.internalWorkItems)
+      ? remote.internalWorkItems
+      : (Array.isArray(remote.externalWorkItems)
+          ? remoteWorkTags.filter(w => !remote.externalWorkItems.includes(w))
+          : INTERNAL_WORK_TAGS);
     const remoteAreaTags = Array.isArray(remote.areaTags) && remote.areaTags.length > 0 ? remote.areaTags : DEFAULT_AREA_TAGS;
     const remoteLeaveTypes = Array.isArray(remote.leaveTypes) && remote.leaveTypes.length > 0 ? remote.leaveTypes : DEFAULT_LEAVE_TYPES;
     const remoteMeetingSelectedItems = Array.isArray(remote.meetingSelectedItems) ? remote.meetingSelectedItems : [];
@@ -776,6 +794,7 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     setRoleNames(remoteRoleNames);
     setRotationRules(remoteRotationRules);
     setWorkTags(remoteWorkTags);
+    setInternalWorkItems(remoteInternalWorkItems);
     setAreaTags(remoteAreaTags);
     setLeaveTypes(remoteLeaveTypes);
     setMeetingSelectedItems(remoteMeetingSelectedItems);
@@ -786,6 +805,7 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     localStorage.setItem('roleNames', JSON.stringify(remoteRoleNames));
     localStorage.setItem('rotationRules', JSON.stringify(remoteRotationRules));
     localStorage.setItem('workTags', JSON.stringify(remoteWorkTags));
+    localStorage.setItem('internalWorkItems', JSON.stringify(remoteInternalWorkItems));
     localStorage.setItem('areaTags', JSON.stringify(remoteAreaTags));
     localStorage.setItem('leaveTypes', JSON.stringify(remoteLeaveTypes));
     // 需要寫回 Firestore 的條件：(1) 首次設定（key 不存在），或 (2) Firestore 中仍有廢除假日殘留
@@ -795,26 +815,80 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const missingRoleNames = Object.keys(DEFAULT_ROLE_NAMES).some(k => !(k in (remote.roleNames || {})));
     const missingRotationRules = !Array.isArray(remote.rotationRules) || remote.rotationRules.length === 0;
     const missingWorkTags = !Array.isArray(remote.workTags) || remote.workTags.length === 0;
+    const missingInternalWorkItems = !Array.isArray(remote.internalWorkItems);
     const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
     const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
-    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
+    if (!didSeedWriteOnce && (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes)) {
+      didSeedWriteOnce = true;
+      try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {}
+    }
   } else {
-    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
-    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
+    if (!didSeedWriteOnce) {
+      didSeedWriteOnce = true;
+      const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
+      try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
+    }
   }
 });
-const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
-const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
-const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
+// Incremental updater：只更新實際變動的 doc，保留未變動 doc 的物件引用，
+// 讓下游 useMemo / React.memo 可以正確 bail-out，避免每筆寫入觸發全 tree 重算。
+// idKey 預設 'id'，user_profiles 用 'docId'。sortFn 可選，用於需要維持順序的 collection。
+const makeIncrementalListUpdater = (setter, opts = {}) => {
+  const idKey = opts.idKey || 'id';
+  const sortFn = opts.sortFn || null;
+  return (s) => {
+    setter(prev => {
+      const changes = s.docChanges();
+      if (changes.length === 0) return prev;
+      const next = prev.slice();
+      let modified = false;
+      changes.forEach(change => {
+        const id = change.doc.id;
+        const data = idKey === 'docId'
+          ? { docId: id, ...change.doc.data() }
+          : { id, ...change.doc.data() };
+        const idx = next.findIndex(x => x[idKey] === id);
+        if (change.type === 'removed') {
+          if (idx !== -1) { next.splice(idx, 1); modified = true; }
+        } else {
+          if (idx === -1) { next.push(data); modified = true; }
+          else { next[idx] = data; modified = true; }
+        }
+      });
+      if (!modified) return prev;
+      if (sortFn) next.sort(sortFn);
+      return next;
+    });
+  };
+};
+const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), makeIncrementalListUpdater(setLeaves));
+const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), makeIncrementalListUpdater(setCalendarEvents));
+const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), makeIncrementalListUpdater(setUsersList, { idKey: 'docId' }));
+const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), makeIncrementalListUpdater(setAttendanceRecords));
+// important_items 原本訂閱 orderBy('date','asc')，incremental 後維持同樣排序
+const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), makeIncrementalListUpdater(setImportantItems, {
+  sortFn: (a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+}));
 const unsubMeetingNotes = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes')), (s) => {
-  const map = {};
-  s.docs.forEach(d => { map[d.id] = d.data().note || ''; });
-  setMeetingNotes(map);
+  setMeetingNotes(prev => {
+    const changes = s.docChanges();
+    if (changes.length === 0) return prev;
+    const next = { ...prev };
+    let modified = false;
+    changes.forEach(change => {
+      const id = change.doc.id;
+      if (change.type === 'removed') {
+        if (id in next) { delete next[id]; modified = true; }
+      } else {
+        const note = change.doc.data().note || '';
+        if (next[id] !== note) { next[id] = note; modified = true; }
+      }
+    });
+    return modified ? next : prev;
+  });
 });
 return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetingNotes(); };
-}, [db, user]);
+}, [db, user?.uid]);
 const handleLogout = async () => {
 if(auth) await signOut(auth);
 };
@@ -878,14 +952,21 @@ if(type==='work') {
 const t = workTags.filter(item => item !== val);
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+const patch = { workTags: t };
 if (settings.workColors && settings.workColors[val]) {
   const newWorkColors = { ...settings.workColors };
   delete newWorkColors[val];
   setSettings(prev => ({ ...prev, workColors: newWorkColors }));
   localStorage.setItem('workColors', JSON.stringify(newWorkColors));
-  persistGlobalSettings({ workColors: newWorkColors });
+  patch.workColors = newWorkColors;
 }
-persistGlobalSettings({ workTags: t });
+if (internalWorkItems.includes(val)) {
+  const i2 = internalWorkItems.filter(x => x !== val);
+  setInternalWorkItems(i2);
+  localStorage.setItem('internalWorkItems', JSON.stringify(i2));
+  patch.internalWorkItems = i2;
+}
+persistGlobalSettings(patch);
 } else {
 const t = areaTags.filter(item => item !== val);
 setAreaTags(t);
@@ -900,29 +981,46 @@ if (areaTags.includes(newVal)) { alert("此轄區已存在"); return; }
 const t = areaTags.map(item => item === oldVal ? newVal : item);
 setAreaTags(t);
 localStorage.setItem('areaTags', JSON.stringify(t));
+const patch = { areaTags: t };
 if (settings.areaColors && settings.areaColors[oldVal]) {
 const newColors = { ...settings.areaColors };
 newColors[newVal] = newColors[oldVal];
 delete newColors[oldVal];
 setSettings(prev => ({ ...prev, areaColors: newColors}));
 localStorage.setItem('areaColors', JSON.stringify(newColors));
-persistGlobalSettings({ areaColors: newColors });}
-persistGlobalSettings({ areaTags: t });
+patch.areaColors = newColors;
+}
+persistGlobalSettings(patch);
 } else if(type === 'work') {
 if (workTags.includes(newVal)) { alert("此項目已存在"); return; }
 const t = workTags.map(item => item === oldVal ? newVal : item);
 setWorkTags(t);
 localStorage.setItem('workTags', JSON.stringify(t));
+const patch = { workTags: t };
 if (settings.workColors && settings.workColors[oldVal]) {
 const newWorkColors = { ...settings.workColors };
 newWorkColors[newVal] = newWorkColors[oldVal];
 delete newWorkColors[oldVal];
 setSettings(prev => ({ ...prev, workColors: newWorkColors }));
 localStorage.setItem('workColors', JSON.stringify(newWorkColors));
-persistGlobalSettings({ workColors: newWorkColors });
+patch.workColors = newWorkColors;
 }
-persistGlobalSettings({ workTags: t });
+if (internalWorkItems.includes(oldVal)) {
+  const i2 = internalWorkItems.map(x => x === oldVal ? newVal : x);
+  setInternalWorkItems(i2);
+  localStorage.setItem('internalWorkItems', JSON.stringify(i2));
+  patch.internalWorkItems = i2;
 }
+persistGlobalSettings(patch);
+}
+};
+const handleToggleInternalWork = (itemName) => {
+  if (!itemName) return;
+  const isInt = internalWorkItems.includes(itemName);
+  const next = isInt ? internalWorkItems.filter(x => x !== itemName) : [...internalWorkItems, itemName];
+  setInternalWorkItems(next);
+  localStorage.setItem('internalWorkItems', JSON.stringify(next));
+  persistGlobalSettings({ internalWorkItems: next });
 };
 const handleManageLeaveTypes = (action, val) => {
 if(action === 'add' && val) {
@@ -1050,8 +1148,8 @@ const pendingLeaveCount = useMemo(() => {
       if (!g.tag) return;
       const isMe = g.people.some(p => p.userId === userData.uid || p.userId === userData.docId || p.userName === userData.name);
       if (!isMe) return;
-      // 外勤判定：在外勤名單內 OR 排班時勾了「外出（需差單）」覆寫
-      const needsLeave = EXTERNAL_WORK_TAGS.includes(g.tag.item) || !!g.tag.requiresLeave;
+      // 外勤判定：預設皆為外勤，僅當工作項目在內勤名單內才視為內勤；勾了「外出（需差單）」覆寫一律外勤
+      const needsLeave = !internalWorkItems.includes(g.tag.item) || !!g.tag.requiresLeave;
       if (!needsLeave) return;
       const d = g.tag.date;
       let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
@@ -1081,7 +1179,7 @@ const pendingLeaveCount = useMemo(() => {
   } catch {
     return 0;
   }
-}, [calendarEvents, leaves, userData]);
+}, [calendarEvents, leaves, userData, internalWorkItems]);
 
 if (loading) return (
 <div className="h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-600 gap-4">
@@ -1220,10 +1318,10 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 <UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" /></div>
 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
 {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} />}
-{view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
-{view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} />}
+{view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
+{view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} leaveTypes={leaveTypes} events={calendarEvents} db={db} />}
-{view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} />}
+{view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'statistics' && <StatisticsView users={usersList} leaves={leaves} currentUser={userData} onUpdateAnyProfile={handleUpdateAnyUserProfile} crud={crud} />}
 {view === 'accounting' && <AccountingStatsView users={usersList} leaves={leaves} leaveTypes={leaveTypes} currentUser={userData} />}
 {view === 'analytics' && <AnalyticsView user={userData} users={usersList} calendarEvents={calendarEvents} leaves={leaves} leaveTypes={leaveTypes} areaTags={areaTags} workTags={workTags} />}
@@ -1231,7 +1329,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'meeting' && <MeetingView user={userData} calendarEvents={calendarEvents} workTags={workTags} meetingSelectedItems={meetingSelectedItems} meetingNotes={meetingNotes} crud={crud} onSaveMeetingSelectedItems={handleSaveMeetingSelectedItems} />}
 {view === 'members' && <MembersView db={db} users={usersList} currentUser={userData} roleNames={roleNames} />}
 {view === 'database' && <DatabaseAdminView events={calendarEvents} leaves={leaves} users={usersList} crud={crud} db={db} />}
-{view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
+{view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag, internalWorkItems, handleToggleInternalWork}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
 {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}</main></div></div>);}
 // --- Sub-Components ---
 function Dashboard({ user, leaves, calendarEvents, setView, leaveTypes }) {
@@ -1259,7 +1357,7 @@ return `${l.requesterName}(${timeStr})`;
 const todayExternalDetails = [];
 calendarEvents.filter(e => e.date === todayStr && e.type === 'person').forEach(p => {
 const tagEv = calendarEvents.find(t => t.groupId === p.groupId && t.type === 'tag');
-if (tagEv && (EXTERNAL_WORK_TAGS.includes(tagEv.item) || !!tagEv.requiresLeave)) {
+if (tagEv && (!internalWorkItems.includes(tagEv.item) || !!tagEv.requiresLeave)) {
 const s = p.slot === 'morning' ? '上午' : (p.slot === 'afternoon' ? '下午' : '整天');
 todayExternalDetails.push(`${p.userName}(${s})`);}
 });
@@ -1515,6 +1613,9 @@ return (
 </tr></React.Fragment>
 )})}</tbody></table></div></div></div>);}
 function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
+const intWorkSet = useMemo(() => new Set(Array.isArray(tags?.internalWorkItems) ? tags.internalWorkItems : INTERNAL_WORK_TAGS), [tags?.internalWorkItems]);
+// 是否視為「外勤」：預設皆為外勤，僅當工作項目在內勤清單時例外
+const isExternalItem = (itemName) => !!itemName && !intWorkSet.has(itemName);
 const [date, setDate] = useState(new Date());
 const [viewMode, setViewMode] = useState('month');
 const [modalOpen, setModalOpen] = useState(false);
@@ -2714,6 +2815,7 @@ const handleSyncGoogleCalendar = async (targetType = 'both') => {
     setIsSyncingGoogle(false);
   }
 };
+
 const renderGrid = () => {
 const cells = [];
 const isMonth = viewMode === 'month';
@@ -2846,7 +2948,7 @@ const renderGroup = (g) => {
           {c}
         </span>
       ))}
-      {!!g.tag?.requiresLeave && !EXTERNAL_WORK_TAGS.includes(tagName) && (
+      {!!g.tag?.requiresLeave && !isExternalItem(tagName) && (
         <span className="px-1.5 py-0.5 rounded text-[10px] leading-none font-bold border bg-orange-100 text-orange-800 border-orange-300" title="此排班標記為外出，需送差單與職代">
           外出
         </span>
@@ -3044,8 +3146,8 @@ return (
 <div>
 <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between gap-2">
   <span>工作項目</span>
-  {/* 內勤項目（月報/專案報告/聚餐）若實際外出可勾此項 → 強制納入差勤申請 */}
-  {(modalData.workItem === '月報' || modalData.workItem === '專案報告' || modalData.workItem === '聚餐') && (
+  {/* 目前判定為「內勤」的工作項目，若實際外出可勾此項 → 強制納入差勤申請 */}
+  {modalData.workItem && !isExternalItem(modalData.workItem) && (
     <label className="text-[11px] font-normal text-orange-600 flex items-center gap-1 cursor-pointer hover:text-orange-700">
       <input type="checkbox" checked={selExternalOverride} onChange={e=>setSelExternalOverride(e.target.checked)} className="accent-orange-500"/>
       外出（需差單）
@@ -3055,8 +3157,8 @@ return (
 <select className="w-full border p-2 rounded bg-white text-sm" value={modalData.workItem} onChange={e=>{
   const newItem = e.target.value;
   setModalData({ ...modalData, workItem: newItem });
-  // 切換工作項目時若新項目非內勤三項則重置外出覆寫
-  if (!['月報', '專案報告', '聚餐'].includes(newItem)) setSelExternalOverride(false);
+  // 切換工作項目時若新項目本身已是外勤則重置外出覆寫（不需再覆寫）
+  if (isExternalItem(newItem)) setSelExternalOverride(false);
   // 自動帶入：選了「專案報告」或「月報」即自動勾選對應的輪值類別標籤
   if (newItem === '專案報告' || newItem === '月報') {
     setSelRotationCategories(prev => prev.includes(newItem) ? prev : [...prev, newItem]);
@@ -3339,26 +3441,6 @@ return (
           const isExpanded = expandedRules.has(r.id);
           // 最近資訊（所有規則都顯示）
           const latestText = stat.latest?.date ? `最近：${(stat.latest.names||[]).join('/')} ${stat.latest.date.slice(5).replace('-','/')}` : '最近：—';
-          // 下一位推薦（依統計）：先未暫停人員 → 次數少優先 → 同次數時最久沒做優先 → 都沒做過者優先
-          const activeOrderList = (r.order || []).filter(n => !(r.pausedUsers || []).includes(n));
-          const nextSuggestion = (() => {
-            if (!activeOrderList.length) return null;
-            const sorted = [...activeOrderList].sort((a, b) => {
-              const ca = stat.total[a] || 0;
-              const cb = stat.total[b] || 0;
-              if (ca !== cb) return ca - cb; // 次數少優先
-              const ra = stat.recent[a] || '';
-              const rb = stat.recent[b] || '';
-              if (!ra && !rb) return 0;
-              if (!ra) return -1; // 未做過者優先
-              if (!rb) return 1;
-              return ra.localeCompare(rb); // 最久沒做優先
-            });
-            return sorted[0];
-          })();
-          // 若管理員手動設定 nextCandidate 仍優先採用
-          const nextPerson = (r.nextCandidate && activeOrderList.includes(r.nextCandidate)) ? r.nextCandidate : nextSuggestion;
-          const nextText = nextPerson ? `下一位：${nextPerson}` : '';
           // 該規則「最近一次」的人員集合（用於橘字標註）
           const latestNamesSet = new Set(stat.latest?.names || []);
           // 簡短摘要（收合時顯示）
@@ -3368,8 +3450,8 @@ return (
           return (
             <div key={r.id} className="bg-gray-50 rounded-lg border overflow-hidden">
               {/* 標題列（可點擊收合/展開） */}
-              <div className={`p-3 flex justify-between items-center gap-2 ${editMode === r.id ? '' : 'cursor-pointer hover:bg-gray-100'}`}
-                   onClick={editMode === r.id ? undefined : ()=>toggleExpand(r.id)}>
+              <div className="p-3 flex justify-between items-center gap-2 cursor-pointer hover:bg-gray-100"
+                   onClick={()=>toggleExpand(r.id)}>
                 <div className="flex items-center gap-2 min-w-0">
                   <ChevronRight size={16} className={`text-gray-400 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}/>
                   <div className="flex flex-col min-w-0">
@@ -3380,31 +3462,15 @@ return (
                     </span>
                     <div className="flex items-center gap-3 flex-wrap text-[11px] font-normal mt-0.5">
                       <span className="text-orange-600">{latestText}</span>
-                      {nextText && <span className="text-blue-600">{nextText}</span>}
                     </div>
                   </div>
                 </div>
-                {editMode !== r.id ? (
-                  <button
-                    onClick={(e)=>{ e.stopPropagation(); startEdit(r); if (!isExpanded) toggleExpand(r.id); }}
-                    className="text-gray-400 hover:text-blue-600 text-[11px] flex items-center gap-1 whitespace-nowrap shrink-0"
-                  ><Edit2 size={12}/> 編輯順序/暫停</button>
-                ) : (
-                  <div className="flex gap-2 items-center" onClick={e=>e.stopPropagation()}>
-                    {showPass ? (
-                      <input autoFocus className="w-16 text-xs border rounded p-1" placeholder="密碼" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-                    ) : null}
-                    <button onClick={saveOrder} className="text-green-600 text-xs font-bold">儲存</button>
-                    <button onClick={()=>setEditMode(null)} className="text-gray-400 text-xs">取消</button>
-                  </div>
-                )}
               </div>
 
-              {/* 展開區（統計表 / 編輯模式） */}
+              {/* 展開區（統計表） */}
               {isExpanded && (
                 <div className="px-3 pb-3 border-t border-gray-200 bg-white">
-                  {editMode !== r.id ? (
-                    <div className="overflow-x-auto">
+                  <div className="overflow-x-auto">
                       <table className="w-full text-xs border-collapse">
                         <thead className="bg-gray-100 text-gray-600">
                           <tr>
@@ -3420,12 +3486,11 @@ return (
                             const total = stat.total[p] || 0;
                             const peng = stat.peng[p] || 0;
                             const dong = stat.dong[p] || 0;
-                            const isPaused = (r.pausedUsers || []).includes(p);
                             const recent = stat.recent[p];
                             const isLatest = latestNamesSet.has(p);  // 該規則最近一次的人員
                             return (
-                              <tr key={p} className={`border-t ${isPaused ? 'text-gray-400 bg-gray-50' : 'text-gray-700'}`}>
-                                <td className="p-2 font-medium">{p}{isPaused && <span className="ml-1 text-[10px]">(暫停)</span>}</td>
+                              <tr key={p} className="border-t text-gray-700">
+                                <td className="p-2 font-medium">{p}</td>
                                 {isVisit && <td className="p-2 text-center"><span className={peng > 0 ? 'font-bold text-orange-600' : ''}>{peng}</span></td>}
                                 {isVisit && <td className="p-2 text-center"><span className={dong > 0 ? 'font-bold text-green-600' : ''}>{dong}</span></td>}
                                 <td className="p-2 text-center"><span className={total > 0 ? 'font-bold text-blue-600' : ''}>{total}</span></td>
@@ -3440,31 +3505,6 @@ return (
                         </tbody>
                       </table>
                     </div>
-                  ) : (
-                    <div className="flex flex-wrap gap-1 pt-2">
-                      {displayOrder.map((p, idx) => {
-                        const isPaused = pausedList.includes(p);
-                        return (
-                          <div key={p} className={`px-2 py-1 text-xs rounded text-center relative ${isPaused ? 'bg-gray-200 text-gray-400 border border-gray-300' : 'bg-white border text-gray-500'}`}>
-                            <div className="font-medium">{p}{isPaused ? '（暫停）' : ''}</div>
-                            <div className="mt-1 flex items-center justify-center gap-1">
-                              <button onClick={()=>moveItem(idx, -1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="左移"><ChevronLeft size={10}/></button>
-                              <button onClick={()=>moveItem(idx, 1)} className="p-0.5 hover:text-blue-500 border rounded bg-white" title="右移"><ChevronRight size={10}/></button>
-                              <button onClick={()=>togglePause(p)} className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isPaused ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                {isPaused ? '恢復' : '暫停'}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {editMode === r.id && (
-                    <div className="mt-2 text-[11px] text-gray-500">
-                      順序與暫停狀態僅影響統計表呈現順序與配色。產假/病假期間可先暫停，回來再按恢復。
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -3472,6 +3512,8 @@ return (
         })}
         <div className="text-[11px] text-gray-500 bg-blue-50 border border-blue-100 rounded p-2 leading-relaxed">
           <div className="font-bold text-blue-700 mb-1">統計規則</div>
+          <div>• 本表僅作<b>歷史次數呈現</b>，不再做自動排序或推薦人選；排班由組長手動指派。</div>
+          <div>• <b>全員一律計入統計</b>，請假／休假／離職等狀態不影響本表（如需暫不列入，請聯絡管理員調整名單）。</div>
           <div>• 澎東訪視：依排班「轄區」標籤含「澎湖」算澎、含「台東」算東。同筆同時含兩者則雙計。</div>
           <div>• 大宗：人數 &gt; 20 人才需勾選輪值類別「大宗」。</div>
           <div>• 統計來源優先讀取新版「輪值類別」標籤；舊資料回退依工作項目（訪視 / 專案報告 / 大宗）對應。</div>
@@ -3482,7 +3524,9 @@ return (
   </div>
 );
 }
-function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView }) {
+function PersonalScheduleView({ user, events, leaves, settings, leaveTypes, crud, users, setView, internalWorkItems }) {
+const intWorkSet = useMemo(() => new Set(Array.isArray(internalWorkItems) ? internalWorkItems : INTERNAL_WORK_TAGS), [internalWorkItems]);
+const isExternalItem = (itemName) => !!itemName && !intWorkSet.has(itemName);
 const [activeTab, setActiveTab] = useState('mine'); // 控制第一區、第二區
 const [month, setMonth] = useState(getLocalDateString(new Date()).slice(0, 7));
 const [monthMode, setMonthMode] = useState('year'); // 'month' or 'year' (預設全年)
@@ -3538,7 +3582,7 @@ const myLeaves = leaves.filter(l =>
 );
 const myLeave = myLeaves[0] || null;
 let status = '正常';
-const isExternal = myWork.some(w => w.tag && (EXTERNAL_WORK_TAGS.includes(w.tag.item) || !!w.tag.requiresLeave));
+const isExternal = myWork.some(w => w.tag && (isExternalItem(w.tag.item) || !!w.tag.requiresLeave));
 const isOfficialLeave = myLeave && isOfficialLeaveType(myLeave.type);
 const isPersonalLeave = myLeave && !isOfficialLeaveType(myLeave.type);
 if (isExternal && !myLeave) status = '缺公務單';
@@ -4190,7 +4234,8 @@ const handleSend = () => {
   onSubmit({ type, start: task.suggestedStart, end: task.suggestedEnd, reason: task.reason, deputyId, skipDeputy, hours: h });
 }
 return (<div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm space-y-3"><div className="flex flex-col md:flex-row justify-between md:items-center border-b border-gray-100 pb-3 gap-2"><div><div className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={16} className="text-indigo-500"/>{task.date} <span className="text-indigo-600">{task.item}</span> {task.area && `(${task.area})`}</div><div className="text-xs text-gray-500 mt-1 flex gap-3"><span><span className="font-bold text-gray-600">時段：</span>{task.slot === 'morning' ? '上午' : task.slot === 'afternoon' ? '下午' : '整天'} ({task.suggestedStart.split('T')[1]} ~ {task.suggestedEnd.split('T')[1]})</span><span><span className="font-bold text-gray-600">自動匯入事由：</span>{task.reason}</span></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs font-bold text-gray-500 block mb-1">確認假別 (自動篩選公務假別)</label><select className="w-full border border-gray-300 p-2 rounded bg-gray-50 focus:bg-white text-sm" value={type} onChange={e=>setType(e.target.value)}>{officialTypes.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}</select>{selectedTypeDesc && <div className="text-[10px] text-indigo-600 mt-1 pl-1">{selectedTypeDesc}</div>}</div><div><label className="text-xs font-bold text-gray-500 block mb-1">請選擇職務代理人 <span className="text-red-500">*</span></label><select className="w-full border border-indigo-300 p-2 rounded bg-white shadow-inner text-sm focus:ring-2 focus:ring-indigo-200 outline-none" value={deputyId} onChange={e=>setDeputyId(e.target.value)}><option value="">-- 點此選擇職代 --</option>{deputies.map(u=><option key={u.docId||u.uid} value={(u.docId || u.uid || (u.email||'').toLowerCase())}>{u.name}</option>)}</select></div></div><div className="pt-2 text-right"><button onClick={handleSend} disabled={isSubmitting} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-md transition disabled:opacity-50 flex justify-center items-center gap-2 ml-auto">{isSubmitting ? <><Loader2 className="animate-spin" size={16}/> 傳送中...</> : <><Check size={16}/> 確認送出此差單</>}</button></div></div>)}
-function LeaveForm({ user, users, leaves, events, crud, leaveTypes, setView }) {
+function LeaveForm({ user, users, leaves, events, crud, leaveTypes, setView, internalWorkItems }) {
+const intWorkList = Array.isArray(internalWorkItems) ? internalWorkItems : INTERNAL_WORK_TAGS;
 const defaultPersonalType = leaveTypes.find(t => t.category === 'personal')?.name || '';
 const [form, setForm] = useState({ type: '', start:'', end:'', reason:'', deputyId:'' });
 const [hours, setHours] = useState(0);
@@ -4327,7 +4372,7 @@ if (!g.tag) return;
 const isMe = g.people.some(p => p.userId === user.uid || p.userId === user.docId || p.userName === user.name);
 if (!isMe) return;
 // 外勤判定：工作項目在外勤名單內 OR 排班時勾了「外出（需差單）」覆寫
-const needsLeave = EXTERNAL_WORK_TAGS.includes(g.tag.item) || !!g.tag.requiresLeave;
+const needsLeave = !intWorkList.includes(g.tag.item) || !!g.tag.requiresLeave;
 if (!needsLeave) return;
 const d = g.tag.date;
 let startTime = g.tag.startTime ? `${d}T${g.tag.startTime}` : `${d}T08:00`;
@@ -4378,7 +4423,7 @@ pending.push({ id: g.tag.groupId, date: d, slot: g.tag.slot, item: g.tag.item, a
 }
 });
 return pending.sort((a,b) => a.date.localeCompare(b.date));
-}, [events, leaves, user]);
+}, [events, leaves, user, intWorkList]);
 useEffect(() => {
   // 少於一天：依起訖時間計算（同日扣午休 12:00-13:00）
   if (inputMode !== 'manual') return;
@@ -4846,7 +4891,7 @@ const executeConfirmedSubmit = async () => {
       const hoursText = Number(payload.hours || 0);
       const reasonText = String(payload.reason || payload.note || '').trim() || '-';
 
-      await sendMail({
+      sendMail({
         targetEmail: deputyEmail,
         subject: `【職代審查】${deputyName}，您有一筆差勤待審：${requesterName} ${leaveType} ${dateText}`,
         body: `${requesterName} ${leaveType} ${dateText}
@@ -5961,13 +6006,19 @@ link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
 link.download = "全團隊請假紀錄.csv";
 link.click();
 };
-const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0));
-const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)) : [];
+const pendingMyDeputy = useMemo(() => leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)), [leaves, currentUser.uid, currentUser.docId, currentUser.email]);
+const pendingLeader = useMemo(() => (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)) : [], [leaves, currentUser.role]);
 // --- Bulk approval selection (leader) ---
+// 用 pendingLeader.length + map(id).join 當 fingerprint 避免每次 render 都當變動
+const pendingLeaderIdsKey = useMemo(() => pendingLeader.map(l => l.id).join(','), [pendingLeader]);
 useEffect(() => {
-  // keep selections that still exist
-  setSelectedLeaderIds(prev => prev.filter(id => pendingLeader.some(l => l.id === id)));
-}, [pendingLeader]);
+  // keep selections that still exist；用 functional update + Object.is 比對避免 setState 重觸發
+  setSelectedLeaderIds(prev => {
+    const validIds = new Set(pendingLeader.map(l => l.id));
+    const filtered = prev.filter(id => validIds.has(id));
+    return filtered.length === prev.length ? prev : filtered;
+  });
+}, [pendingLeaderIdsKey]);
 
 const toggleLeaderSelect = (id) => {
   setSelectedLeaderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -6012,7 +6063,7 @@ const handleLeaderBulkApprove = async () => {
       try {
         const requesterEmail = (leave.requesterEmail || '').toLowerCase();
         if (requesterEmail) {
-          await sendMail({
+          sendMail({
             targetEmail: requesterEmail,
             subject: "【差勤核准】你的差單已核准",
             body: `你好 ${leave.requesterName||''}：
@@ -6062,7 +6113,7 @@ const handleLeaderApprove = async (leave) => { if (processingId) { alert("目前
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
   if (requesterEmail) {
-    await sendMail({
+    sendMail({
       targetEmail: requesterEmail,
       subject: "【差勤核准】你的差單已核准",
       body: `你好 ${leave.requesterName||''}：
@@ -6088,7 +6139,7 @@ const handleReject = async (leave) => { if (processingId) { alert("目前有作�
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
   if (requesterEmail) {
-    await sendMail({
+    sendMail({
       targetEmail: requesterEmail,
       subject: "【差勤退回】你的差單未通過（退件）",
       body: `你好 ${leave.requesterName||''}：
@@ -7232,10 +7283,13 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
   const leaveColor = (t, idx=0) => LEAVE_HEX[t] || PALETTE[idx % PALETTE.length];
 
   // ===== Section A 篩選器 state =====
+  // 統計分析預設只勾選「審查 / 訪視 / 訪視+審查」三項工作類別
+  const DEFAULT_ANALYTICS_WORKS = ['審查', '訪視', '訪視+審查'];
+  const defaultSelWorks = (list) => (Array.isArray(list) ? list.filter(w => DEFAULT_ANALYTICS_WORKS.includes(w)) : []);
   const [dateMode, setDateMode] = useState('event'); // event=訪視日(執行日), created=建立日
   const [vYear, setVYear] = useState('all');
   const [selAreas, setSelAreas] = useState(areaTags);
-  const [selWorks, setSelWorks] = useState(workTags);
+  const [selWorks, setSelWorks] = useState(defaultSelWorks(workTags));
 
   // ===== Section B 篩選器 state =====
   const [lYear, setLYear] = useState('all');
@@ -7246,7 +7300,7 @@ function AnalyticsView({ user, users, calendarEvents, leaves, leaveTypes, areaTa
 
   // 篩選器隨設定變動同步
   useEffect(() => { setSelAreas(areaTags); }, [areaTags.join(',')]);
-  useEffect(() => { setSelWorks(workTags); }, [workTags.join(',')]);
+  useEffect(() => { setSelWorks(defaultSelWorks(workTags)); }, [workTags.join(',')]);
   useEffect(() => { setSelLeaveTypes(allLeaveTypeNames); }, [allLeaveTypeNames.join(',')]);
 
   // 取得日期字串（依 dateMode）
@@ -8219,6 +8273,7 @@ return (
 );
 }
 function SettingsView({ settings, user, leaveTypes, tags, handleManageLeaveTypes, onSave, roleNames, onUpdateRoleNames }) {
+const intWorkList = Array.isArray(tags?.internalWorkItems) ? tags.internalWorkItems : INTERNAL_WORK_TAGS;
 const [areaC, setAreaC] = useState(settings.areaColors || DEFAULT_AREA_COLORS);
 const [workC, setWorkC] = useState(settings.workColors || DEFAULT_WORK_COLORS);
 const [customHolidays, setCustomHolidays] = useState(settings.customHolidays || {});
@@ -8314,7 +8369,7 @@ return (
 )}
 <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({ ...localRoleNames, staff: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({ ...localRoleNames, leader: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({ ...localRoleNames, admin: e.target.value})} /></div></div><p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p></div>
 <div className="bg-white p-6 rounded shadow-sm">
-<h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Briefcase/> 工作項目設定 (名稱/顏色/編輯)</h2>
+<h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Briefcase/> 工作項目設定 (名稱/顏色/外勤/編輯)</h2>
 <div className={`border rounded-lg p-4 mb-6 transition-colors ${editWorkId ? 'bg-yellow-50 border-yellow-300' : 'bg-gray-50'}`}>
 <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center justify-between">
 <span>{editWorkId ? '修改工作項目' : '新增工作項目'}</span>
@@ -8324,17 +8379,20 @@ return (
 <input className="border rounded px-3 py-2 text-sm flex-1 bg-white" placeholder="輸入工作項目..." value={newWork} onChange={e=>setNewWork(e.target.value)} />
 <button onClick={handleAddOrUpdateWork} className={`${editWorkId ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded text-sm font-bold shrink-0 transition`}>{editWorkId ? '儲存修改' : '新增項目'}</button>
 </div>
+<p className="text-[11px] text-gray-500 mt-2">所有工作項目<b>預設為「外勤」</b>，排入日曆會自動觸發「差勤申請」第一區塊。若某項目實際在辦公室執行（如：辦理課程／月報），請點下方卡片的「外勤」標籤切換成「內勤」（不觸發差勤）。</p>
 </div>
 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-{tags.workTags.map(work => (
-<div key={work} className={`relative group flex items-center bg-white border rounded shadow-sm hover:border-blue-300 transition ${editWorkId === work ? 'ring-2 ring-yellow-400' : ''}`}>
-<div className="relative group/btn w-full">
+{tags.workTags.map(work => {
+const isInt = intWorkList.includes(work);
+return (
+<div key={work} className={`relative group flex items-center bg-white border rounded shadow-sm hover:border-blue-300 transition ${editWorkId === work ? 'ring-2 ring-yellow-400' : ''} ${isInt ? 'border-gray-300' : ''}`}>
+<div className="relative group/btn flex-1 min-w-0">
 <div className={`w-full text-left px-3 py-2 rounded-l flex justify-between items-center ${workC[work] || 'bg-gray-100 text-gray-800'}`}>
-<span className="font-bold">{work}</span>
+<span className="font-bold truncate">{work}</span>
 <button
   type="button"
   onClick={(e)=>{ e.stopPropagation(); handleWorkColorCycle(work); }}
-  className={`w-4 h-4 rounded-full border border-black/20 ${String(workC[work] || 'bg-gray-100').split(' ')[0]}`}
+  className={`w-4 h-4 rounded-full border border-black/20 shrink-0 ${String(workC[work] || 'bg-gray-100').split(' ')[0]}`}
   title="點一下切換顏色"
 ></button>
 </div>
@@ -8344,12 +8402,21 @@ return (
 ))}
 </div>
 </div>
-<div className="flex px-1 gap-1 border-l opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-gray-50 rounded-r h-full items-center">
+<button
+  type="button"
+  onClick={()=>tags.handleToggleInternalWork && tags.handleToggleInternalWork(work)}
+  className={`px-2 py-1 text-[10px] font-bold border-l shrink-0 transition ${isInt ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
+  title={isInt ? '目前為「內勤」：排入日曆不會觸發差勤申請。點此改回「外勤」（預設）' : '目前為「外勤」（預設）：排入日曆會自動觸發差勤申請。點此改為「內勤」'}
+>
+  {isInt ? '內勤' : '外勤'}
+</button>
+<div className="flex px-1 gap-1 border-l opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-gray-50 rounded-r h-full items-center shrink-0">
 <button onClick={()=>startEditWork(work)} className='text-gray-400 hover:text-blue-600 p-1.5'><Edit size={14}/></button>
 <button onClick={()=>tags.handleDeleteTag('work', work)} className='text-gray-400 hover:text-red-600 p-1.5'><Trash2 size={14}/></button>
 </div>
 </div>
-))}
+);
+})}
 </div>
 </div>
 <div className="bg-white p-6 rounded shadow-sm">
