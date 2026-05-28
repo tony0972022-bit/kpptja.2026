@@ -830,15 +830,62 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     }
   }
 });
-const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
-const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
-const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
-const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
+// Incremental updater：只更新實際變動的 doc，保留未變動 doc 的物件引用，
+// 讓下游 useMemo / React.memo 可以正確 bail-out，避免每筆寫入觸發全 tree 重算。
+// idKey 預設 'id'，user_profiles 用 'docId'。sortFn 可選，用於需要維持順序的 collection。
+const makeIncrementalListUpdater = (setter, opts = {}) => {
+  const idKey = opts.idKey || 'id';
+  const sortFn = opts.sortFn || null;
+  return (s) => {
+    setter(prev => {
+      const changes = s.docChanges();
+      if (changes.length === 0) return prev;
+      const next = prev.slice();
+      let modified = false;
+      changes.forEach(change => {
+        const id = change.doc.id;
+        const data = idKey === 'docId'
+          ? { docId: id, ...change.doc.data() }
+          : { id, ...change.doc.data() };
+        const idx = next.findIndex(x => x[idKey] === id);
+        if (change.type === 'removed') {
+          if (idx !== -1) { next.splice(idx, 1); modified = true; }
+        } else {
+          if (idx === -1) { next.push(data); modified = true; }
+          else { next[idx] = data; modified = true; }
+        }
+      });
+      if (!modified) return prev;
+      if (sortFn) next.sort(sortFn);
+      return next;
+    });
+  };
+};
+const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), makeIncrementalListUpdater(setLeaves));
+const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), makeIncrementalListUpdater(setCalendarEvents));
+const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), makeIncrementalListUpdater(setUsersList, { idKey: 'docId' }));
+const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), makeIncrementalListUpdater(setAttendanceRecords));
+// important_items 原本訂閱 orderBy('date','asc')，incremental 後維持同樣排序
+const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), makeIncrementalListUpdater(setImportantItems, {
+  sortFn: (a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+}));
 const unsubMeetingNotes = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes')), (s) => {
-  const map = {};
-  s.docs.forEach(d => { map[d.id] = d.data().note || ''; });
-  setMeetingNotes(map);
+  setMeetingNotes(prev => {
+    const changes = s.docChanges();
+    if (changes.length === 0) return prev;
+    const next = { ...prev };
+    let modified = false;
+    changes.forEach(change => {
+      const id = change.doc.id;
+      if (change.type === 'removed') {
+        if (id in next) { delete next[id]; modified = true; }
+      } else {
+        const note = change.doc.data().note || '';
+        if (next[id] !== note) { next[id] = note; modified = true; }
+      }
+    });
+    return modified ? next : prev;
+  });
 });
 return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetingNotes(); };
 }, [db, user?.uid]);
