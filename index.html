@@ -64,7 +64,7 @@ const MAIL_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwBq-ilvSBOihhw
 const MAIL_SECRET_KEY = "kpptja_mail_9Xf3aL7qZt2Vn8Rm4YwQp6Hd1B";
 
 // Simple mail sender (internal use)
-async function sendMail({ targetEmail, subject, body }) {
+async function sendMail({ targetEmail, subject, body, silent = false }) {
   try {
     if (!MAIL_WEBAPP_URL) throw new Error("MAIL_WEBAPP_URL 未設定");
     if (!targetEmail) throw new Error("targetEmail 為空，未寄信");
@@ -101,7 +101,7 @@ async function sendMail({ targetEmail, subject, body }) {
     return true;
   } catch (e) {
     const msg = (e && e.name === "AbortError") ? "寄信逾時（12 秒未回應），請稍後再試或檢查 Apps Script 部署/權限" : (e?.message || String(e));
-    alert("寄信失敗：" + msg);
+    if (!silent) alert("寄信失敗：" + msg);
     console.warn("sendMail error:", e);
     return false;
   }
@@ -759,8 +759,6 @@ init();
 useEffect(() => {
 if (!db || !user) return;
 const settingsRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'app_settings', 'global');
-// 防止多 client 互踩 setDoc：每個 client/session 只允許寫回一次「missing 補欄位」
-let didSeedWriteOnce = false;
 const unsubSettings = onSnapshot(settingsRef, async (snap) => {
   if (snap.exists()) {
     const remote = snap.data() || {};
@@ -818,74 +816,21 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const missingInternalWorkItems = !Array.isArray(remote.internalWorkItems);
     const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
     const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
-    if (!didSeedWriteOnce && (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes)) {
-      didSeedWriteOnce = true;
-      try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {}
-    }
+    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
   } else {
-    if (!didSeedWriteOnce) {
-      didSeedWriteOnce = true;
-      const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
-      try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
-    }
+    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
+    try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
   }
 });
-// Incremental updater：只更新實際變動的 doc，保留未變動 doc 的物件引用，
-// 讓下游 useMemo / React.memo 可以正確 bail-out，避免每筆寫入觸發全 tree 重算。
-// idKey 預設 'id'，user_profiles 用 'docId'。sortFn 可選，用於需要維持順序的 collection。
-const makeIncrementalListUpdater = (setter, opts = {}) => {
-  const idKey = opts.idKey || 'id';
-  const sortFn = opts.sortFn || null;
-  return (s) => {
-    setter(prev => {
-      const changes = s.docChanges();
-      if (changes.length === 0) return prev;
-      const next = prev.slice();
-      let modified = false;
-      changes.forEach(change => {
-        const id = change.doc.id;
-        const data = idKey === 'docId'
-          ? { docId: id, ...change.doc.data() }
-          : { id, ...change.doc.data() };
-        const idx = next.findIndex(x => x[idKey] === id);
-        if (change.type === 'removed') {
-          if (idx !== -1) { next.splice(idx, 1); modified = true; }
-        } else {
-          if (idx === -1) { next.push(data); modified = true; }
-          else { next[idx] = data; modified = true; }
-        }
-      });
-      if (!modified) return prev;
-      if (sortFn) next.sort(sortFn);
-      return next;
-    });
-  };
-};
-const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), makeIncrementalListUpdater(setLeaves));
-const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), makeIncrementalListUpdater(setCalendarEvents));
-const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), makeIncrementalListUpdater(setUsersList, { idKey: 'docId' }));
-const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), makeIncrementalListUpdater(setAttendanceRecords));
-// important_items 原本訂閱 orderBy('date','asc')，incremental 後維持同樣排序
-const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), makeIncrementalListUpdater(setImportantItems, {
-  sortFn: (a, b) => String(a.date || '').localeCompare(String(b.date || ''))
-}));
+const unsubLeaves = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'leaves')), (s) => setLeaves(s.docs.map(d => ({id:d.id, ...d.data()}))));
+const unsubEvents = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'calendar_events')), (s) => setCalendarEvents(s.docs.map(d => ({id:d.id, ...d.data()}))));
+const unsubUsers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'user_profiles')), (s) => setUsersList(s.docs.map(d => ({ docId: d.id, ...d.data() }))));
+const unsubAttendance = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'attendance')), (s) => setAttendanceRecords(s.docs.map(d => ({id: d.id, ...d.data()}))));
+const unsubImportant = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'), orderBy('date','asc')), (s) => setImportantItems(s.docs.map(d => ({id:d.id, ...d.data()}))));
 const unsubMeetingNotes = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'meeting_notes')), (s) => {
-  setMeetingNotes(prev => {
-    const changes = s.docChanges();
-    if (changes.length === 0) return prev;
-    const next = { ...prev };
-    let modified = false;
-    changes.forEach(change => {
-      const id = change.doc.id;
-      if (change.type === 'removed') {
-        if (id in next) { delete next[id]; modified = true; }
-      } else {
-        const note = change.doc.data().note || '';
-        if (next[id] !== note) { next[id] = note; modified = true; }
-      }
-    });
-    return modified ? next : prev;
-  });
+  const map = {};
+  s.docs.forEach(d => { map[d.id] = d.data().note || ''; });
+  setMeetingNotes(map);
 });
 return () => { unsubSettings(); unsubLeaves(); unsubEvents(); unsubUsers(); unsubAttendance(); unsubImportant(); unsubMeetingNotes(); };
 }, [db, user?.uid]);
@@ -1317,7 +1262,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 <span className="font-bold text-gray-800">差勤排班系統</span>
 <UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" /></div>
 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
-{view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} />}
+{view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} internalWorkItems={internalWorkItems} />}
 {view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
 {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} leaveTypes={leaveTypes} events={calendarEvents} db={db} />}
@@ -1332,7 +1277,8 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 {view === 'settings' && <SettingsView settings={settings} user={userData} tags={{workTags, areaTags, handleAddTag, handleDeleteTag, handleUpdateTag, internalWorkItems, handleToggleInternalWork}} leaveTypes={leaveTypes} handleManageLeaveTypes={handleManageLeaveTypes} onSave={handleUpdateSettings} onProfileSave={handleUpdateProfile} roleNames={roleNames} onUpdateRoleNames={handleUpdateRoleNames} />}
 {view === 'profile' && <ProfileView user={userData} onSave={handleUpdateProfile} roleNames={roleNames} />}</main></div></div>);}
 // --- Sub-Components ---
-function Dashboard({ user, leaves, calendarEvents, setView, leaveTypes }) {
+function Dashboard({ user, leaves, calendarEvents, setView, leaveTypes, internalWorkItems: internalWorkItemsProp }) {
+const internalWorkItems = Array.isArray(internalWorkItemsProp) ? internalWorkItemsProp : INTERNAL_WORK_TAGS;
 const [weeksToShow, setWeeksToShow] = useState(1);
 const [weatherData, setWeatherData] = useState([]);
 const [expandedWeatherIdx, setExpandedWeatherIdx] = useState(null);
@@ -1698,7 +1644,18 @@ const getWorkBgClass = (tagName, hasPeople) => {
   if (n.includes("聚餐")) return "bg-pink-50";
   return "bg-blue-50";
 };
-useEffect(()=>{try{if((importantItems||[]).length===0&&!localStorage.getItem('important_seed_v1')){localStorage.setItem('important_seed_v1','1');crud.createImportantItem({date:'2026-03-05',owner:'方姿云',title:'第一期成果報告',text:'第一期成果報告（工作項目：分配等等）',createdAt:new Date()});}}catch(e){}},[importantItems,crud]);
+useEffect(() => {
+  try {
+    if (!db) return;
+    if ((importantItems || []).length !== 0) return;
+    if (localStorage.getItem('important_seed_v1')) return;
+    localStorage.setItem('important_seed_v1', '1');
+    addDoc(
+      collection(db, 'artifacts', APP_ID, 'public', 'data', 'important_items'),
+      { date:'2026-03-05', owner:'方姿云', title:'第一期成果報告', text:'第一期成果報告（工作項目：分配等等）', createdAt:new Date() }
+    ).catch(() => {});
+  } catch (e) {}
+}, [db, importantItems]);
 const upcomingImportant = useMemo(() => {
   const now = new Date();
   const end = new Date(now); end.setMonth(end.getMonth()+2);
@@ -4891,7 +4848,7 @@ const executeConfirmedSubmit = async () => {
       const hoursText = Number(payload.hours || 0);
       const reasonText = String(payload.reason || payload.note || '').trim() || '-';
 
-      sendMail({
+      void sendMail({
         targetEmail: deputyEmail,
         subject: `【職代審查】${deputyName}，您有一筆差勤待審：${requesterName} ${leaveType} ${dateText}`,
         body: `${requesterName} ${leaveType} ${dateText}
@@ -4907,7 +4864,8 @@ ${deputyName} 您好：
 事由：${reasonText}
 
 請至系統「差單審核」完成審查。
-（寄件人：KPPT職再差勤系統）`
+（寄件人：KPPT職再差勤系統）`,
+        silent: true
       });
     } catch (mailErr) {
       console.warn('mail notify (deputy review) failed:', mailErr);
@@ -6006,19 +5964,13 @@ link.href = encodeURI("data:text/csv;charset=utf-8,"+csv);
 link.download = "全團隊請假紀錄.csv";
 link.click();
 };
-const pendingMyDeputy = useMemo(() => leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)), [leaves, currentUser.uid, currentUser.docId, currentUser.email]);
-const pendingLeader = useMemo(() => (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)) : [], [leaves, currentUser.role]);
+const pendingMyDeputy = leaves.filter(l => (l.deputyId === currentUser.uid || l.deputyId === currentUser.docId || String(l.deputyId||'').toLowerCase() === (currentUser.email||'').toLowerCase()) && l.status === 'pending').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0));
+const pendingLeader = (currentUser.role === 'leader' || currentUser.role === 'admin') ? leaves.filter(l => l.status === 'deputy_signed').sort((a,b)=>new Date(b.start||b.timestamp||0)-new Date(a.start||a.timestamp||0)) : [];
 // --- Bulk approval selection (leader) ---
-// 用 pendingLeader.length + map(id).join 當 fingerprint 避免每次 render 都當變動
-const pendingLeaderIdsKey = useMemo(() => pendingLeader.map(l => l.id).join(','), [pendingLeader]);
 useEffect(() => {
-  // keep selections that still exist；用 functional update + Object.is 比對避免 setState 重觸發
-  setSelectedLeaderIds(prev => {
-    const validIds = new Set(pendingLeader.map(l => l.id));
-    const filtered = prev.filter(id => validIds.has(id));
-    return filtered.length === prev.length ? prev : filtered;
-  });
-}, [pendingLeaderIdsKey]);
+  // keep selections that still exist
+  setSelectedLeaderIds(prev => prev.filter(id => pendingLeader.some(l => l.id === id)));
+}, [pendingLeader]);
 
 const toggleLeaderSelect = (id) => {
   setSelectedLeaderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -6058,12 +6010,12 @@ const handleLeaderBulkApprove = async () => {
       )
     );
 
-    // ── 所有寫入成功後再逐筆發送通知信 ──
+    // 寫入完成後改成背景寄信，避免畫面卡在 spinner 看起來像「沒存成功」
     for (const leave of leavesToApprove) {
       try {
         const requesterEmail = (leave.requesterEmail || '').toLowerCase();
         if (requesterEmail) {
-          sendMail({
+          void sendMail({
             targetEmail: requesterEmail,
             subject: "【差勤核准】你的差單已核准",
             body: `你好 ${leave.requesterName||''}：
@@ -6079,7 +6031,8 @@ const handleLeaderBulkApprove = async () => {
 2. 職代人員：${leave.deputySignedByName || '—'}｜同意時間：${fmtDT(leave.deputySignedAt)}
 3. 組長：${approvedByName||'—'}｜同意時間：${fmtDT(approvedAt)}
 
-（寄件人：KPPT職再差勤系統）`
+（寄件人：KPPT職再差勤系統）`,
+            silent: true
           });
         }
       } catch (mailErr) { console.warn("mail notify (approved bulk) failed:", mailErr); }
@@ -6113,7 +6066,7 @@ const handleLeaderApprove = async (leave) => { if (processingId) { alert("目前
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
   if (requesterEmail) {
-    sendMail({
+    void sendMail({
       targetEmail: requesterEmail,
       subject: "【差勤核准】你的差單已核准",
       body: `你好 ${leave.requesterName||''}：
@@ -6129,7 +6082,8 @@ try {
 2. 職代人員：${leave.deputySignedByName || '—'}｜同意時間：${fmtDT(leave.deputySignedAt)}
 3. 組長：${(currentUser.name||'—')}｜同意時間：${fmtDT(new Date())}
 
-（寄件人：KPPT職再差勤系統）`
+（寄件人：KPPT職再差勤系統）`,
+      silent: true
     });
   }
 } catch (mailErr) { console.warn("mail notify (approved) failed:", mailErr); }
@@ -6139,7 +6093,7 @@ const handleReject = async (leave) => { if (processingId) { alert("目前有作�
 try {
   const requesterEmail = (leave.requesterEmail||'').toLowerCase();
   if (requesterEmail) {
-    sendMail({
+    void sendMail({
       targetEmail: requesterEmail,
       subject: "【差勤退回】你的差單未通過（退件）",
       body: `你好 ${leave.requesterName||''}：
@@ -6149,7 +6103,8 @@ try {
 起訖：${fmtISO(leave.start)} ～ ${fmtISO(leave.end)}
 
 如需調整內容，請重新送出或洽主管。
-（寄件人：KPPT職再差勤系統）`
+（寄件人：KPPT職再差勤系統）`,
+      silent: true
     });
   }
 } catch (mailErr) { console.warn("mail notify (rejected) failed:", mailErr); }
@@ -9147,154 +9102,3 @@ const handleGoogleLogin = async () => {
 return (<div className="min-h-screen bg-slate-100 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm p-8 rounded-xl shadow-lg text-center"><div className="w-16 h-16 bg-blue-600 rounded-xl mx-auto mb-4 flex items-center justify-center text-white"><Calendar size={32}/></div><h1 className="text-2xl font-bold text-gray-800 mb-1">差勤排班系統</h1><p className="text-gray-400 text-sm mb-8">高屏澎東職務再設計專案單位</p><div className="space-y-4"><button onClick={handleGoogleLogin} disabled={isLoggingIn} className="w-full py-3.5 rounded-lg font-bold bg-white border-2 border-gray-200 text-gray-700 transition-all flex items-center justify-center gap-3 hover:bg-gray-50 shadow-sm disabled:opacity-50">{isLoggingIn ? (<Loader2 className="animate-spin text-blue-600" size={20}/>) : (<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5"/>)}<span>{isLoggingIn ? '正在驗證帳號...' : '使用 Google 帳號登入'}</span></button></div></div></div>);}
 const root = createRoot(document.getElementById('root'));
 root.render(<App />);</script></body></html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
