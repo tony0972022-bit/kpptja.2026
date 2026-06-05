@@ -1263,7 +1263,7 @@ ${isDesktopCollapsed ? 'md:w-20' : 'md:w-64'}
 <UserAvatar user={userData} size="w-8 h-8" textSize="text-xs" /></div>
 <main className="flex-1 overflow-y-auto p-2 md:p-4 bg-gray-100 transition-all">
 {view === 'dashboard' && <Dashboard user={userData} leaves={leaves} calendarEvents={calendarEvents} setView={setView} leaveTypes={leaveTypes} internalWorkItems={internalWorkItems} />}
-{view === 'calendar' && <CalendarView user={userData} auth={auth} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
+{view === 'calendar' && <CalendarView user={userData} auth={auth} db={db} users={usersList} events={calendarEvents} leaves={leaves} importantItems={importantItems} crud={crud} tags={{workTags, areaTags, internalWorkItems}} settings={settings} rotationRules={rotationRules} onUpdateRotationRules={handleUpdateRotationRules} />}
 {view === 'leave' && <LeaveForm user={userData} users={usersList} leaves={leaves} events={calendarEvents} crud={crud} leaveTypes={leaveTypes} setView={setView} internalWorkItems={internalWorkItems} />}
 {view === 'approval' && <ApprovalView currentUser={userData} leaves={leaves} crud={crud} users={usersList} leaveTypes={leaveTypes} events={calendarEvents} db={db} />}
 {view === 'personal' && <PersonalScheduleView user={userData} events={calendarEvents} leaves={leaves} settings={settings} leaveTypes={leaveTypes} crud={crud} users={usersList} setView={setView} internalWorkItems={internalWorkItems} />}
@@ -1558,7 +1558,7 @@ return (
 </td>
 </tr></React.Fragment>
 )})}</tbody></table></div></div></div>);}
-function CalendarView({ user, auth, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
+function CalendarView({ user, auth, db, users, events, leaves, importantItems, crud, tags, settings, rotationRules, onUpdateRotationRules }) {
 const intWorkSet = useMemo(() => new Set(Array.isArray(tags?.internalWorkItems) ? tags.internalWorkItems : INTERNAL_WORK_TAGS), [tags?.internalWorkItems]);
 // 是否視為「外勤」：預設皆為外勤，僅當工作項目在內勤清單時例外
 const isExternalItem = (itemName) => !!itemName && !intWorkSet.has(itemName);
