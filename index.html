@@ -69,7 +69,6 @@ const DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR = {
   "林益青": "C04e21d2d189b24d00b8ad26d99de7229",
   "張世立": "C15625662491b1a355cb883d0e453c2f0",
 };
-let specialistLineGroupIdsByCreator = { ...DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR };
 
 // Simple mail sender (internal use)
 async function sendMail({ targetEmail, subject, body, silent = false }) {
@@ -165,40 +164,6 @@ function formatMonthDayWithWeekday(dateString) {
   return `${month}/${day}（${weekdays[date.getDay()]}）`;
 }
 
-function normalizeLineGroupMap(mapLike, fallback = {}) {
-  if (!mapLike || typeof mapLike !== 'object' || Array.isArray(mapLike)) return { ...fallback };
-  const next = {};
-  Object.entries(mapLike).forEach(([key, value]) => {
-    const normalizedKey = String(key || '').trim();
-    const normalizedValue = String(value || '').trim();
-    if (normalizedKey && normalizedValue) next[normalizedKey] = normalizedValue;
-  });
-  return Object.keys(next).length ? next : { ...fallback };
-}
-
-function serializeLineGroupMap(mapLike = {}) {
-  return Object.entries(mapLike)
-    .sort(([a], [b]) => String(a).localeCompare(String(b), 'zh-Hant'))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
-}
-
-function parseLineGroupMapText(text = '') {
-  const next = {};
-  String(text || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .forEach((line) => {
-      const separatorIndex = line.indexOf('=');
-      if (separatorIndex <= 0) return;
-      const key = line.slice(0, separatorIndex).trim();
-      const value = line.slice(separatorIndex + 1).trim();
-      if (key && value) next[key] = value;
-    });
-  return next;
-}
-
 function parseDispatchSyncNote(note = "") {
   const lines = String(note || "")
     .split(/\r?\n/)
@@ -229,8 +194,8 @@ function parseDispatchSyncNote(note = "") {
 
 function resolveSpecialistLineGroupId({ creator = "" } = {}) {
   const creatorKey = String(creator || "").trim();
-  if (creatorKey && specialistLineGroupIdsByCreator[creatorKey]) {
-    return specialistLineGroupIdsByCreator[creatorKey];
+  if (creatorKey && DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR[creatorKey]) {
+    return DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR[creatorKey];
   }
   return "";
 }
@@ -792,8 +757,7 @@ const [settings, setSettings] = useState({
 areaColors: DEFAULT_AREA_COLORS,
 workColors: DEFAULT_WORK_COLORS,
 customHolidays: DEFAULT_SPECIAL_HOLIDAYS,
-sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID,
-specialistLineGroupIdsByCreator: { ...DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR }
+sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID
 });
 const [loading, setLoading] = useState(true);
 const [connectSeconds, setConnectSeconds] = useState(0);
@@ -841,13 +805,7 @@ const savedSharedGoogleCalendarId = localStorage.getItem('sharedGoogleCalendarId
 if (savedSharedGoogleCalendarId) {
   setSettings(prev => ({ ...prev, sharedGoogleCalendarId: String(savedSharedGoogleCalendarId).trim() || DEFAULT_SHARED_GCAL_ID }));
 }
-const savedSpecialistLineGroupIdsByCreator = localStorage.getItem('specialistLineGroupIdsByCreator');
-if (savedSpecialistLineGroupIdsByCreator) {
-  try {
-    const parsed = JSON.parse(savedSpecialistLineGroupIdsByCreator);
-    setSettings(prev => ({ ...prev, specialistLineGroupIdsByCreator: normalizeLineGroupMap(parsed, DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR) }));
-  } catch (e) {}
-}
+localStorage.removeItem('specialistLineGroupIdsByCreator');
 localStorage.removeItem('specialistLineGroupIdsByAreaCategory');
 const savedLeaveTypes = localStorage.getItem('leaveTypes');
 if(savedLeaveTypes) {
@@ -955,8 +913,7 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
         REVOKED_HOLIDAYS.forEach(d => delete base[d]);
         return base;
       })(),
-      sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID,
-      specialistLineGroupIdsByCreator: normalizeLineGroupMap(remote.specialistLineGroupIdsByCreator, DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR)
+      sharedGoogleCalendarId: String(remote.sharedGoogleCalendarId || '').trim() || DEFAULT_SHARED_GCAL_ID
     };
     const remoteRoleNames = { ...DEFAULT_ROLE_NAMES, ...(remote.roleNames || {}) };
     const remoteRotationRules = normalizeRotationRules(remote.rotationRules || DEFAULT_ROTATION_RULES);
@@ -978,12 +935,11 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     setAreaTags(remoteAreaTags);
     setLeaveTypes(remoteLeaveTypes);
     setMeetingSelectedItems(remoteMeetingSelectedItems);
-    specialistLineGroupIdsByCreator = { ...merged.specialistLineGroupIdsByCreator };
     localStorage.setItem('areaColors', JSON.stringify(merged.areaColors));
     localStorage.setItem('workColors', JSON.stringify(merged.workColors));
     localStorage.setItem('customHolidays', JSON.stringify(merged.customHolidays));
     localStorage.setItem('sharedGoogleCalendarId', merged.sharedGoogleCalendarId);
-    localStorage.setItem('specialistLineGroupIdsByCreator', JSON.stringify(merged.specialistLineGroupIdsByCreator));
+    localStorage.removeItem('specialistLineGroupIdsByCreator');
     localStorage.removeItem('specialistLineGroupIdsByAreaCategory');
     localStorage.setItem('roleNames', JSON.stringify(remoteRoleNames));
     localStorage.setItem('rotationRules', JSON.stringify(remoteRotationRules));
@@ -1001,10 +957,9 @@ const unsubSettings = onSnapshot(settingsRef, async (snap) => {
     const missingInternalWorkItems = !Array.isArray(remote.internalWorkItems);
     const missingAreaTags = !Array.isArray(remote.areaTags) || remote.areaTags.length === 0;
     const missingLeaveTypes = !Array.isArray(remote.leaveTypes) || remote.leaveTypes.length === 0;
-    const missingSpecialistLineGroupIdsByCreator = !remote.specialistLineGroupIdsByCreator || typeof remote.specialistLineGroupIdsByCreator !== 'object';
-    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes || missingSpecialistLineGroupIdsByCreator) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, specialistLineGroupIdsByCreator: merged.specialistLineGroupIdsByCreator, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
+    if (missing || missingWork || !remote.sharedGoogleCalendarId || missingRoleNames || missingRotationRules || missingWorkTags || missingInternalWorkItems || missingAreaTags || missingLeaveTypes) { try { await setDoc(settingsRef, { areaColors: merged.areaColors, workColors: merged.workColors, customHolidays: merged.customHolidays, sharedGoogleCalendarId: merged.sharedGoogleCalendarId, roleNames: remoteRoleNames, rotationRules: remoteRotationRules, workTags: remoteWorkTags, internalWorkItems: remoteInternalWorkItems, areaTags: remoteAreaTags, leaveTypes: remoteLeaveTypes }, { merge: true }); } catch(e) {} }
   } else {
-    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, specialistLineGroupIdsByCreator: DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
+    const init = { areaColors: DEFAULT_AREA_COLORS, workColors: DEFAULT_WORK_COLORS, customHolidays: DEFAULT_SPECIAL_HOLIDAYS, sharedGoogleCalendarId: DEFAULT_SHARED_GCAL_ID, roleNames: DEFAULT_ROLE_NAMES, rotationRules: normalizeRotationRules(DEFAULT_ROTATION_RULES), workTags: DEFAULT_WORK_TAGS, internalWorkItems: INTERNAL_WORK_TAGS, areaTags: DEFAULT_AREA_TAGS, leaveTypes: DEFAULT_LEAVE_TYPES };
     try { await setDoc(settingsRef, init, { merge: true }); } catch(e) {}
   }
 });
@@ -1029,8 +984,7 @@ if(s.areaColors) localStorage.setItem('areaColors', JSON.stringify(s.areaColors)
 if(s.workColors) localStorage.setItem('workColors', JSON.stringify(s.workColors));
 if(s.customHolidays) localStorage.setItem('customHolidays', JSON.stringify(s.customHolidays));
 if(s.sharedGoogleCalendarId) localStorage.setItem('sharedGoogleCalendarId', String(s.sharedGoogleCalendarId).trim());
-if(s.specialistLineGroupIdsByCreator) localStorage.setItem('specialistLineGroupIdsByCreator', JSON.stringify(normalizeLineGroupMap(s.specialistLineGroupIdsByCreator, DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR)));
-specialistLineGroupIdsByCreator = { ...normalizeLineGroupMap(s.specialistLineGroupIdsByCreator, DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR) };
+localStorage.removeItem('specialistLineGroupIdsByCreator');
 localStorage.removeItem('specialistLineGroupIdsByAreaCategory');
 if (db && userData && (userData.role === 'admin')) {
   setDoc(
@@ -1039,8 +993,7 @@ if (db && userData && (userData.role === 'admin')) {
       areaColors: s.areaColors || DEFAULT_AREA_COLORS,
       workColors: s.workColors || DEFAULT_WORK_COLORS,
       customHolidays: s.customHolidays || DEFAULT_SPECIAL_HOLIDAYS,
-      sharedGoogleCalendarId: String(s.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID,
-      specialistLineGroupIdsByCreator: normalizeLineGroupMap(s.specialistLineGroupIdsByCreator, DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR)
+      sharedGoogleCalendarId: String(s.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID
     },
     { merge: true }
   ).catch(e => alert('儲存系統設定失敗: ' + (e?.message || e)));
@@ -8507,7 +8460,6 @@ const [newHolidayName, setNewHolidayName] = useState('');
 const [localRoleNames, setLocalRoleNames] = useState(roleNames);
 const [isSettingsSaved, setIsSettingsSaved] = useState(false);
 const [sharedGoogleCalendarIdInput, setSharedGoogleCalendarIdInput] = useState(String(settings.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID));
-const [specialistLineGroupIdsByCreatorText, setSpecialistLineGroupIdsByCreatorText] = useState(serializeLineGroupMap(settings.specialistLineGroupIdsByCreator || DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR));
 const isAdmin = String(user?.role || '') === 'admin';
 const colors = [{l:'紅',c:"bg-red-100 text-red-800"},{l:'橘',c:"bg-orange-100 text-orange-800"},{l:'黃',c:"bg-yellow-100 text-yellow-800"},{l:'綠',c:"bg-green-100 text-green-800"},{l:'藍',c:"bg-blue-100 text-blue-800"},{l:'紫',c:"bg-purple-100 text-purple-800"},{l:'粉',c:"bg-pink-100 text-pink-800"},{l:'灰',c:"bg-gray-100 text-gray-800"}];
 const handleColorChange = (area, colorClass) => { setAreaC({ ...areaC, [area]: colorClass}); };
@@ -8525,7 +8477,6 @@ useEffect(() => {
   setWorkC(settings.workColors || DEFAULT_WORK_COLORS);
   setCustomHolidays(settings.customHolidays || {});
   setSharedGoogleCalendarIdInput(String(settings.sharedGoogleCalendarId || DEFAULT_SHARED_GCAL_ID));
-  setSpecialistLineGroupIdsByCreatorText(serializeLineGroupMap(settings.specialistLineGroupIdsByCreator || DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR));
 }, [settings]);
 const handleAddAreaWithColor = () => {
 if(!newArea) { alert("請先輸入轄區名稱。"); return; }
@@ -8584,11 +8535,7 @@ const handleSaveSettings = () => {
     areaColors: areaC,
     workColors: workC,
     customHolidays,
-    sharedGoogleCalendarId: String(sharedGoogleCalendarIdInput || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID,
-    specialistLineGroupIdsByCreator: normalizeLineGroupMap(
-      parseLineGroupMapText(specialistLineGroupIdsByCreatorText),
-      DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR
-    )
+    sharedGoogleCalendarId: String(sharedGoogleCalendarIdInput || DEFAULT_SHARED_GCAL_ID).trim() || DEFAULT_SHARED_GCAL_ID
   });
   setIsSettingsSaved(true);
   setTimeout(() => setIsSettingsSaved(false), 2000);
@@ -8601,18 +8548,6 @@ return (
   <label className="block text-xs font-bold text-gray-500 mb-1">共用 Google 日曆 ID (管理員)</label>
   <input className="border rounded p-2 w-full text-sm" value={sharedGoogleCalendarIdInput} onChange={e=>setSharedGoogleCalendarIdInput(e.target.value)} placeholder="輸入共用 Calendar ID" />
   <p className="text-xs text-gray-400 mt-2">此 ID 會提供給全員「同步Google日曆」時的共用日曆同步使用。</p>
-  <div className="mt-6 grid grid-cols-1 gap-4">
-    <div>
-      <label className="block text-xs font-bold text-gray-500 mb-1">LINE 群組對照: 承辦姓名</label>
-      <textarea
-        className="border rounded p-2 w-full text-sm min-h-[120px] bg-white"
-        value={specialistLineGroupIdsByCreatorText}
-        onChange={e=>setSpecialistLineGroupIdsByCreatorText(e.target.value)}
-        placeholder={"林益青=C04e21d2d189b24d00b8ad26d99de7229\n張世立=C15625662491b1a355cb883d0e453c2f0"}
-      />
-      <p className="text-xs text-gray-400 mt-1">格式：`姓名=groupId`，一行一筆。派員通知會先用承辦姓名找群組。</p>
-    </div>
-  </div>
 </div>
 )}
 <div className="bg-white p-6 rounded shadow-sm"><h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Shield/> 職稱顯示設定</h2><div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><div><label className="block text-xs font-bold text-gray-500 mb-1">職員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.staff} onChange={e=>setLocalRoleNames({ ...localRoleNames, staff: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">主管 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.leader} onChange={e=>setLocalRoleNames({ ...localRoleNames, leader: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 mb-1">管理員 顯示名稱</label><input className="border rounded p-2 w-full text-sm" value={localRoleNames.admin} onChange={e=>setLocalRoleNames({ ...localRoleNames, admin: e.target.value})} /></div></div><p className="text-xs text-gray-400 mt-2">* 這裡修改的名稱將套用至全系統顯示。</p></div>
