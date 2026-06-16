@@ -355,16 +355,12 @@ function buildReviewAttendanceLineNotice({ date, startTime, endTime, note, peopl
   const titleSuffix = previousPeople.length > 0 ? "人員調整" : "專辦已派員";
   const areaLabel = getReviewNoticeAreaLabel({ note, area: parsed.area, category: parsed.category });
   const titlePrefix = `📝${areaLabel}`;
-  const reviewListLine = parsed.itinerary.length
-    ? ["•審查清單：", ...parsed.itinerary]
-    : (parsed.reviewList ? [`•審查清單：${parsed.reviewList}`] : []);
   const message = [
     `${titlePrefix}【審查會議】${titleSuffix}`,
     `•會議日期：${formatMonthDayWithWeekday(date)}`,
     `•會議時間：${getReviewMeetingTimeText(note, startTime, endTime)}`,
     `•會議地點：${getReviewMeetingLocationText(note, parsed, areaLabel)}`,
     `•出席專員：${(people || []).join("、") || "未填"}`,
-    ...(reviewListLine.length ? ["", ...reviewListLine] : []),
   ].join("\n");
   return { to: targetGroupId, message, title: titleSuffix };
 }
