@@ -149,12 +149,12 @@ async function pushLineMessage({ to, message, silent = false }) {
     if (!j.ok) throw new Error(j.error || j.message || "LINE 發送失敗");
 
     console.log("LINE sent:", j);
-    return true;
+    return { ok: true, error: "" };
   } catch (e) {
     const msg = (e && e.name === "AbortError") ? "LINE 推播逾時（12 秒未回應）" : (e?.message || String(e));
     if (!silent) alert("LINE 推播失敗：" + msg);
     console.warn("pushLineMessage error:", e);
-    return false;
+    return { ok: false, error: msg };
   }
 }
 
@@ -2387,8 +2387,11 @@ if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && linkedApprovedLe
   }
 }
 let specialistLineFailed = false;
+let specialistLineError = '';
 if (specialistLineNotice) {
-  specialistLineFailed = !(await pushLineMessage({ ...specialistLineNotice, silent: true }));
+  const specialistLineResult = await pushLineMessage({ ...specialistLineNotice, silent: true });
+  specialistLineFailed = !specialistLineResult.ok;
+  specialistLineError = String(specialistLineResult.error || '').trim();
 }
 // 取消自動帶入流程後，不再依工作項目推進輪序指針（改以統計表觀察輪值次數）
 setModalOpen(false);
@@ -2400,7 +2403,7 @@ if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && leaveAssignments
 } else if (syncLinkedLeaves && editGroupId && hasLinkedLeaveChanges && (linkedPendingLeaves.length > 0 || linkedApprovedLeaves.length > 0)) {
   alert(`行程修改完成。${linkedPendingLeaves.length > 0 ? '\n相關待審差單已同步更新並退回待職代審查。' : ''}${linkedApprovedLeaves.length > 0 ? `\n已刪除 ${linkedApprovedLeaves.length} 筆已核准差單。` : ''}`);
 } else {
-  alert(`${editGroupId ? '行程修改完成' : '行程新增完成'}${specialistLineNotice ? (specialistLineFailed ? '\n主責職再專員 LINE 通知送出失敗。' : `\n已自動送出「${specialistLineNotice.title}」LINE 通知。`) : ''}`);
+  alert(`${editGroupId ? '行程修改完成' : '行程新增完成'}${specialistLineNotice ? (specialistLineFailed ? `\n主責職再專員 LINE 通知送出失敗。${specialistLineError ? `\n原因：${specialistLineError}` : ''}` : `\n已自動送出「${specialistLineNotice.title}」LINE 通知。`) : ''}`);
 }
 } catch (e) {
   const msg = '儲存失敗：' + (e?.message || '請檢查網路或權限');
