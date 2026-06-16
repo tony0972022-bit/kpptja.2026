@@ -78,6 +78,14 @@ const DEFAULT_REVIEW_LINE_GROUP_IDS_BY_KEYWORD = {
   "台東身障審查": "Cc5115e0c6ebe6557308be8d6f49738fb",
   "澎湖身障審查": "Cce13438ff7aa52c5e535b9fa81877cb9",
 };
+const DEFAULT_REVIEW_MEETING_LOCATIONS = {
+  "中高職再": "高屏澎東銀髮資源中心 高雄市苓雅區正言里中正一路306號2樓",
+  "中高訓就": "高雄市政府勞工局訓練就業中心 高雄市鹽埕區中正四路274號5樓",
+  "高雄身障": "高雄市政府勞工局博愛職業技能訓練中心 高雄市三民區十全三路101號",
+  "屏東身障": "屏東縣政府勞動暨青年發展處辦公大樓 屏東縣屏東市自由路17號",
+  "澎湖身障": "澎湖縣政府社會處 澎湖縣馬公市治平路32號",
+  "台東身障": "臺東縣政府社會處 臺東縣臺東市新興里桂林北路201號3樓",
+};
 
 // Simple mail sender (internal use)
 async function sendMail({ targetEmail, subject, body, silent = false }) {
@@ -174,13 +182,25 @@ function formatMonthDayWithWeekday(dateString) {
 }
 
 function parseDispatchSyncNote(note = "") {
+  const rawText = String(note || "").trim();
   const lines = String(note || "")
     .split(/\r?\n/)
     .map((line) => String(line || "").trim())
     .filter(Boolean);
+  const inlinePrefixes = ["承辦：", "訪視型態：", "集合時間：", "集合地點：", "總人數：", "訪視委員：", "審查清單：", "備註："];
   const getValue = (prefix) => {
     const line = lines.find((item) => item.startsWith(prefix));
-    return line ? line.slice(prefix.length).trim() : "";
+    if (line) return line.slice(prefix.length).trim();
+    const index = rawText.indexOf(prefix);
+    if (index < 0) return "";
+    const start = index + prefix.length;
+    const rest = rawText.slice(start);
+    const nextIndex = inlinePrefixes
+      .filter((item) => item !== prefix)
+      .map((item) => rest.indexOf(item))
+      .filter((item) => item >= 0)
+      .sort((a, b) => a - b)[0];
+    return (nextIndex >= 0 ? rest.slice(0, nextIndex) : rest).trim();
   };
   const syncText = getValue("派案系統同步：");
   const [area = "", category = "", period = ""] = syncText.split("｜").map((part) => String(part || "").trim());
@@ -232,6 +252,79 @@ function getReviewNoticeAreaLabel({ note = "", area = "", category = "" } = {}) 
   return "未填";
 }
 
+function getDefaultReviewMeetingLocation(areaLabel = "") {
+  const normalized = String(areaLabel || "").trim().replace(/^臺東/u, "台東");
+  return DEFAULT_REVIEW_MEETING_LOCATIONS[normalized] || "";
+}
+
+function getReviewMeetingLocationText(note = "", parsed = {}, areaLabel = "") {
+  const defaultLocation = getDefaultReviewMeetingLocation(areaLabel);
+  const noteText = String(parsed.noteText || "").trim();
+  if (noteText) {
+    if (defaultLocation && noteText.length <= 20 && !/[縣市區路街號]/u.test(noteText)) {
+      return `${defaultLocation} ${noteText}`.trim();
+    }
+    return noteText;
+  }
+  if (parsed.meetingLocation) return parsed.meetingLocation;
+  const lines = String(note || "")
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  const candidate = lines.find((line) => !line.startsWith("派案系統同步："));
+  if (candidate) return candidate;
+  return defaultLocation || String(note || "").trim() || "未填";
+}
+
+function getReviewMeetingTimeText(note = "", startTime = "", endTime = "") {
+  const noteText = String(note || "").trim();
+  const ampmMatch = noteText.match(/審查會\s*([0-9]{1,2})(?::([0-9]{2}))?\s*(a\.?m\.?|p\.?m\.?)/i);
+  if (ampmMatch) {
+    let hour = Number(ampmMatch[1] || 0);
+    const minute = String(ampmMatch[2] || "00").padStart(2, "0");
+    const meridiem = String(ampmMatch[3] || "").toLowerCase().replace(/\./g, "");
+    if (meridiem === "pm" && hour < 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    const label = meridiem === "pm" ? "下午" : "上午";
+    return `${label}${String(hour).padStart(2, "0")}:${minute}`;
+  }
+
+  const zhMatch = noteText.match(/審查會\s*(上午|下午)\s*([0-9]{1,2})(?::([0-9]{2}))?/u);
+  if (zhMatch) {
+    let hour = Number(zhMatch[2] || 0);
+    const minute = String(zhMatch[3] || "00").padStart(2, "0");
+    const label = zhMatch[1];
+    if (label === "下午" && hour < 12) hour += 12;
+    if (label === "上午" && hour === 12) hour = 0;
+    return `${label}${String(hour).padStart(2, "0")}:${minute}`;
+  }
+
+  const twentyFourHourMatch = noteText.match(/審查會\s*([0-9]{1,2}):([0-9]{2})/);
+  if (twentyFourHourMatch) {
+    const hour = Number(twentyFourHourMatch[1] || 0);
+    const minute = String(twentyFourHourMatch[2] || "00").padStart(2, "0");
+    const label = hour >= 12 ? "下午" : "上午";
+    return `${label}${String(hour).padStart(2, "0")}:${minute}`;
+  }
+
+  const chineseHourMap = {
+    "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12,
+  };
+  const chineseHourMatch = noteText.match(/審查會\s*(上午|下午)?\s*(十一|十二|十|[一二兩三四五六七八九])點(?:([0-9]{1,2})分?)?/u);
+  if (chineseHourMatch) {
+    const rawHour = chineseHourMap[chineseHourMatch[2]] || 0;
+    const minute = String(chineseHourMatch[3] || "00").padStart(2, "0");
+    const label = chineseHourMatch[1] || (rawHour >= 8 && rawHour < 12 ? "上午" : "下午");
+    let hour = rawHour;
+    if (label === "下午" && hour < 12) hour += 12;
+    if (label === "上午" && hour === 12) hour = 0;
+    return `${label}${String(hour).padStart(2, "0")}:${minute}`;
+  }
+
+  return [startTime, endTime].filter(Boolean).join("-") || "未填";
+}
+
 function buildSpecialistAssignedLineNotice({ date, note, people, previousPeople = [] }) {
   const parsed = parseDispatchSyncNote(note);
   const creator = String(parsed.creator || "").trim();
@@ -260,16 +353,17 @@ function buildReviewAttendanceLineNotice({ date, startTime, endTime, note, peopl
   const targetGroupId = resolveReviewLineGroupId(note);
   if (!targetGroupId) return null;
   const titleSuffix = previousPeople.length > 0 ? "人員調整" : "專辦已派員";
-  const titlePrefix = `📝${getReviewNoticeAreaLabel({ note, area: parsed.area, category: parsed.category })}`;
+  const areaLabel = getReviewNoticeAreaLabel({ note, area: parsed.area, category: parsed.category });
+  const titlePrefix = `📝${areaLabel}`;
   const reviewListLine = parsed.itinerary.length
     ? ["•審查清單：", ...parsed.itinerary]
     : (parsed.reviewList ? [`•審查清單：${parsed.reviewList}`] : []);
   const message = [
     `${titlePrefix}【審查會議】${titleSuffix}`,
     `•會議日期：${formatMonthDayWithWeekday(date)}`,
-    `•會議時間：${[startTime, endTime].filter(Boolean).join("-") || "未填"}`,
-    `•會議地點：${parsed.noteText || parsed.meetingLocation || "未填"}`,
-    `•列席專員：${(people || []).join("、") || "未填"}`,
+    `•會議時間：${getReviewMeetingTimeText(note, startTime, endTime)}`,
+    `•會議地點：${getReviewMeetingLocationText(note, parsed, areaLabel)}`,
+    `•出席專員：${(people || []).join("、") || "未填"}`,
     ...(reviewListLine.length ? ["", ...reviewListLine] : []),
   ].join("\n");
   return { to: targetGroupId, message, title: titleSuffix };
