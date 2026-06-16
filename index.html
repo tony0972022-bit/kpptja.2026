@@ -72,6 +72,12 @@ const DEFAULT_SPECIALIST_LINE_GROUP_IDS_BY_CREATOR = {
   "洪錦蓉": "C8bc3d6dc927dac2f9b6819dfd1d7949d",
   "蔡秀英": "Cce13438ff7aa52c5e535b9fa81877cb9",
 };
+const DEFAULT_REVIEW_LINE_GROUP_IDS_BY_KEYWORD = {
+  "高雄身障審查": "C15625662491b1a355cb883d0e453c2f0",
+  "屏東身障審查": "C8bc3d6dc927dac2f9b6819dfd1d7949d",
+  "台東身障審查": "Cc5115e0c6ebe6557308be8d6f49738fb",
+  "澎湖身障審查": "Cce13438ff7aa52c5e535b9fa81877cb9",
+};
 
 // Simple mail sender (internal use)
 async function sendMail({ targetEmail, subject, body, silent = false }) {
@@ -203,6 +209,29 @@ function resolveSpecialistLineGroupId({ creator = "" } = {}) {
   return "";
 }
 
+function resolveReviewLineGroupId(note = "") {
+  const noteText = String(note || "").trim();
+  const matchedKeyword = Object.keys(DEFAULT_REVIEW_LINE_GROUP_IDS_BY_KEYWORD).find((keyword) => noteText.includes(keyword));
+  return matchedKeyword ? DEFAULT_REVIEW_LINE_GROUP_IDS_BY_KEYWORD[matchedKeyword] : "";
+}
+
+function extractReviewLineKeyword(note = "") {
+  const noteText = String(note || "").trim();
+  return Object.keys(DEFAULT_REVIEW_LINE_GROUP_IDS_BY_KEYWORD).find((keyword) => noteText.includes(keyword)) || "";
+}
+
+function getReviewNoticeAreaLabel({ note = "", area = "", category = "" } = {}) {
+  const reviewKeyword = extractReviewLineKeyword(note);
+  if (reviewKeyword) {
+    return reviewKeyword.replace(/審查$/u, "");
+  }
+  const areaText = String(area || "").trim();
+  const categoryText = String(category || "").trim();
+  if (categoryText.includes("中高")) return "中高職再";
+  if (areaText || categoryText) return `${areaText}${categoryText}`;
+  return "未填";
+}
+
 function buildSpecialistAssignedLineNotice({ date, note, people, previousPeople = [] }) {
   const parsed = parseDispatchSyncNote(note);
   const creator = String(parsed.creator || "").trim();
@@ -228,23 +257,22 @@ function buildSpecialistAssignedLineNotice({ date, note, people, previousPeople 
 
 function buildReviewAttendanceLineNotice({ date, startTime, endTime, note, people, previousPeople = [] }) {
   const parsed = parseDispatchSyncNote(note);
-  const creator = String(parsed.creator || "").trim();
-  const targetGroupId = resolveSpecialistLineGroupId({ creator });
+  const targetGroupId = resolveReviewLineGroupId(note);
   if (!targetGroupId) return null;
-  const title = previousPeople.length > 0 ? "審查會議人員調整" : "審查會議出席人員";
-  const titlePrefix = parsed.area || parsed.category ? `📝${parsed.area || ""}${parsed.category || ""}` : "📝未填";
+  const titleSuffix = previousPeople.length > 0 ? "人員調整" : "專辦已派員";
+  const titlePrefix = `📝${getReviewNoticeAreaLabel({ note, area: parsed.area, category: parsed.category })}`;
   const reviewListLine = parsed.itinerary.length
     ? ["•審查清單：", ...parsed.itinerary]
     : (parsed.reviewList ? [`•審查清單：${parsed.reviewList}`] : []);
   const message = [
-    `${titlePrefix}【${title}】`,
+    `${titlePrefix}【審查會議】${titleSuffix}`,
     `•會議日期：${formatMonthDayWithWeekday(date)}`,
     `•會議時間：${[startTime, endTime].filter(Boolean).join("-") || "未填"}`,
-    `•出席人員：${(people || []).join("、") || "未填"}`,
+    `•會議地點：${parsed.noteText || parsed.meetingLocation || "未填"}`,
+    `•列席專員：${(people || []).join("、") || "未填"}`,
     ...(reviewListLine.length ? ["", ...reviewListLine] : []),
-    ...(parsed.noteText ? ["", `•備註：${parsed.noteText}`] : []),
   ].join("\n");
-  return { to: targetGroupId, message, title };
+  return { to: targetGroupId, message, title: titleSuffix };
 }
 
 
@@ -2241,7 +2269,9 @@ const previousPeopleKey = previousPeople.join('|');
 const effectivePreviousNoticePeopleKey = previousNoticePeopleKey || previousPeopleKey;
 const selectedPeopleKey = selectedPeople.join('|');
 const isVisitDispatchNotice = String(modalData.workItem || '').trim() === '訪視' && String(modalData.note || '').includes('派案系統同步：');
-const isReviewMeetingNotice = String(modalData.workItem || '').trim() === '審查' && String(modalData.note || '').includes('派案系統同步：審查會議｜');
+const isReviewMeetingNotice = String(modalData.workItem || '').trim() === '審查'
+  && String(modalData.note || '').includes('派案系統同步：')
+  && String(modalData.note || '').includes('審查');
 const shouldSendSpecialistLineNotice = isVisitDispatchNotice
   && !selAllStaff
   && selectedPeople.length > 0
